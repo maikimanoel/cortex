@@ -117,6 +117,13 @@ selects HEAD, ordinary/linked working trees, Unix byte paths, explicit ignored-f
 exclusion and unsupported special states, with two matching observations and stated
 race limitations. Dirty snapshot identity and later extraction coverage remain open.
 
+**002-B scoped resolution:** The [binding contract](../architecture/candidate-binding.md)
+selects explicit caller-assigned task revisions, scoped observation ordering,
+exact contract applicability, canonical local worktree identity, bounded comparison
+material and Core correspondence rules. Matching dirty status remains insufficient
+for content identity; no dirty snapshot mechanism is selected. DEC-010 still
+requires a separate evidence-model decision before 002-C.
+
 ## DEC-012
 
 **Proportional profiles and required reviewers.** Before 004-C, establish

@@ -21,7 +21,7 @@ only when all its required increments and exit evidence are satisfied.
 | --- | --- | --- | --- |
 | 001 — Repository Foundation | DELIVERED: Cortex source foundation; local verification and private delivery require candidate-scoped handoff evidence; remote CI remains NOT_RUN until authorized execution | None | Actual three-crate workspace, CLI behavior, minimal contract tests, private remote, configured manual CI |
 | 001A — Product Blueprint | Documentation artifact defined here; checkpoint acceptance/commit/push must be established in its handoff | 001 | Complete catalog, consistent architecture/roadmap/decisions, link and scope audits, local checks, verified private documentation commit/push |
-| 002 — First Vertical Slice | IN_PROGRESS: 002-A delivered; 002-B/C/D remain PLANNED | 001A | All 002-A/B/C/D exits; real task-to-candidate-to-evidence-to-inspection end-to-end tests and honest failure/unknown cases |
+| 002 — First Vertical Slice | IN_PROGRESS: 002-A/B delivered; 002-C/D remain PLANNED | 001A | All 002-A/B/C/D exits; real task-to-candidate-to-evidence-to-inspection end-to-end tests and honest failure/unknown cases |
 | 003 — Temporal Knowledge & Memory | PLANNED | 002; privacy/storage/coverage decisions | Graph extraction/query/conflict/invalidation, memory supersession/time/staleness, retrieval/context and portable handoff correctness |
 | 004 — Typed Skills, Workflows & Harness | PLANNED | 003; authority, profile, adapter and budget decisions | Typed composition/guards, durable continuation, effective host isolation, real authorized/denied invocations, traces and recovery |
 | 005 — Governed Evolution & Evaluation | PLANNED | 004; evaluation decisions | Reproducible evaluation and regression evidence, audited proposal dispositions, no self-approval or recursive privilege expansion |
@@ -48,8 +48,9 @@ claim. The exact audit, local verification, and Git outcomes belong in its hando
 Deliver genuinely useful, verifiable increments as their contracts mature. Cortex
 may help build Cortex only within demonstrated capabilities and actual grants.
 Neither progressive use nor an optional workflow makes unfinished milestone
-exits complete. 002-A now supplies bounded repository inspection. The next
-implementation is 002-B and still requires separate authorization.
+exits complete. 002-A supplies bounded repository inspection and 002-B adds typed
+candidate/task binding. The next implementation is 002-C under separate authority,
+after resolving DEC-010 and the applicable output/provenance contract.
 
 ## 002: first complete vertical slice
 
@@ -59,7 +60,7 @@ deterministic actual-candidate processing -> unified evidence -> inspection.
 | Increment | Scope and capability | Prerequisites | Exit evidence |
 | --- | --- | --- | --- |
 | 002-A — DELIVERED | Read-only actual Git inspection, [CAP-CLI-002](capability-catalog.md#cap-cli-002) | DEC-005/011 for bounded supported scope | Real repositories resolve HEAD/revision and separate staged/unstaged/untracked state; clean/dirty/detached/unborn and invalid/unsupported/limited cases; no repository mutation |
-| 002-B | Bind inspected candidate to task, [CAP-CORE-002](capability-catalog.md#cap-core-002) | 002-A, foundation contracts | Actual object/candidate correspondence, contract identity, explicit incomplete/dirty state, mismatch/stale-observation rejection |
+| 002-B — DELIVERED | Bind inspected candidate to task, [CAP-CORE-002](capability-catalog.md#cap-core-002) | 002-A, foundation contracts | Actual object/candidate correspondence, contract identity, explicit incomplete/dirty state, mismatch/stale-observation rejection |
 | 002-C | Unified observation/assessment, [CAP-EVD-002](capability-catalog.md#cap-evd-002) | 002-B, DEC-010 and relevant DEC-007 output semantics | Provenance/time/environment/component versions, separate result/applicability/validity, no pass from missing evidence, honest unknown/blocked/not-run cases |
 | 002-D | CLI integration, [CAP-CLI-003](capability-catalog.md#cap-cli-003) | 002-A/B/C, minimum output contract in DEC-007 | Complete real-candidate task/evidence/inspection path, human/machine outputs, reliable exits, failure and privacy tests |
 
@@ -68,8 +69,11 @@ task binding, semantic evidence, or end-to-end inspection is missing. No agents,
 indexing, persistent memory, database, or workflow runner is needed in this slice.
 The implemented [002-A contract](../architecture/repository-inspection.md) settles
 bounds, supported repository forms, HEAD selection, path handling and observed
-concurrent-change reporting. Its local acceptance and private delivery observations
-belong to the candidate-scoped external handoff; remote CI remains NOT_RUN.
+concurrent-change reporting. The [002-B contract](../architecture/candidate-binding.md)
+adds explicit task revisions, typed observation comparison and qualified binding,
+without changing evidence semantics or creating a binding CLI command. Their local
+acceptance and private delivery observations belong to candidate-scoped external
+handoffs; remote CI remains NOT_RUN.
 
 ## 003: temporal knowledge and memory
 

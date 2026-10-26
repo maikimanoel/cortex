@@ -13,19 +13,20 @@ The Cortex foundation contains these actual crates:
 
 | Crate | Current responsibility | Dependency |
 | --- | --- | --- |
-| `cortex-core` | Validated task names, a one-criterion task contract, and Git revision syntax | Standard library only |
+| `cortex-core` | Foundation contracts, contract revisions, typed repository state and candidate/task binding | Standard library only |
 | `cortex-evidence` | Descriptive provenance, caller-reported execution status, optional terminal assessment | `cortex-core` |
-| `cortex-cli` | Help/version, bounded read-only Git inspection, typed observation and errors | `cortex-core`; local Git and util-linux runtime tools |
+| `cortex-cli` | Help/version, bounded read-only Git inspection, typed Core adapter and errors | `cortex-core`; local Git and util-linux runtime tools |
 
 The accepted [0001 foundation decision](0001-foundation.md) is authoritative for
 those bounded design choices. Rust 1.99.1, edition 2024,
 resolver 3, unpublished packages, and the shared lockfile remain as configured.
-The CLI now uses core revision syntax validation while independently resolving
-actual Git commits in [002-A inspection](repository-inspection.md). Task/candidate
-binding, policy enforcement, durable workflows, persistence, knowledge indexing,
-agent harnesses and temporal provenance remain planned. The observation module,
-Git/capture boundary and text presentation stay in the CLI crate for this slice;
-core and evidence do not depend on process or filesystem mechanics.
+The CLI resolves actual Git commits in [002-A inspection](repository-inspection.md)
+and supplies typed state to [002-B Core binding](candidate-binding.md). Shared
+state types have one definition in Core; Git capture and presentation remain in
+the CLI package, exposed through its library adapter as well as the executable.
+Core performs no filesystem/process/clock access. Evidence semantics are unchanged.
+Policy enforcement, durable workflows, persistence, knowledge indexing, agent
+harnesses and temporal provenance remain planned.
 
 ## Logical areas and dependency direction
 
@@ -134,8 +135,10 @@ preserve the original observation and cannot infer a missing distinction or time
 Resolve [DEC-010](../decisions/open-decisions.md#dec-010) before extending that
 model in 002-C; do not rewrite the accepted foundation decision retroactively.
 
-Similarly, today's `CandidateId` only checks object-ID syntax. Actual Git object,
-worktree, snapshot, and concurrency semantics belong to 002-A/002-B. Typed
+Similarly, `CandidateId` still checks object-ID syntax only. 002-A resolves real
+commits; 002-B retains contract revisions, local worktree identities, scoped
+observations and correspondence decisions. It does not identify dirty bytes or
+produce an atomic snapshot. Snapshot identity remains planned for 003-A. Typed
 permissions, principals, resource budgets, requirement/decision identities,
 skills, and workflows remain planned extensions, not existing core types.
 

@@ -86,10 +86,12 @@ and performance claims require observations in the stated environments.
 
 The current implementation retains the three-crate foundation described in the
 [accepted foundation decision](../architecture/0001-foundation.md) and adds
-[002-A bounded local Git inspection](../architecture/repository-inspection.md).
-It validates in-memory task/evidence values, prints help/version, and observes
-supported repositories without binding tasks or assessing software. It does not
-yet enforce task permissions, execute agents, persist history or implement temporal
+[002-A bounded local Git inspection](../architecture/repository-inspection.md) and
+[002-B typed candidate/task binding](../architecture/candidate-binding.md).
+It validates in-memory task/evidence values, observes supported repositories, and
+compares candidate observations against explicit task revisions. The CLI prints
+help/version/inspection; bindings are programmatic and create no assessments.
+It does not yet enforce task permissions, execute agents, persist history or implement temporal
 provenance. The [roadmap](roadmap.md) schedules that work;
 plans are not execution authorization or evidence of delivery.
 

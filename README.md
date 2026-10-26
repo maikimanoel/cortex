@@ -8,10 +8,11 @@ identity, and the conditions under which observations can support an engineering
 judgment. Future agents may propose or perform authorized work within those
 boundaries. Projects engineered with Cortex do not need to contain AI.
 
-**Milestone 002-A adds bounded, read-only local Git inspection.** The binary
-supports `cortex inspect`, help and version information. The libraries retain the
-foundation's in-memory contracts and evidence rules. There are no agents, task
-runners, persistence, providers, network services, background workers or telemetry.
+**Milestones 002-A/B provide bounded Git inspection and typed candidate/task binding.**
+The binary supports `cortex inspect`, help and version information. The libraries retain the
+foundation's in-memory contracts and evidence rules; Core adds deterministic
+binding through typed observations and the inspection adapter. There are no agents,
+task runners, persistence, providers, network services, background workers or telemetry.
 
 ## Product blueprint
 
@@ -31,10 +32,12 @@ the blueprint without changing runtime behavior.
 | [Open decisions](docs/decisions/open-decisions.md) | Unresolved policies and proposed decision points |
 | [Foundation decision](docs/architecture/0001-foundation.md) | Preserved accepted design of the current implementation |
 
-Milestone 002 remains incomplete: 002-A implements actual read-only Git inspection;
-task/candidate binding (002-B), unified evidence (002-C), and end-to-end CLI
-integration (002-D) remain planned. See the [inspection contract](docs/architecture/repository-inspection.md)
-for CAP-CLI-002's supported forms, resource limits, errors and acceptance mechanisms.
+Milestone 002 remains incomplete: 002-A inspection and 002-B task/candidate binding
+are implemented. Unified evidence (002-C) and end-to-end CLI integration (002-D)
+remain planned. See the [inspection contract](docs/architecture/repository-inspection.md)
+and [binding contract](docs/architecture/candidate-binding.md) for their supported
+scope, limits and acceptance mechanisms. Binding is a library API; `cortex inspect`
+continues to observe repositories without creating task bindings or assessments.
 
 ## Run locally
 
@@ -75,12 +78,16 @@ these are not sandbox or hard real-time guarantees.
 
 | Crate | Current responsibility |
 | --- | --- |
-| `cortex-core` | Validated task identities, single-criterion task contracts, and full Git source revision syntax |
+| `cortex-core` | Foundation contracts, explicit contract revisions, typed repository state and scoped candidate/task binding |
 | `cortex-evidence` | Task/candidate-bound provenance, reported execution status, and explicit assessments |
-| `cortex-cli` | Help/version, bounded Git inspection and typed observation presentation |
+| `cortex-cli` | Help/version, bounded Git inspection, typed Core adapter and observation presentation |
 
-Both `cortex-evidence` and `cortex-cli` depend on `cortex-core`; inspection reuses
-its revision syntax validation without changing candidate/task/evidence semantics.
+Both `cortex-evidence` and `cortex-cli` depend on `cortex-core`. The inspection
+adapter supplies actual observations to Core's binding boundary. Foundation
+`TaskContract`, `CandidateId` and evidence APIs retain their meanings. A binding
+retains its exact task revision and scoped observations; it grants no authority,
+does not assess software and does not identify dirty bytes. Reobservation ordering
+is producer-supplied, and trusted integration must actually capture current state.
 No library depends on the CLI or an agent framework. All packages have
 `publish = false`; version 0.1.0 carries no stable API commitment.
 
@@ -108,7 +115,9 @@ git status --short
 
 Behavioral tests exercise the CLI as a subprocess, real temporary Git repositories,
 read-only content/metadata invariance, resource failures, concurrent-change rejection,
-input boundaries, provenance retention and observation/assessment rules. Inspection
+input boundaries, provenance retention and observation/assessment rules. Binding
+tests cover invalid revisions, stale/mismatched/incomplete inputs and real-Git
+translation, including dirty bytes hidden by identical status. Inspection
 permission fixtures require a non-root Linux user; all fixtures are local/offline.
 Validate relative links and anchors in changed Markdown documentation as well.
 Passing tests support these scoped contracts, not comprehensive correctness or

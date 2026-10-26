@@ -1,4 +1,4 @@
-//! CAP-CLI-002: actual local Git observations, without task binding or assessment.
+//! Bounded Git inspection and its CAP-CORE-002 typed adapter; no assessments.
 
 mod parse;
 mod process;
@@ -7,7 +7,11 @@ mod process;
 #[path = "../../tests/support/mod.rs"]
 mod support;
 
-use cortex_core::CandidateId;
+use cortex_core::binding::{
+    BindingError, CandidateBindingContract, CandidateObservation, Change, ComparisonBasis, Entry,
+    Head, ObservationConsistency, ObservationCoverage, ObservationId, RepositoryIdentity,
+    RepositoryState,
+};
 use std::{
     error::Error,
     ffi::{OsStr, OsString},
@@ -17,32 +21,45 @@ use std::{
     time::{Duration, Instant},
 };
 
-const MAX_ENTRIES: usize = 10_000;
+const MAX_ENTRIES: usize = cortex_core::binding::MAX_OBSERVATION_ENTRIES;
 const MAX_OPERATIONS: usize = 32;
 const INSPECTION_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Failure of bounded inspection or translation to the typed Core boundary.
 #[derive(Debug)]
-pub(crate) enum InspectionError {
+pub enum InspectionError {
+    /// Input path could not be resolved.
     InvalidPath(io::Error),
+    /// Input identifies a non-directory.
     NotDirectory,
+    /// Git could not be executed.
     MissingGit,
+    /// Filesystem, process or capture I/O failed.
     Io(io::Error),
+    /// Git reported failure or diagnostics.
     GitFailed(&'static str),
+    /// Repository form or host controls are unsupported.
     Unsupported(&'static str),
+    /// A bounded resource was exhausted.
     Limit(&'static str),
+    /// Samples or object resolution changed during inspection.
     Inconsistent,
+    /// Git output did not match the supported formats.
     Malformed,
+    /// Git state could not satisfy the typed observation boundary.
+    InvalidObservation(BindingError),
 }
 
 impl InspectionError {
-    pub(crate) fn exit_code(&self) -> u8 {
+    /// Read the documented CLI exit category.
+    pub fn exit_code(&self) -> u8 {
         match self {
             Self::InvalidPath(_) | Self::NotDirectory => 2,
             Self::MissingGit => 3,
             Self::Io(_) | Self::GitFailed(_) => 4,
             Self::Unsupported(_) => 5,
             Self::Limit(_) => 6,
-            Self::Inconsistent | Self::Malformed => 7,
+            Self::Inconsistent | Self::Malformed | Self::InvalidObservation(_) => 7,
         }
     }
 }
@@ -58,6 +75,7 @@ impl fmt::Display for InspectionError {
             Self::Unsupported(form) => write!(f, "unsupported repository state: {form}; inspection is incomplete"),
             Self::Limit(kind) => write!(f, "inspection resource limit exceeded ({kind}); no complete report"),
             Self::Inconsistent => f.write_str("repository changed during inspection; retry when stable"),
+            Self::InvalidObservation(_) => f.write_str("Git observation could not cross the typed binding boundary"),
             Self::Malformed => f.write_str("indeterminate Git observation; unsupported or malformed output; no complete report"),
         }
     }
@@ -67,49 +85,8 @@ impl Error for InspectionError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::InvalidPath(e) | Self::Io(e) => Some(e),
+            Self::InvalidObservation(e) => Some(e),
             _ => None,
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum Head {
-    Attached {
-        branch: Vec<u8>,
-        commit: CandidateId,
-    },
-    Detached {
-        commit: CandidateId,
-    },
-    Unborn {
-        branch: Vec<u8>,
-    },
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum Change {
-    Added,
-    Modified,
-    Deleted,
-    TypeChanged,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum Entry {
-    Tracked {
-        path: Vec<u8>,
-        staged: Option<Change>,
-        unstaged: Option<Change>,
-    },
-    Untracked {
-        path: Vec<u8>,
-    },
-}
-
-impl Entry {
-    fn path(&self) -> &[u8] {
-        match self {
-            Self::Tracked { path, .. } | Self::Untracked { path } => path,
         }
     }
 }
@@ -128,7 +105,8 @@ struct Sample {
     entries: Vec<Entry>,
 }
 
-pub(crate) struct RepositoryObservation {
+/// A completed bounded Git inspection; private mechanism data is not printed.
+pub struct RepositoryObservation {
     sample: Sample,
     git_version: String,
 }
@@ -307,6 +285,7 @@ impl Git {
                     return Err(InspectionError::Inconsistent);
                 }
             }
+            Head::Unknown => return Err(InspectionError::Malformed),
             Head::Unborn { branch } => {
                 let mut name = b"refs/heads/".to_vec();
                 name.extend(branch);
@@ -357,8 +336,49 @@ fn os_string(bytes: &[u8]) -> Result<OsString, InspectionError> {
     }
 }
 
-pub(crate) fn inspect(path: &Path) -> Result<RepositoryObservation, InspectionError> {
+/// Inspect a local working tree using the documented 002-A limits and controls.
+pub fn inspect(path: &Path) -> Result<RepositoryObservation, InspectionError> {
     inspect_between(path, || {})
+}
+
+/// Perform a real bounded inspection for this exact binding contract and observation ID.
+///
+/// Call twice with increasing IDs in one producer scope, then use Core's
+/// `bind_candidate`. IDs are caller assertions: this function captures actual
+/// state but does not authenticate ordering, grant authority or assess software.
+pub fn inspect_candidate(
+    path: &Path,
+    contract: &CandidateBindingContract,
+    id: ObservationId,
+) -> Result<CandidateObservation, InspectionError> {
+    let observation = inspect(path)?;
+    let sample = observation.sample;
+    let repository = RepositoryIdentity::new(sample.root, sample.git_dir, sample.common_dir)
+        .map_err(InspectionError::InvalidObservation)?;
+    let state = RepositoryState::new(
+        Some(repository),
+        sample.head,
+        sample.entries,
+        ObservationCoverage::GitStatus,
+        ObservationConsistency::TwoMatchingSamples,
+    )
+    .map_err(InspectionError::InvalidObservation)?;
+    // Framing prevents ambiguous concatenation. These bytes compare the producer's
+    // observed config/index/status, never claim to identify uncommitted contents.
+    let mut material = Vec::new();
+    for part in [sample.configuration, sample.index, sample.status] {
+        material.extend_from_slice(&(part.len() as u64).to_le_bytes());
+        material.extend_from_slice(&part);
+    }
+    let profile = format!(
+        "002-A-v1:{}:{}-{}",
+        observation.git_version,
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    );
+    let basis =
+        ComparisonBasis::new(&profile, material).map_err(InspectionError::InvalidObservation)?;
+    Ok(CandidateObservation::new(id, contract, state, Some(basis)))
 }
 
 fn inspect_between(
@@ -402,7 +422,8 @@ fn inspect_between(
 }
 
 impl RepositoryObservation {
-    pub(crate) fn write(&self, output: &mut impl Write) -> io::Result<()> {
+    /// Print the existing human-readable 002-A report without exposing raw metadata.
+    pub fn write(&self, output: &mut impl Write) -> io::Result<()> {
         let sample = &self.sample;
         writeln!(output, "Repository: {:?}", sample.root)?;
         writeln!(output, "Git directory: {:?}", sample.git_dir)?;
@@ -415,6 +436,12 @@ impl RepositoryObservation {
             Head::Detached { commit } => {
                 writeln!(output, "HEAD: {}", commit.as_str())?;
                 writeln!(output, "Branch: DETACHED")?;
+            }
+            Head::Unknown => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "HEAD was not observed",
+                ));
             }
             Head::Unborn { branch } => {
                 writeln!(output, "HEAD: NONE (unborn)")?;

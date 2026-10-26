@@ -2,6 +2,9 @@
 //!
 //! These values describe work and source identity. They grant no execution authority.
 
+/// Typed repository observations and candidate-bound task contracts.
+pub mod binding;
+
 use std::{error::Error, fmt};
 
 /// Maximum task identifier size in UTF-8 bytes (identifiers are ASCII).

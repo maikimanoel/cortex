@@ -66,7 +66,7 @@ results require a candidate-scoped handoff. No open foundation API promise.
 ### CAP-CORE-002
 
 **Name:** Actual candidate and task binding.
-**Status:** PLANNED.
+**Status:** IMPLEMENTED.
 **Owner:** Core with repository inspection. **Target:** 002-B; snapshot extensions
 in 003-A. **Dependencies:** CAP-CORE-001, CAP-CLI-002.
 
@@ -84,8 +84,20 @@ identity must support temporal invalidation and historical correspondence
 **Acceptance:** Bind a real clean checkout to its commit and task; a staged-only,
 unstaged-only, or untracked change remains distinguishable from that clean
 candidate. Reject stale/mismatched observations and nonexistent commit claims.
-**Verification:** NOT_RUN; real temporary Git fixtures, mismatch and concurrent
-change cases. **Decisions:** DEC-010/011; no dirty-snapshot representation chosen.
+**Bounded implementation:** Core validates explicit contract revisions, local
+repository/worktree identities and typed observations, then compares a baseline
+with a separately ordered reobservation. Results distinguish scoped compatibility,
+incompatibility, staleness, insufficient information and invalid input. The
+[002-B contract](../architecture/candidate-binding.md) defines exact applicability,
+producer trust, dirty-state handling, comparison material, coverage and limits.
+No dirty snapshot or permanent freshness guarantee is supplied.
+**Verification:** [Core tests](../../crates/cortex-core/tests/binding.rs) and
+[real-Git cross-crate tests](../../crates/cortex-cli/tests/binding.rs), alongside
+002-A/foundation regressions. Test source is a mechanism; executed outcomes belong
+to the delivered candidate's external handoff. No evidence assessment is created.
+**Decisions:** DEC-011 resolved for bounded 002-B binding only; dirty snapshot
+identity remains open for 003-A. DEC-010 remains at its pre-002-C evidence-extension
+decision point and was not resolved by binding-domain results.
 
 ### CAP-CORE-003
 

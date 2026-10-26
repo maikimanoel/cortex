@@ -34,8 +34,8 @@ progressively without claiming unfinished milestones complete.
   complete, bounded vertical slice over unused infrastructure or empty crates.
 - Keep `cortex-core` independent of infrastructure and the CLI. Evidence may
   depend on core; a CLI command may integrate both. Avoid circular dependencies
-  and speculative public interfaces. The inspection CLI uses core revision syntax
-  validation; task binding and evidence integration remain future increments.
+  and speculative public interfaces. The inspection adapter supplies typed state
+  to Core binding; evidence integration remains a future increment.
 - Use validated construction and typed errors at meaningful boundaries. Keep
   diagnostics useful without repeating private input. Preserve error causes
   where callers need them. Do not introduce unsafe Rust.

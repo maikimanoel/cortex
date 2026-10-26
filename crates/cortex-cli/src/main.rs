@@ -1,6 +1,6 @@
 //! The Cortex terminal interface and bounded local repository inspection.
 
-mod inspection;
+use cortex_cli as inspection;
 
 use std::{
     error::Error,

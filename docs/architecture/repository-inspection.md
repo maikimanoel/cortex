@@ -4,7 +4,9 @@ This is the implemented scope of [CAP-CLI-002](../product/capability-catalog.md#
 It resolves the inspection portions of [DEC-005](../decisions/open-decisions.md#dec-005)
 and [DEC-011](../decisions/open-decisions.md#dec-011). It does not bind tasks, create
 snapshot identities, persist evidence, assess software, or grant permission.
-Milestones 002-B/C/D remain planned. The accepted foundation APIs are unchanged.
+[002-B binding](candidate-binding.md) now consumes this inspection through a typed
+library adapter. Milestones 002-C/D remain planned; the inspection command still
+creates no task binding or assessment. The accepted foundation APIs are unchanged.
 
 ## Interface and meaning
 
@@ -23,9 +25,9 @@ inspection, without repeating their values.
 Output includes canonical working-tree, Git-directory and common-Git-directory
 locations, full resolved commit ID, branch or detached/unborn state, and separate
 staged/unstaged/untracked path counts. Paths and branch names are quoted and
-escaped for terminal display. The private typed model retains path bytes and
-change categories; downstream code need not parse the text. There is no public
-serialization or stable library API for observations in this increment.
+escaped for terminal display. The shared Core state model retains path bytes and
+change categories; the 002-B library adapter exposes typed observations without
+parsing terminal text. No serialization or stable public API commitment is made.
 
 For example, the essential portion of a dirty report is:
 
