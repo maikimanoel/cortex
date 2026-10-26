@@ -22,7 +22,7 @@ not exempt any subsystem from the others.
 
 Feature status is separate from assessment result and validity in
 [INV-002](../architecture/core-invariants.md#inv-002). No capability is promoted
-to `VERIFIED` merely because types compile. The four `IMPLEMENTED` entries below
+to `VERIFIED` merely because types compile. The `IMPLEMENTED` entries below
 refer to the current Cortex source and behavioral test mechanisms. Links to test
 source are not run logs. Re-establish observations against each actual candidate;
 candidate-specific execution results belong in its handoff/evidence. A result
@@ -841,7 +841,8 @@ translation conformance, package integrity and actual adapter compatibility case
 **Functional contract:** `cortex --help`/`-h` and no arguments print help;
 `--version`/`-V` print the package version. Success exits zero, unsupported/extra
 arguments exit 2 without echoing their values, and output failures propagate with
-exit 1. No work command, repository inspection, agent, or network operation exists.
+exit 1. These foundation forms remain compatible; repository inspection is
+specified separately by CAP-CLI-002. No agent or network operation is introduced.
 
 **Advanced properties:** A bounded argument dispatch and private-input-safe
 diagnostics (INV-008/011). Stream writes can block; no stream timeout is claimed.
@@ -856,7 +857,7 @@ candidate/environment-scoped. No stable future subcommand API is implied.
 ### CAP-CLI-002
 
 **Name:** Bounded read-only actual Git inspection.
-**Status:** PLANNED.
+**Status:** IMPLEMENTED.
 **Owner:** Repository inspection with CLI presentation. **Target:** 002-A.
 **Dependencies:** CAP-CORE-001; DEC-005/011 resolved for the supported scope.
 
@@ -878,9 +879,18 @@ unstaged-only, untracked-only, mixed, detached, and unborn cases. Invalid paths,
 missing revisions, denied access, nonstandard filenames, and configured limit
 failures have documented outcomes. Before/after comparison shows no repository
 mutation. Concurrent edits cannot produce an unsupported clean-candidate claim.
-**Verification:** NOT_RUN; local real-Git integration and resource/error tests.
-**Decisions:** DEC-005/011; no implementation, CLI flags, schema, or new exit codes
-are frozen in this checkpoint.
+**Bounded implementation:** `cortex inspect [--repo <PATH>]` on Linux, with local
+Git and util-linux `prlimit`; HEAD selection, typed private observations, two-sample
+comparison, finite process/capture/entry/address-space budgets, and explicit
+coverage/error semantics. See the [inspection contract](../architecture/repository-inspection.md)
+for supported forms, exclusions, read-only controls and concurrency limitations.
+**Verification:** [Implementation](../../crates/cortex-cli/src/inspection/mod.rs),
+[real-Git CLI tests](../../crates/cortex-cli/tests/inspection.rs), and bounded
+parser/process tests in the inspection module. Executed acceptance is recorded
+against the delivered candidate in its external handoff; test source alone is not
+run evidence. No remote CI result or full snapshot/candidate identity is claimed.
+**Decisions:** DEC-005/011 resolved for 002-A only in the inspection contract;
+runner budgets, snapshot identity and later extraction remain open.
 
 ### CAP-CLI-003
 

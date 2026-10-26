@@ -15,15 +15,17 @@ The Cortex foundation contains these actual crates:
 | --- | --- | --- |
 | `cortex-core` | Validated task names, a one-criterion task contract, and Git revision syntax | Standard library only |
 | `cortex-evidence` | Descriptive provenance, caller-reported execution status, optional terminal assessment | `cortex-core` |
-| `cortex-cli` | Help/version, argument errors, output errors | Standard library only |
+| `cortex-cli` | Help/version, bounded read-only Git inspection, typed observation and errors | `cortex-core`; local Git and util-linux runtime tools |
 
 The accepted [0001 foundation decision](0001-foundation.md) is authoritative for
 those bounded design choices. Rust 1.99.1, edition 2024,
 resolver 3, unpublished packages, and the shared lockfile remain as configured.
-The current CLI does not integrate either library. There is no repository
-inspection, policy engine, durable workflow, persistence, index, agent harness,
-or temporal provenance implementation. This blueprint specifies future behavior
-without implementing it.
+The CLI now uses core revision syntax validation while independently resolving
+actual Git commits in [002-A inspection](repository-inspection.md). Task/candidate
+binding, policy enforcement, durable workflows, persistence, knowledge indexing,
+agent harnesses and temporal provenance remain planned. The observation module,
+Git/capture boundary and text presentation stay in the CLI crate for this slice;
+core and evidence do not depend on process or filesystem mechanics.
 
 ## Logical areas and dependency direction
 

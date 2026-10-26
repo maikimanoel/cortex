@@ -46,6 +46,10 @@ must be established before any dispatch. The foundation's existing ten-minute
 manual job timeout is a configured limit, not a universal product budget.
 Dependencies: CAP-CLI-002/005, CAP-CORE-003, CAP-HRN-001, and CAP-EVL-001.
 
+**002-A scoped resolution:** The [inspection contract](../architecture/repository-inspection.md#finite-budgets)
+sets time, capture, operation, entry and Linux address-space limits, prerequisite
+failures and cleanup limits. This does not select agent/sandbox or hosted-CI policy.
+
 ## DEC-006
 
 **Initial real agent adapters and supported host/runtime matrix.** Choose actual
@@ -107,6 +111,11 @@ An unsupported case must be explicit, never a false clean candidate. Before
 003-B, declare the first language/document/schema/binary adapter coverage and
 dependency invalidation rules. Dependencies: CAP-CLI-002, CAP-CORE-002, and
 CAP-KNW-001. No arbitrary language count or complete snapshot guarantee is set.
+
+**002-A scoped resolution:** The [inspection contract](../architecture/repository-inspection.md)
+selects HEAD, ordinary/linked working trees, Unix byte paths, explicit ignored-file
+exclusion and unsupported special states, with two matching observations and stated
+race limitations. Dirty snapshot identity and later extraction coverage remain open.
 
 ## DEC-012
 

@@ -8,10 +8,10 @@ identity, and the conditions under which observations can support an engineering
 judgment. Future agents may propose or perform authorized work within those
 boundaries. Projects engineered with Cortex do not need to contain AI.
 
-**Milestone 001 is a foundation, not an execution platform.** The current binary
-prints help and version information. The libraries validate in-memory contracts
-and evidence records. There are no agents, runners, persistence, providers,
-network services, background workers, or telemetry.
+**Milestone 002-A adds bounded, read-only local Git inspection.** The binary
+supports `cortex inspect`, help and version information. The libraries retain the
+foundation's in-memory contracts and evidence rules. There are no agents, task
+runners, persistence, providers, network services, background workers or telemetry.
 
 ## Product blueprint
 
@@ -31,9 +31,10 @@ the blueprint without changing runtime behavior.
 | [Open decisions](docs/decisions/open-decisions.md) | Unresolved policies and proposed decision points |
 | [Foundation decision](docs/architecture/0001-foundation.md) | Preserved accepted design of the current implementation |
 
-Milestone 002 is planned, not implemented: actual read-only Git inspection,
-task/candidate binding, unified evidence, and end-to-end CLI inspection are four
-required increments. An inspection command alone will not complete it.
+Milestone 002 remains incomplete: 002-A implements actual read-only Git inspection;
+task/candidate binding (002-B), unified evidence (002-C), and end-to-end CLI
+integration (002-D) remain planned. See the [inspection contract](docs/architecture/repository-inspection.md)
+for CAP-CLI-002's supported forms, resource limits, errors and acceptance mechanisms.
 
 ## Run locally
 
@@ -45,12 +46,30 @@ dependencies and builds offline.
 ```sh
 cargo run --offline --locked -p cortex-cli -- --help
 cargo run --offline --locked -p cortex-cli -- --version
+cargo run --offline --locked -p cortex-cli -- inspect
+cargo run --offline --locked -p cortex-cli -- inspect --repo "/path/to/repository"
 ```
 
 The executable is named `cortex`. No arguments and `-h` also print help; `-V`
 prints the version. Unsupported or additional arguments exit with code 2 without
 echoing their values. Output failures exit with code 1. Successful help/version
-requests exit with code 0. These commands do not execute engineering tasks.
+requests exit with code 0.
+
+Inspection currently requires Linux, Git supporting `--no-lazy-fetch`, and
+util-linux `/usr/bin/prlimit`. It selects HEAD in the current directory or the
+specified working tree, including subdirectories and linked worktrees. It reports
+canonical locations, resolved commit, branch/detached/unborn state and separate
+staged, unstaged and untracked counts. Dirty inspection also exits zero; this is
+an observation, never software verification or a complete working candidate ID.
+Ignored paths are excluded, and two matching observations are not an atomic
+snapshot. Unsupported forms and incomplete observations fail without a report.
+
+Each Git process has a five-second deadline, 512 MiB address-space ceiling,
+4 MiB stdout cap and 16 KiB stderr cap. An inspection has a 30-second observation
+budget, at most 32 Git queries, and at most 10,000 tracked and 10,000 changed
+entries per sample. Cleanup may add one second. See the
+[full limits and trust boundary](docs/architecture/repository-inspection.md#finite-budgets);
+these are not sandbox or hard real-time guarantees.
 
 ## Workspace
 
@@ -58,12 +77,12 @@ requests exit with code 0. These commands do not execute engineering tasks.
 | --- | --- |
 | `cortex-core` | Validated task identities, single-criterion task contracts, and full Git source revision syntax |
 | `cortex-evidence` | Task/candidate-bound provenance, reported execution status, and explicit assessments |
-| `cortex-cli` | The terminal help/version interface |
+| `cortex-cli` | Help/version, bounded Git inspection and typed observation presentation |
 
-Only `cortex-evidence` currently depends on `cortex-core`. The CLI is independent
-until a command needs the libraries. No library depends on the CLI or an agent
-framework. All packages have `publish = false`; version 0.1.0 identifies this
-private foundation and carries no stable API commitment.
+Both `cortex-evidence` and `cortex-cli` depend on `cortex-core`; inspection reuses
+its revision syntax validation without changing candidate/task/evidence semantics.
+No library depends on the CLI or an agent framework. All packages have
+`publish = false`; version 0.1.0 carries no stable API commitment.
 
 An execution report and a semantic judgment are different values. A newly
 constructed evidence record has no assessment, even when its exit code is zero.
@@ -81,14 +100,19 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --locked
 cargo run --locked -p cortex-cli -- --help
 cargo run --locked -p cortex-cli -- --version
+cargo run --locked -p cortex-cli -- inspect
 git diff --check
 git diff --cached --check
 git status --short
 ```
 
-Behavioral tests exercise the CLI as a subprocess, input boundaries, provenance
-retention, and the observation/assessment rules. Passing tests support these
-scoped contracts, not comprehensive correctness or security certification.
+Behavioral tests exercise the CLI as a subprocess, real temporary Git repositories,
+read-only content/metadata invariance, resource failures, concurrent-change rejection,
+input boundaries, provenance retention and observation/assessment rules. Inspection
+permission fixtures require a non-root Linux user; all fixtures are local/offline.
+Validate relative links and anchors in changed Markdown documentation as well.
+Passing tests support these scoped contracts, not comprehensive correctness or
+security certification.
 
 The GitHub Actions workflow has only `workflow_dispatch`, read-only repository
 permissions, and a bounded job timeout. It is prepared for later operator use;

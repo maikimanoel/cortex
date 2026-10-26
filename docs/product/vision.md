@@ -84,11 +84,13 @@ actual candidate. Improvements must be proposed and evaluated against explicit
 oracles and baselines. Compatibility, reliability, retrieval quality, security,
 and performance claims require observations in the stated environments.
 
-The current implementation is only the three-crate foundation described in the
-[accepted foundation decision](../architecture/0001-foundation.md). It validates
-in-memory task and evidence values and prints CLI help/version. It does not yet
-inspect repositories, enforce permissions, execute agents, persist history, or
-implement temporal provenance. The [roadmap](roadmap.md) schedules that work;
+The current implementation retains the three-crate foundation described in the
+[accepted foundation decision](../architecture/0001-foundation.md) and adds
+[002-A bounded local Git inspection](../architecture/repository-inspection.md).
+It validates in-memory task/evidence values, prints help/version, and observes
+supported repositories without binding tasks or assessing software. It does not
+yet enforce task permissions, execute agents, persist history or implement temporal
+provenance. The [roadmap](roadmap.md) schedules that work;
 plans are not execution authorization or evidence of delivery.
 
 Cortex does not promise infallibility, universal compatibility, or objectively

@@ -5,6 +5,9 @@ version = 4
 [[package]]
 name = "cortex-cli"
 version = "0.1.0"
+dependencies = [
+ "cortex-core",
+]
 
 [[package]]
 name = "cortex-core"

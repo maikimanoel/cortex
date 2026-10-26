@@ -10,5 +10,8 @@ publish.workspace = true
 name = "cortex"
 path = "src/main.rs"
 
+[dependencies]
+cortex-core = { path = "../cortex-core" }
+
 [lints]
 workspace = true

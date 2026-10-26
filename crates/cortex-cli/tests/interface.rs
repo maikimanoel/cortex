@@ -19,7 +19,7 @@ fn help_flags_describe_only_the_implemented_interface() {
         assert!(text.contains("Usage: cortex [OPTIONS]"));
         assert!(text.contains("--help"));
         assert!(text.contains("--version"));
-        assert!(text.contains("no execution commands are available"));
+        assert!(text.contains("no agent execution commands are available"));
     }
 }
 

@@ -1,4 +1,6 @@
-//! The initial Cortex command interface; no work is executed by this milestone.
+//! The Cortex terminal interface and bounded local repository inspection.
+
+mod inspection;
 
 use std::{
     error::Error,
@@ -11,18 +13,23 @@ use std::{
 const HELP: &str = "Cortex — evidence-driven software engineering
 
 Usage: cortex [OPTIONS]
+       cortex inspect [--repo <PATH>]
 
 Options:
   -h, --help       Print help
   -V, --version    Print version
 
-Milestone 001 provides domain contracts only; no execution commands are available.
+Commands:
+  inspect         Observe a local Git worktree (default: current directory)
+
+Inspection does not verify software; no agent execution commands are available.
 ";
 
 #[derive(Debug)]
 enum CliError {
     InvalidArguments,
     Output(io::Error),
+    Inspection(inspection::InspectionError),
 }
 
 impl fmt::Display for CliError {
@@ -30,6 +37,7 @@ impl fmt::Display for CliError {
         match self {
             Self::InvalidArguments => f.write_str("unsupported arguments; use --help"),
             Self::Output(_) => f.write_str("could not write command output"),
+            Self::Inspection(error) => error.fmt(f),
         }
     }
 }
@@ -38,6 +46,7 @@ impl Error for CliError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Output(error) => Some(error),
+            Self::Inspection(error) => Some(error),
             Self::InvalidArguments => None,
         }
     }
@@ -45,6 +54,22 @@ impl Error for CliError {
 
 fn run(mut args: impl Iterator<Item = OsString>, output: &mut impl Write) -> Result<(), CliError> {
     let first = args.next();
+    if first.as_deref() == Some(std::ffi::OsStr::new("inspect")) {
+        let path = match args.next() {
+            None => OsString::from("."),
+            Some(flag) if flag == "--repo" => args
+                .next()
+                .filter(|p| !p.is_empty())
+                .ok_or(CliError::InvalidArguments)?,
+            _ => return Err(CliError::InvalidArguments),
+        };
+        if args.next().is_some() {
+            return Err(CliError::InvalidArguments);
+        }
+        let observation =
+            inspection::inspect(std::path::Path::new(&path)).map_err(CliError::Inspection)?;
+        return observation.write(output).map_err(CliError::Output);
+    }
     if args.next().is_some() {
         return Err(CliError::InvalidArguments);
     }
@@ -65,6 +90,7 @@ fn main() -> ExitCode {
             match error {
                 CliError::InvalidArguments => ExitCode::from(2),
                 CliError::Output(_) => ExitCode::FAILURE,
+                CliError::Inspection(error) => ExitCode::from(error.exit_code()),
             }
         }
     }
