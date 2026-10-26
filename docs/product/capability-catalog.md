@@ -37,6 +37,11 @@ Failures use structured categories and the common result/validity rules where
 applicable; exact schemas, thresholds, and numeric exit codes need their scheduled
 decision. Plans and dependencies do not authorize execution or spending.
 
+The proportional [maintainability and contributor acceptance requirements](../engineering-principles.md#maintainability-and-contributor-experience)
+apply across future capability changes; each subsystem owns its implementation
+and CLI/delivery coordinates the documented contributor path. These requirements
+do not enlarge any delivered Milestone 002 contract.
+
 ## A. Core, task contracts, and operational authority
 
 ### CAP-CORE-001
@@ -96,8 +101,8 @@ No dirty snapshot or permanent freshness guarantee is supplied.
 002-A/foundation regressions. Test source is a mechanism; executed outcomes belong
 to the delivered candidate's external handoff. No evidence assessment is created.
 **Decisions:** DEC-011 resolved for bounded 002-B binding only; dirty snapshot
-identity remains open for 003-A. DEC-010 remains at its pre-002-C evidence-extension
-decision point and was not resolved by binding-domain results.
+identity remains open for 003-A. DEC-010 was resolved separately in 002-C;
+binding-domain correspondence is still not an evidence assessment.
 
 ### CAP-CORE-003
 
@@ -112,6 +117,11 @@ operation's preconditions, target/candidate scope, applicable policy and require
 approvals; return a structured allow/block decision. Guard auditable state changes
 and postconditions. An allowed decision is enforceable only through the actual
 tool/environment boundary; missing external/human approval blocks the action.
+Bind the grant to operation, actual resource identity, scope, candidate or execution
+context, constraints and the applicable authority/approval decision. Consumers must
+check that correspondence at the effect boundary; a prior plan/declaration cannot
+substitute for it. Invalid, incomplete or indeterminate authorization never allows
+execution. Core remains the policy authority; harness/skill consumers enforce it.
 
 **Advanced properties:** Non-amplifying delegation, versioned policy, temporal
 decision provenance, and auditable consumption at invocation (INV-001/004/006/008).
@@ -121,6 +131,8 @@ remain different domain objects.
 **Acceptance:** A permitted operation stays inside its scope; a child requesting
 another tool, larger budget, changed candidate, or broader path/network access is
 blocked before effects. Wrong/absent approval cannot be supplied by tool text.
+Changing the resource, constraints or execution context after planning requires
+applicable authorization at dispatch; uncertain correspondence blocks the effect.
 **Verification:** NOT_RUN; policy boundary/property tests and real host-denial
 integration tests. **Decisions:** DEC-005/006/012; no numeric budgets selected.
 
@@ -206,11 +218,19 @@ for 002-C identities/time and minimum 002-D CLI input/output, with later formats
 **Dependencies:** CAP-EVD-002, CAP-KNW-001, CAP-MEM-001.
 
 **Functional contract:** Given a dependency/version change, identify affected
-observations and conclusions, mark their applicability to the requested context
-stale, retain original results, and explain why. Preserve unaffected validity
-only with a justified dependency basis. Import/export and historical inspection
+observations and conclusions, mark their validity `STALE` for the requested
+candidate/context, retain original results and applicability determinations, and
+explain why. Preserve unaffected validity only with a justified dependency basis. Import/export and historical inspection
 retain identities, dependencies, times, and limitations; malformed or unsupported
 versions fail explicitly rather than discarding provenance.
+
+Future verification producers must declare the context required by
+[INV-004](../architecture/core-invariants.md#inv-004) and retain the references
+needed to evaluate validity for the requested candidate/dependencies. Relevant
+execution or interpretation context changes participate in validity; insufficient
+context cannot establish CURRENT validity for the requested claim. Reuse the 002-C dimensions, without
+inventing a second evidence model or claiming that 002 already captures every
+future context automatically.
 
 **Advanced properties:** Transitive invalidation, scoped non-impact reasoning,
 and independently inspectable history (INV-004/005/007/012).
@@ -218,7 +238,10 @@ and independently inspectable history (INV-004/005/007/012).
 **Acceptance:** Changing a criterion, tool version, or depended-on file invalidates
 its consumers; unrelated material stays current with justification. A historical
 pass survives as historical/stale, never as current acceptance. Round-trip export
-preserves the result/validity distinction; missing dependencies stay unknown.
+preserves the result/validity distinction; missing dependencies stay explicit.
+A conclusion-changing runtime, toolchain, environment or oracle change invalidates
+affected evidence; insufficient dependency coverage cannot justify CURRENT reuse.
+An observation never supports a claim beyond its declared verification coverage.
 **Verification:** NOT_RUN; dependency/property tests and interchange/historical
 query integration. **Decisions:** DEC-004/007/010.
 
@@ -237,8 +260,13 @@ relations, and source spans. Appropriate adapters also handle documentation,
 schemas, and analyzable binary artifacts. Material nodes/edges carry source,
 candidate, adapter/version, and extraction provenance. Update deterministically
 from declared dependencies; remove obsolete relations and invalidate affected
-material. Unsupported formats, syntax, unresolved references, and partial coverage
-must be explicit, not invented structure or a silent complete index.
+material. Declare dependencies on relevant sources, configuration, parser/adapter
+versions and extraction rules, and their coverage. A relevant change marks affected
+derived knowledge's validity STALE; preserve unaffected knowledge only with a
+justified non-impact basis. Uncertain or incomplete dependency coverage is explicit
+and cannot establish CURRENT for a property it does not cover. Unsupported formats,
+syntax, unresolved references and partial coverage cannot become invented structure
+or a silent complete index.
 
 **Advanced properties:** One derived, rebuildable context index; relation origin
 (`extracted`/`inferred`) stays separate from validation disposition
@@ -246,8 +274,11 @@ must be explicit, not invented structure or a silent complete index.
 
 **Acceptance:** Declared-language fixtures yield correct symbols, spans, imports,
 and calls; unsupported constructs report coverage limits. Incremental and clean
-rebuilds agree for the same inputs/configuration. A dependency edit invalidates
-consumers while justified unaffected entries retain validity. Validating an
+rebuilds agree on the contracted semantic result for equivalent candidates, inputs,
+configuration and parser/extraction versions where recomputation is practical.
+Diagnose divergence instead of silently accepting it; declare limits where a full
+baseline cannot be established. Source/configuration/parser/rule changes invalidate
+their consumers while justified unaffected entries retain validity. Validating an
 inferred edge never changes its origin to extracted.
 **Verification:** NOT_RUN; parser fixtures, deterministic rebuild comparisons,
 negative coverage and invalidation tests. **Decisions:** DEC-007/011.
@@ -339,6 +370,9 @@ decisions, and learning history with identities, provenance, version references,
 explicit corrections/supersession, and domain versus recording times. Distinguish
 canonical, transient, and ephemeral layers with chosen retention rules. Reject
 ambiguous identities/temporal contradictions and expose unavailable history.
+Logical corrections preserve the meaning of retained history, not an unconditional
+promise of physical retention. Authorized deletion/omission follows CAP-SEC-002 and
+DEC-004; missing policy must not be replaced by an append-only storage assumption.
 
 **Advanced properties:** Bitemporal queries and privacy-compatible deletion without
 silently rewriting retained history (INV-004/005/007/012). Canonical memory is an
@@ -469,13 +503,26 @@ and guarded transitions where supported, without pretending to rerun or observe
 external effects. Crash-safe continuation reconciles pending effects or blocks
 explicitly rather than blindly duplicating them.
 
+The workflow owns the durable external-effect record: recorded intent, dispatch
+initiation, confirmed outcome, unknown outcome after interruption, reconciliation
+required and safe resolution. These describe planned operational lifecycle semantics,
+not new evidence-result enums or a selected storage protocol. A timeout/crash after
+dispatch does not prove that no effect occurred. Reconcile or block an unknown
+outcome; retry is safe only under the actual operation's idempotency/retry contract.
+Start with a bounded local-first contract before considering distributed coordination;
+CAP-HRN-001 supplies dispatch/outcome observations without duplicating authoritative
+effect state.
+
 **Advanced properties:** Auditable state history, dependency-aware invalidation,
 and executor-independent workflow contracts (INV-004/005/006).
 
 **Acceptance:** Invalid transitions and missing evidence cannot advance state;
 interrupt/restart at persistence/effect boundaries neither loses an accepted
-transition nor repeats an unreconciled side effect. Changed candidates block
-unsafe resumption. **Verification:** NOT_RUN; transition/property tests,
+transition nor repeats an unreconciled side effect. Faults before/after dispatch,
+confirmation and reconciliation preserve intent and outcome uncertainty. An effect
+confirmed externally after a lost response cannot trigger a blind non-idempotent
+retry. Changed candidates or missing current authority block unsafe resumption.
+**Verification:** NOT_RUN; transition/property tests,
 deterministic replay and crash/fault injection with declared budgets.
 **Decisions:** DEC-005/007; durability/effect protocol not selected.
 
@@ -548,12 +595,21 @@ CAP-HRN-001/002, CAP-EVL-002 for measured evaluation.
 
 **Functional contract:** When parallel work is explicitly authorized, decompose
 tasks by declared dependencies under a common base candidate and shared contracts.
-Assign independent execution workspaces/branches, bounded mutation scopes,
+Assign an accountable owner and explicit prerequisites to each task. Analyze semantic
+dependencies beyond overlapping file paths; stabilize shared contracts before treating
+tasks as independently executable. Assign independent execution workspaces/branches,
+bounded mutation scopes,
 resource budgets, and integration responsibilities. Detect overlapping changes,
 semantic/interface conflicts, stale bases, and missing dependency results.
 Integrate in a separately authorized guarded step and rerun affected checks on
-the integrated candidate. Preserve branch-local and integrated evidence distinctly;
-a branch-local `PASS` does not establish integrated `PASS`.
+the integrated candidate, with its own identity distinct from parent execution
+candidates and explicit dependency/conflict reconciliation. Preserve branch-local
+and integrated evidence distinctly; affected properties need new evidence against
+the integrated candidate. Any justified reuse must retain original evidence identity
+and establish its validity for the integrated context, without relabeling an old
+record. Unresolved dependencies/conflicts remain blocked or uncertain. A successful
+Git merge or branch-local `PASS` does not establish semantic compatibility or
+integrated `PASS`.
 
 **Advanced properties:** Non-amplifying delegation, reproducible candidate
 correspondence, effective isolation, and evidence-based integration gates
@@ -564,7 +620,9 @@ not mandatory ceremony for trivial work.
 
 **Acceptance:** Dependent tasks wait for their prerequisites; out-of-scope writes
 are denied by actual controls. Individually passing branches with an incompatible
-shared interface fail/block integration until reconciled. A changed base
+shared interface fail/block integration until reconciled. Disjoint-file tasks with
+an unresolved shared semantic dependency cannot be scheduled as independent work.
+A clean merge with an incompatible dependency still blocks acceptance. A changed base
 invalidates affected evidence, and required integrated checks cannot be replaced
 by local passes. Missing approval or partial integration remains explicit.
 **Verification:** NOT_RUN; dependency/overlap/semantic-conflict fixtures, real
@@ -588,6 +646,11 @@ and data-volume limits using real host controls. Capture candidate-bound inputs,
 proposals, tools, outputs, decisions, and evidence with redacted export. Timeouts,
 resource exhaustion, permission violations, and tool failures produce recoverable
 typed interruption with useful partial trace and explicit cleanup limits.
+At actual consequential dispatch, enforce the applicable CAP-CORE-003 decision for
+the operation/resource/context; prior planning and skill declarations are not grants.
+Report dispatch and outcome uncertainty to CAP-WFL-001 for effect reconciliation.
+Trace capture/omission and retention require CAP-SEC-002/DEC-004 scope; redacted
+export alone does not authorize unrestricted raw trace storage.
 
 **Advanced properties:** Pluggable isolation backends with demonstrable guarantees;
 appropriately constrained component-style runtimes may be used when justified by
@@ -597,6 +660,8 @@ threat model/host capability (INV-001/004/006/008). No Rust trait alone is isola
 and child-process escape attempts are actually contained for each supported
 backend. Unsupported mandatory controls block execution. Cancellation and cleanup
 leave inspectable terminal/interrupted state without secret trace leakage.
+A target/context change or indeterminate grant is denied at the real effect boundary;
+a timeout after dispatch retains an unknown effect outcome when confirmation is absent.
 **Verification:** NOT_RUN; adversarial real-host tests, resource/fault tests, and
 trace privacy checks. **Decisions:** DEC-004/005/006; no backend guarantee assumed.
 
@@ -688,6 +753,8 @@ tool-output laundering, plugin/skill poisoning, exfiltration, filesystem/permiss
 violations, and trust changes through policy-enforced invocation and actual
 isolation. Classification/detection can add defense in depth but cannot grant
 authority. Record denied actions and useful redacted failure diagnostics.
+Validate the real effect-boundary enforcement of CAP-CORE-003/CAP-HRN-001,
+including resource/context changes after planning; do not create another policy owner.
 
 **Advanced properties:** No bypass through retrieval, recovered memory, protocol,
 or export path; resource-bounded least privilege (INV-001/004/008).
@@ -757,10 +824,17 @@ failure cases. **Decisions:** DEC-003/006/007; no scanner/service requirement ad
 
 **Functional contract:** Identify cases, datasets, candidates, explicit oracles,
 baselines, hidden/held-out sets, and negative examples. Execute within authorized
-budgets and capture versions/configuration, structured traces, cost/resource
-records, outcomes and limitations. Reproduction states relevant stochastic and
-environmental conditions; unavailable prerequisites or unperformed procedures
-remain `BLOCKED`/`NOT_RUN`, not fabricated results.
+budgets and capture candidate, model/harness configuration, relevant environment
+and tool versions, criterion/mechanism/oracle definitions and versions, dataset and
+evaluation-version identity, permitted traces, observed costs/resources, outcomes
+and limitations. Retain attempt counts and the full case population: failures,
+execution errors, skipped/unexecuted cases and incomplete attempts cannot disappear
+from reported denominators. Declare each rate's population and accounting basis;
+unknown consumption is not a measured saving. Material intended for independent
+judgment, including oracles, reserved cases and accounting records, stays outside
+the evaluated agent/harness's authority. Protection scope is governed by DEC-008.
+Reproduction states relevant stochastic and environmental conditions; unavailable
+prerequisites or unperformed procedures remain `BLOCKED`/`NOT_RUN`, not fabricated results.
 
 **Advanced properties:** Independently inspectable evaluation inputs and temporal
 validity, with controlled access to reserved cases (INV-004/005/009/011).
@@ -768,6 +842,9 @@ validity, with controlled access to reserved cases (INV-004/005/009/011).
 **Acceptance:** Reproduce a deterministic case's result from its recorded inputs;
 changed candidates/oracles invalidate comparisons. Negative cases discriminate
 incorrect behavior. Hidden cases are not exposed to a proposing agent.
+A run containing failures/errors/skips/interruption remains fully accounted for;
+the evaluated agent/harness cannot modify protected cases, oracles or attempt records
+to improve its score. Missing context or measurements remain explicit.
 **Verification:** NOT_RUN; evaluation reproducibility, oracle-failure, negative
 and held-out isolation cases. **Decisions:** DEC-005/008; no score targets selected.
 
@@ -788,7 +865,9 @@ remain `NOT_RUN`; regression failures cannot be averaged away. Evaluate optional
 delegation/parallel methods under fair declared baselines using time to verified
 integrated outcome, task quality, token/resource expenditure, retries, human
 coordination cost, and regressions. Local branch completion is not the endpoint
-when integration and revalidation remain outstanding.
+when integration and revalidation remain outstanding. Improvement claims require
+appropriately controlled comparisons with the protected accounting of CAP-EVL-001;
+missing/failed attempts cannot be filtered away to manufacture a better denominator.
 
 **Advanced properties:** Candidate-bound, resource-aware empirical promotion and
 honest uncertainty (INV-004/005/009/011).
@@ -1016,6 +1095,9 @@ dispatch; the checkpoint does not authorize changing this configuration.
 **Functional contract:** Prepare a reviewed release candidate with license decision,
 repository/history/privacy review, distribution/versioning and operation/support
 documentation, and reproducible checks appropriate to the delivered platform.
+Demonstrate the future [contributor walkthrough](../engineering-principles.md#maintainability-and-contributor-experience)
+against documented setup/contracts without private chat history; this technical
+acceptance does not settle contributor governance under DEC-003.
 Record unresolved limits and readiness evidence. Separate technical preparation
 from explicit owner authorization for public access, packages, releases, or launch.
 
@@ -1023,7 +1105,9 @@ from explicit owner authorization for public access, packages, releases, or laun
 without unsupported readiness claims (INV-001/004/008/011/012).
 
 **Acceptance:** An unlicensed, privacy-unreviewed, or unresolved-gate candidate
-cannot be declared ready for its proposed distribution. Completing preparation
+cannot be declared ready for its proposed distribution. Record the walkthrough's
+candidate, prerequisites, attempted steps, failures and limits; an internal rehearsal
+is not independently observed external contributor acceptance. Completing preparation
 does not publish anything; absent owner authorization blocks launch.
 **Verification:** NOT_RUN; release-candidate/history review and distribution checks
 after decisions. No public repository, tag, release, or package is created here.

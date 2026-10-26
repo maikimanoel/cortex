@@ -33,8 +33,12 @@ before outside contributions, even if that occurs before 007.
 **Privacy, retention, and deletion defaults.** Determine classification, consent,
 retention for canonical/transient/ephemeral layers, physical deletion, backups,
 export handling, and permitted non-sensitive audit remnants before persistent
-memory is enabled in 003-A. Logical append-only history must coexist with
-authorized deletion. Dependencies: CAP-MEM-001/002/003 and CAP-SEC-002.
+memory is enabled in 003-A. Logical correction/supersession of retained history is
+distinct from policy-governed physical deletion; neither selects unconditional
+retention or a deletion guarantee before implementation. Before 004-D, also decide
+sensitive trace capture, access, omission/redaction and retention limits. Useful
+execution evidence does not authorize unrestricted storage of raw tool output.
+Dependencies: CAP-MEM-001/002/003 and CAP-SEC-002.
 
 ## DEC-005
 
@@ -75,7 +79,11 @@ Before 003-E/003-F, decide the minimum Portable Context Package integrity,
 project/candidate identity, freshness and privacy/omission semantics for manual
 exchange. Before 004-C/004-D, define parallel-workspace coordination and guarded
 integration/effect records without treating worktrees as sandboxes. Dependencies:
-CAP-CTX-002, CAP-WFL-003/004. No format or workspace implementation is selected.
+CAP-CTX-002, CAP-WFL-003/004. Before 004-C, define the minimum durable effect record
+and operation-specific retry/reconciliation semantics for CAP-WFL-001, linked to
+actual harness dispatch and applicable Core authority. Prefer a bounded local-first
+contract before considering distributed coordination. No format, transaction/backend
+or workspace implementation is selected; lifecycle requirements are not a schema.
 
 **002-C scoped resolution:** The [evidence contract](../architecture/unified-evidence.md#identity-provenance-and-time)
 retains exact existing task/revision/candidate/capture identities, a separate
@@ -103,8 +111,13 @@ original milestone boundaries.
 **Evaluation cases, baselines, and comparison-publication policy.** Select
 benchmark families, reserved/held-out cases, access controls, oracles, baselines,
 resource accounting, and rules for reporting comparisons before 005-A or any
-public quantitative claim. Separate model and harness effects where the study
-can identify them; otherwise report the confounding. Dependencies: CAP-EVL-001/002
+public quantitative claim. Specify case/attempt populations and denominators that
+retain failures, execution errors, skips and incomplete attempts under CAP-EVL-001.
+Decide protection/access boundaries for independent judgment material and accounting
+outside the evaluated agent/harness's authority, and controlled comparison design
+under CAP-EVL-002. These requirements do not select datasets, numerical targets,
+reviewer governance or publication permission. Separate model and harness effects
+where the study can identify them; otherwise report the confounding. Dependencies: CAP-EVL-001/002
 and CAP-EVO-002. No benchmark score or superiority claim is approved here.
 
 ## DEC-009
@@ -132,7 +145,8 @@ validity cannot imply CURRENT. Reports remain unauthenticated caller assertions;
 no assessment grants permission. The linked contract owns construction rules,
 limits, redaction and compatibility. No storage schema, transitive dependency graph,
 runner or persistence migration is selected. Dependencies: CAP-EVD-002 and CAP-CORE-002;
-DEC-007's later format/CLI decisions remain open.
+DEC-007's broader persistent/interchange/API decisions remain open; the minimum
+002-D CLI projection is resolved only within its documented scope.
 
 ## DEC-011
 

@@ -107,6 +107,73 @@ CI success without the corresponding authority and evidence. Repository privacy,
 unpublished packages, and an undecided license remain deliberate boundaries of
 this milestone.
 
+## Maintainability and contributor experience
+
+These are cross-cutting acceptance requirements for future milestones and focused
+changes, applied in proportion to risk and the affected contract under
+[INV-011](architecture/core-invariants.md#inv-011). Each subsystem owns its
+implementation and documentation; CLI/delivery coordinates setup, verification
+instructions and the future contributor walkthrough. The catalog owns functional
+scope and the roadmap sequences its acceptance. This checkpoint establishes
+requirements, not independent evidence that contributor usability has been tested.
+
+**Architecture and modularity:** A reviewer must be able to trace a changed
+requirement to its owning cohesive crate/module, invariants and consumers. Keep
+dependencies directional and acyclic, responsibility boundaries explicit and
+public visibility minimal. Reject duplicated domain authority/evidence semantics
+and speculative generic frameworks. A new crate or abstraction needs an actual
+consumer and an observable boundary; KISS and YAGNI apply to documentation too.
+
+**Idiomatic Rust:** Make ownership, borrowing and resource lifetimes understandable;
+use validated types where they enforce a meaningful invariant. Errors must have
+predictable categories/causes and private-input-safe diagnostics. Document public
+invariants and use consistent native naming/conversion conventions. Safe Rust and
+the existing workspace prohibition on unsafe code remain the baseline; a future
+exception would need an explicitly authorized policy change and demonstrated need,
+with documented and verified obligations. Feature, toolchain and compatibility
+changes require deliberate scope and affected checks, without inferring broader
+API/platform guarantees from a version number (DEC-006/007).
+
+**Verification:** Connect tests to observable requirements and plausible incorrect
+behavior. Include relevant negative/boundary cases, corrected-defect regressions,
+integration tests at consequential boundaries and end-to-end tests for essential
+user workflows. Record actual results, configuration, skipped/unavailable checks
+and unverified scope. Neither a passing count nor successful compilation is a
+universal correctness metric; select techniques by the property being assessed.
+
+**Documentation:** Examples, setup/build/test instructions, supported behavior and
+limitations must agree with the inspected candidate. Keep terminology, architecture,
+catalog status and roadmap consistent. Retain one canonical owner for a requirement
+and link to it. A planned capability cannot be described as demonstrated behavior;
+a future contributor must not need private conversation history to recover contracts.
+
+**Contributor acceptance:** Under the future CAP-CLI-006 contract, a recorded
+walkthrough must demonstrate that a competent external Rust contributor can use
+the permitted project documentation to:
+
+1. Understand the purpose and actual implementation status.
+2. Locate the responsible subsystem and relevant modules.
+3. Set up the documented local development environment.
+4. Build and test the relevant workspace components.
+5. Identify applicable contracts and invariants.
+6. Make a focused change without private chat history.
+7. Verify it with the documented commands and record limitations.
+8. Submit a reviewable contribution with clear candidate-bound evidence.
+
+Record prerequisites, attempted steps, failures and the assessed candidate; an
+internal rehearsal is not independent external usability evidence. These are
+future observable requirements. Contributor governance, permitted submission and
+review responsibilities remain DEC-003 decisions before accepting outside work;
+this document does not authorize public access or contribution intake.
+
+**Change review:** Preserve contract compatibility, accurate documentation, relevant
+tests, security/privacy boundaries, resource/error semantics and evidence validity.
+Changed relevant inputs require fresh verification. Review depth follows the
+change's risk and required controls, with DEC-012 retaining its classification and
+qualified-review decisions. No universal formal proof, agent count, orchestration
+method or excessive fixed checklist is required for ordinary changes; critical
+work cannot bypass its contract-required review.
+
 ## Choose proportionate methods and measure change
 
 Satisfy each capability's complete functional contract before claiming its
@@ -123,11 +190,21 @@ improvement. Separate harness and model effects where possible, disclose
 confounding, and never replace missing experiments with confidence or aggregate
 scores. Publication and consequential promotion need their own authority.
 
-Deliver genuinely usable slices early and use Cortex to help build Cortex only
-as its capabilities become demonstrated and authorized. Optional planning,
+**Progressive dogfooding:** Deliver usable slices early and use Cortex to help
+build Cortex only as its capabilities become demonstrated and explicitly authorized.
+CLI/delivery coordinates this practice using the documented baseline (CAP-CLI-005);
+future method automation belongs to CAP-WFL-002 and empirical benefit claims to
+CAP-EVL-002. Practice adoption is optional, with feature status distinct from the
+result/validity of a particular use. Optional planning,
 delegation and parallel work must preserve shared contracts, independent bounded
 workspaces, and human/core authority. An executor does not approve its own
 consequential promotion. Revalidate the integrated candidate; passing branch-local
 checks cannot establish integrated acceptance. Evaluate actual time to verified
 integrated outcome, quality, token/resource expenditure, retries, coordination
 cost and regressions before making efficiency or superiority claims.
+
+Plan–Execute–Reconcile, continuity/context features, portable packages and governed
+parallel work retain their catalog owners and roadmap targets. Selecting these
+methods/features is optional where applicable; satisfying their contracts and the
+shared invariants is mandatory when selected. Their planned interfaces must also
+support direct single-agent work. Additional agents alone never establish an improvement.

@@ -16,7 +16,9 @@ actual candidate observations, policy and required external/operator approvals.
 Outputs are validated contracts and scoped allow/block decisions, never authority
 derived from model text. Rejections identify violated conditions. Enforcement
 consumers must check the applicable decision at the actual invocation boundary.
-Core remains independent of storage, CLI, agents, and providers.
+Core remains independent of storage, CLI, agents, and providers. It owns the
+applicable grant; harness/tool consumers enforce it at the actual effect boundary
+under CAP-CORE-003, with no second policy authority.
 
 ## Evidence and assessment
 
@@ -27,6 +29,8 @@ their mechanisms/inputs/configuration/versions/time, not claims of success as
 trusted commands. Produces scoped judgments with reasons and limitations; it
 cannot approve an operation. Dependency changes invalidate consumers without
 rewriting observations. Actual capture adapters and evaluators remain identifiable.
+Producers declare verification context/coverage under INV-004; Evidence owns validity interpretation,
+while knowledge owns the extraction dependency declarations in CAP-KNW-001.
 The existing [002-C in-memory model](unified-evidence.md) adds independent evidence
 dimensions and direct contextual invalidation alongside the preserved foundation
 API. Transitive dependency invalidation, persistent history and interchange remain
@@ -76,12 +80,17 @@ applicable policy, selected method and evidence; emits guarded step decisions an
 recorded state changes. Executor contracts are replaceable only within declared
 capabilities. Persistence/effect reconciliation must make crash/replay limits
 explicit. The workflow consumes evidence and permission; it manufactures neither.
+CAP-WFL-001 owns durable external-effect intent, uncertainty and reconciliation state. The
+harness reports actual dispatch/outcomes against those references, rather than
+maintaining competing authoritative effect state.
 
 The planned optional [Plan–Execute–Reconcile method](../product/capability-catalog.md#cap-wfl-003)
 owns review and reconciliation around typed contracts and returned handoffs.
 [Governed parallel work](../product/capability-catalog.md#cap-wfl-004) owns
 dependency-aware decomposition, common base/shared contracts, bounded independent
-workspaces, and the guarded integration schedule. Core/harness still enforce
+workspaces, task ownership/prerequisites, stable shared contracts and the guarded
+integration schedule. Its integrated candidate has distinct identity and affected
+revalidation obligations under CAP-WFL-004. Core/harness still enforce
 authority/isolation; integration needs separate approval and affected checks
 on the integrated candidate. Branch-local success is not integrated acceptance.
 
@@ -125,7 +134,9 @@ candidate behavior through authorized execution without redefining authority.
 Evolution consumes its evidence through domain contracts; proposers cannot replace
 trusted oracles or view protected cases. Model/harness effects are separated where
 identifiable. Unrun evaluations and confounding are explicit, never optimistic
-improvement claims.
+improvement claims. CAP-EVL-001 owns complete attempt/population accounting and protected
+judgment material outside the evaluated agent/harness's authority; CAP-EVL-002
+owns controlled comparisons, without changing Core's authority role.
 
 ## Context and interoperability
 
@@ -153,8 +164,8 @@ authorize hosted jobs, public access, packages, or release actions.
 Before an effect, the consumer checks identity/candidate, policy/approval scope,
 required capabilities and limits. After an attempt, it preserves the mechanism,
 inputs/configuration/version/time, actual observation, completion/interruption
-state, and redacted diagnostics. Assessments and state transitions reference those
-records; history/index consumers retain dependencies and temporal meaning.
+state and permitted, redacted diagnostics under the applicable capture/omission policy.
+Assessments and state transitions reference those records; history/index consumers retain dependencies and temporal meaning.
 
 For example, a recovered decision can help assemble context for a task, but a
 stale dependency prevents treating it as current evidence. A workflow may propose
@@ -164,3 +175,13 @@ If any prerequisite is absent, the affected operation stops honestly while
 independent authorized inspection may continue. Serialization formats, backend
 choices, transaction protocols and broader public APIs remain
 [open](../decisions/open-decisions.md).
+
+## Maintainability ownership
+
+Each subsystem owns the cohesion, public invariants, tests and documentation of
+its changes under the canonical [engineering requirements](../engineering-principles.md#maintainability-and-contributor-experience).
+CLI/delivery coordinates setup and verification instructions and future contributor
+walkthrough acceptance in CAP-CLI-006. It also coordinates proportional progressive
+dogfooding with current CAP-CLI-005 tooling; workflow automation and benefit
+measurement remain with CAP-WFL-002 and CAP-EVL-002. These are engineering/acceptance
+responsibilities, not a new subsystem, contribution policy or publication grant.

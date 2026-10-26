@@ -16,6 +16,12 @@ An increment can be implemented while required verification is still `NOT_RUN`,
 `BLOCKED`, or insufficient. Assess result and validity independently; record exact
 candidate/environment and missing gates in each handoff. A milestone is complete
 only when all its required increments and exit evidence are satisfied.
+Future milestone exits also apply the relevant proportional
+[maintainability and contributor acceptance requirements](../engineering-principles.md#maintainability-and-contributor-experience).
+Each affected subsystem supplies contract/test/documentation evidence; CLI/delivery
+coordinates the full future walkthrough under CAP-CLI-006 in 007; earlier milestones
+supply evidence for their affected portions, not a repeated full external walkthrough.
+This does not require a fixed checklist, formal method or agent topology for every change.
 
 | Milestone | Current readiness | Dependency | Exit evidence |
 | --- | --- | --- | --- |
@@ -53,6 +59,10 @@ candidate/task binding. 002-C adds unified evidence library semantics with scope
 DEC-010/007 resolutions. 002-D integrates one deterministic committed-HEAD equality
 check with explicit task/candidate input and human/versioned JSON output. Further
 implementation requires separate authority and the relevant 003 decision points.
+CLI/delivery coordinates this optional progressive dogfooding under the
+[engineering principles](../engineering-principles.md#choose-proportionate-methods-and-measure-change);
+method automation remains in 004-C (CAP-WFL-002), with measured evaluation in
+005-A/005-C and 006 (CAP-EVL-002).
 
 ## 002: first complete vertical slice
 
@@ -84,6 +94,16 @@ belong to candidate-scoped external handoffs; remote CI remains NOT_RUN. This do
 not deliver agents, complete candidate snapshots, permission enforcement or temporal
 history. 003 remains planned and gated by its privacy/storage/coverage decisions.
 
+## Checkpoint 002-E: documentation consolidation
+
+This documentation-only checkpoint consolidates future context identity, dependency
+invalidation, effect reconciliation, effect-boundary authority, evaluation accounting
+and integrated-candidate requirements under their existing catalog owners below.
+It adds proportional maintainability/contributor acceptance without changing the
+002-A/B/C/D implementation contracts, milestone exits or capability statuses.
+Documentation verification and private delivery belong to its external handoff;
+no future runtime capability is implemented or verified by this checkpoint.
+
 ## 003: temporal knowledge and memory
 
 These increments combine into one coherent subsystem milestone; neither a parser
@@ -92,8 +112,8 @@ demo nor an append-only log alone satisfies the exit.
 | Increment | Scope/capabilities | Dependency and exit evidence |
 | --- | --- | --- |
 | 003-A | Canonical history/layers [CAP-MEM-001](capability-catalog.md#cap-mem-001), privacy gate [CAP-SEC-002](capability-catalog.md#cap-sec-002), snapshot extension [CAP-CORE-002](capability-catalog.md#cap-core-002) | 002, DEC-004/007/011; identity, supersession, bitemporal boundary and layer-retention tests before persistence |
-| 003-B | Unified derived index/extractors [CAP-KNW-001](capability-catalog.md#cap-knw-001) | 003-A, declared adapter coverage; multi-language/code/document/schema/artifact fixtures, spans/relations, incremental versus rebuild agreement, explicit unsupported coverage |
-| 003-C | Temporal queries/conflicts/impact [CAP-KNW-002](capability-catalog.md#cap-knw-002), invalidation [CAP-EVD-003](capability-catalog.md#cap-evd-003), historical recovery [CAP-MEM-002](capability-catalog.md#cap-mem-002) | 003-A/B; origin/disposition separation, historical and late-correction queries, conflict reconciliation, transitive invalidation and justified non-impact |
+| 003-B | Unified derived index/extractors [CAP-KNW-001](capability-catalog.md#cap-knw-001) | 003-A, declared adapter coverage; multi-language/code/document/schema/artifact fixtures, spans/relations, declared source/configuration/parser/rule dependencies, incremental versus full semantic recomputation and diagnosed divergence, explicit unsupported/dependency coverage |
+| 003-C | Temporal queries/conflicts/impact [CAP-KNW-002](capability-catalog.md#cap-knw-002), invalidation [CAP-EVD-003](capability-catalog.md#cap-evd-003), historical recovery [CAP-MEM-002](capability-catalog.md#cap-mem-002) | 003-A/B; origin/disposition separation, historical and late-correction queries, conflict reconciliation, context-bound evidence/knowledge validity, transitive invalidation and justified non-impact, no CURRENT claim from insufficient dependency coverage |
 | 003-D | Local retrieval [CAP-KNW-003](capability-catalog.md#cap-knw-003), recovery integration CAP-MEM-002 | 003-C; declared relevance/negative cases, bounded results, no unauthorized/stale-as-current material, one shared index |
 | 003-E | Handoffs [CAP-MEM-003](capability-catalog.md#cap-mem-003), privacy behavior CAP-SEC-002, CLI surfaces [CAP-CLI-004](capability-catalog.md#cap-cli-004) | 003-C/D; portable round-trip, source map, integrity rejection, candidate mismatch -> STALE, redaction and authorized deletion propagation |
 | 003-F | Context assembly [CAP-CTX-001](capability-catalog.md#cap-ctx-001), CLI surfaces CAP-CLI-004 | 003-D/E; versioned source selection, provenance, resource/token limits, visible omissions/staleness, no authority from recovered context |
@@ -116,10 +136,10 @@ material constraints or declare missing/stale context without guessed token thre
 
 | Increment | Scope/capabilities | Dependency and exit evidence |
 | --- | --- | --- |
-| 004-A | Policy/typed identities [CAP-CORE-003](capability-catalog.md#cap-core-003), trust analysis [CAP-SEC-001](capability-catalog.md#cap-sec-001) | 003 and DEC-005/006/012 as relevant; explicit authority decisions, threat/control cases, no self-grant or candidate mismatch |
+| 004-A | Policy/typed identities [CAP-CORE-003](capability-catalog.md#cap-core-003), trust analysis [CAP-SEC-001](capability-catalog.md#cap-sec-001) | 003 and DEC-005/006/012 as relevant; operation/resource/scope/context/constraint/approval-bound decisions, threat/control cases, no self-grant/candidate mismatch or permission from incomplete/indeterminate authorization |
 | 004-B | Skills/registry [CAP-SKL-001](capability-catalog.md#cap-skl-001), composition/imports [CAP-SKL-002](capability-catalog.md#cap-skl-002), executable provenance [CAP-SEC-003](capability-catalog.md#cap-sec-003) | 004-A; exact immutable versions, discovery without effects, type/runtime guard rejection, behavioral promotion prerequisites |
-| 004-C | Durable workflow [CAP-WFL-001](capability-catalog.md#cap-wfl-001), profiles/methods [CAP-WFL-002](capability-catalog.md#cap-wfl-002) | 004-A/B, DEC-007/012; guarded transitions, blocked reasons, crash/replay/resume and effect-reconciliation tests, inspectable executor-independent profiles |
-| 004-D | Effective harness [CAP-HRN-001](capability-catalog.md#cap-hrn-001), enforcement CAP-SEC-001 | 004-A/C, selected host/backend and approved budgets; actual isolation/denial/limit/cleanup tests, candidate traces and recoverable typed interruptions |
+| 004-C | Durable workflow [CAP-WFL-001](capability-catalog.md#cap-wfl-001), profiles/methods [CAP-WFL-002](capability-catalog.md#cap-wfl-002) | 004-A/B, DEC-007/012; guarded transitions, blocked reasons, crash/replay/resume and local-first durable effect intent/dispatch/confirmation/unknown-outcome reconciliation with safe-retry fault tests, inspectable executor-independent profiles |
+| 004-D | Effective harness [CAP-HRN-001](capability-catalog.md#cap-hrn-001), enforcement CAP-SEC-001 | 004-A/C, selected host/backend and approved budgets; actual effect-boundary grant enforcement, isolation/denial/limit/cleanup tests, candidate-bound authorized traces/omission scope and recoverable typed interruptions/unknown outcomes |
 | 004-E | Real adapters [CAP-HRN-002](capability-catalog.md#cap-hrn-002), translation [CAP-CTX-002](capability-catalog.md#cap-ctx-002), CLI CAP-CLI-004 | 004-D plus 003 context/handoffs; actual negotiated adapter conformance, absent optional integration diagnostics, portable source/limit/evidence meaning |
 
 The milestone exits only when guards work at real boundaries, not merely in a
@@ -137,15 +157,19 @@ parallel work contracts in 004-C, real bounded workspace execution in 004-D, and
 guarded integration/revalidation in 006-A/006-C. Shared base/contracts, denied
 out-of-scope mutations, semantic/interface conflict cases, and separate promotion
 approval are required; worktrees alone prove neither isolation nor compatibility.
-Branch-local evidence cannot substitute for checks against the integrated candidate.
+Task ownership, declared prerequisites and stable shared contracts precede independent
+execution, including semantic dependencies beyond file overlap. Integration assigns
+a distinct candidate and reconciles dependencies/conflicts before affected new
+verification; neither a clean Git merge nor branch-local evidence substitutes for
+integrated acceptance under CAP-WFL-004.
 
 ## 005: governed evolution and evaluation
 
 | Increment | Scope/capabilities | Dependency and exit evidence |
 | --- | --- | --- |
-| 005-A | Evaluation contracts [CAP-EVL-001](capability-catalog.md#cap-evl-001) | 004, DEC-008 and authorized budgets; identified datasets/oracles/baselines, hidden/held-out/negative cases, reproducible traces and resource/cost records |
+| 005-A | Evaluation contracts [CAP-EVL-001](capability-catalog.md#cap-evl-001) | 004, DEC-008 and authorized budgets; identified datasets/oracles/baselines, hidden/held-out/negative cases, permitted reproducible traces and candidate/model/harness/tool/environment context, complete attempt/error/skip denominators, protected judgment/accounting and observed resource/cost records |
 | 005-B | Proposed changes [CAP-EVO-001](capability-catalog.md#cap-evo-001) | 005-A; distinct candidates for all approved proposal categories, impact/evaluation/rollback plans, inspectable rejected/deferred dispositions without activation |
-| 005-C | Promotion [CAP-EVO-002](capability-catalog.md#cap-evo-002), regressions [CAP-EVL-002](capability-catalog.md#cap-evl-002), skill promotion CAP-SKL-002 | 005-A/B; proposer/approver separation, external authorization where needed, no recursive privilege/oracle/gate bypass, rollback/recovery, reward-hacking and held-out regression cases |
+| 005-C | Promotion [CAP-EVO-002](capability-catalog.md#cap-evo-002), regressions [CAP-EVL-002](capability-catalog.md#cap-evl-002), skill promotion CAP-SKL-002 | 005-A/B; proposer/approver separation, external authorization where needed, no recursive privilege/oracle/gate bypass, rollback/recovery, reward-hacking/held-out regressions and controlled comparisons retaining failed/incomplete attempts |
 
 Exit requires retained audited decisions and real evaluation evidence. Model and
 harness contributions are measured separately where identifiable, with limits
@@ -162,9 +186,9 @@ or superiority claim is justified before actual measurement.
 
 | Increment | Scope/capabilities | Exit evidence |
 | --- | --- | --- |
-| 006-A | Authority/evidence/temporal coherence across CORE, EVD, MEM, WFL, EVO, SEC | Whole-path candidate and policy correspondence, stale-input invalidation, no approval from data, no self-promotion, privacy propagation and retained audit |
+| 006-A | Authority/evidence/temporal coherence across CORE, EVD, MEM, WFL, EVO, SEC | Whole-path candidate/policy/verification-context correspondence, effect-boundary authority and unknown-effect reconciliation, stale-input invalidation, distinct integrated candidates with affected revalidation, no approval from data or self-promotion, privacy propagation and retained audit |
 | 006-B | Real host/backend/security/portability coverage for HRN, SEC, EVL | Observed supported matrix, actual path/network/tool/resource denial, replay/recovery and supply-chain checks; unsupported environments explicit |
-| 006-C | Unified query/context/handoff/CLI integration for KNW, MEM, CTX, CLI | Composable/history query meaning, portable provenance-preserving exports, context limits, actual cross-adapter compatibility, coherent human/machine diagnostics |
+| 006-C | Unified query/context/handoff/CLI integration for KNW, MEM, CTX, CLI | Composable/history query meaning, portable provenance-preserving exports, context limits, actual cross-adapter compatibility, coherent human/machine diagnostics and a documented setup/verification path for integrated workflows under the proportional engineering requirements |
 | 006-D | Optional integration boundary validation under HRN/CTX | Tested absence and failure of optional integrations; no bypass, silent authority change, lost evidence, or essential paid dependency. Test selected optional protocols/backends when actually enabled |
 
 All mandatory contracts scheduled through 006 must satisfy their full functional
@@ -179,6 +203,7 @@ claim follows from milestone numbering.
 
 Deliver [CAP-CLI-006](capability-catalog.md#cap-cli-006): resolve license, brand,
 contribution/IP and release-scope decisions; inspect repository/history/privacy;
+demonstrate CAP-CLI-006's contributor walkthrough without private chat history;
 prepare distribution, versioning, operation/support documentation and an assessed
 release candidate. Complete applicable security/supply-chain and environment
 verification, recording limitations. Exit evidence is a reviewed candidate and

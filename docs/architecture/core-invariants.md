@@ -8,14 +8,15 @@ and their acceptance cases live in [the catalog](../product/capability-catalog.m
 ## INV-001
 
 **Authority cannot amplify itself.** A consequential invocation requires a typed,
-core-governed decision applicable to its principal, operation, target, candidate,
-tools, budgets, and policy version, plus any required operator/external approval.
-The host boundary must check and enforce the decision when the action occurs.
+core-governed decision applicable to its principal, operation, actual resource
+identity, scope, candidate or execution context, tools, budgets and policy version,
+plus any required operator/external approval. The host boundary must check and
+enforce the applicable decision and constraints where the effect occurs.
 A proposal, skill, workflow, harness, recovered memory, or tool response cannot
 extend that decision, approve itself, change its evaluator, or authorize a child
-with broader effective authority. Expired, absent, ambiguous, or mismatched
-authority blocks the affected operation. An external integration cannot bypass
-this path because its input arrived through another protocol.
+with broader effective authority. Expired, absent, ambiguous, mismatched,
+incomplete or indeterminate authority blocks the affected operation. An external
+integration cannot bypass this path because its input arrived through another protocol.
 
 Inspection and discovery do not execute a skill or workflow. Read permission does
 not imply write, network, subprocess, or data-export permission. These distinctions
@@ -28,7 +29,8 @@ proposals/statements, tool observations, inferred claims, assessments, operator
 authorizations, and recorded state transitions distinguishable. A process result
 is an observation about a mechanism, not automatically an acceptance judgment.
 
-The planned unified assessment vocabulary is:
+The unified result vocabulary, implemented in the bounded
+[002-C model](unified-evidence.md) and required for future assessments, is:
 
 | Result | Required meaning |
 | --- | --- |
@@ -42,10 +44,15 @@ The planned unified assessment vocabulary is:
 Applicability distinguishes applicable, not applicable, and uncertain cases.
 Only demonstrated absence supports `N/A`. Uncertain applicability cannot support
 `PASS` or `N/A`. Missing tools, time, access, or evidence are not absence.
-Validity is independent: `CURRENT` means the dependency/candidate context remains
-applicable; `STALE` means it no longer does. A stored historical `PASS` can be
+Validity is independent: `CURRENT` means supporting observations correspond to
+the requested candidate/dependency context within their declared coverage; `STALE`
+marks a known relevant mismatch or invalidation. A stored historical `PASS` can be
 `STALE`; displaying it as current success is forbidden. No current-readiness
 claim can use stale evidence without new justification and verification.
+CURRENT/STALE describe validity, not criterion applicability. The 002-C types keep
+`AssessmentResult`, `Applicability` and `Validity` distinct; missing validity is
+`None` (displayed UNESTABLISHED), not a new applicability state or implicit CURRENT.
+Legacy `Inconclusive` is not silently converted into these distinctions.
 
 Zero exit, zero relevant tests, model confidence, missing observations, and a
 narrative of intended work cannot independently establish `PASS`. Required gates
@@ -68,15 +75,16 @@ decided before their implementation.
 For parallel work, the shared base and each execution/integrated candidate remain
 distinct. Integration changes the assessed material: branch-local `PASS` does not
 establish integrated `PASS`; detect semantic/interface conflicts and revalidate
-affected gates on the integrated candidate. A Portable Context Package identifies
-its project and snapshot. Snapshot reasoning without live repository access must
+affected gates on the integrated candidate. A successful Git merge alone establishes
+neither semantic compatibility nor verification of the integrated result.
+A Portable Context Package identifies its project and snapshot. Snapshot reasoning without live repository access must
 not be presented as live verification.
 
 ## INV-004
 
 **Provenance is universal.** Material knowledge, memory, requirements, decisions,
-and observations need identities, source/version references, and temporal/validity
-semantics. Evidence identifies its task/criterion, candidate, mechanism and
+observations and operational state need identities, source/version references and
+temporal/validity semantics. Evidence identifies its task/criterion, candidate, mechanism and
 version, inputs, configuration, environment, relevant component versions,
 observation/recording time, observed outcome, evaluator when applicable, and
 limitations. Skill and harness execution references are exact immutable versions
@@ -84,6 +92,13 @@ when those components participate. Absent components are explicitly inapplicable
 not invented versions. Inferences identify their supporting observations and
 derivation mechanism. Hashes support byte correspondence; they do not prove
 authorship, permission, semantic truth, or completeness.
+
+For future verification mechanisms, context identity also covers relevant toolchain/
+runtime versions, criterion/oracle definition and version, and declared analysis
+coverage/exclusions. Environment differences capable of changing a conclusion must
+participate in validity decisions. Producers declare what they actually observed;
+claims cannot exceed that coverage. This strengthens future producer/consumer
+contracts without enlarging the implemented 002-C/002-D interfaces or guarantees.
 
 ## INV-005
 
@@ -95,7 +110,9 @@ as relevant. A later correction must not silently rewrite what was known earlier
 Changes to declared inputs, contracts, mechanisms, versions, or configuration
 invalidate dependent conclusions. Unaffected material retains validity only with
 a justified dependency/non-impact basis; uncertainty must remain visible.
-Recovery of old memory cannot make it current by recall alone.
+Recovery of old memory cannot make it current by recall alone. Insufficient declared
+dependency coverage cannot establish CURRENT for the requested property; uncertainty
+must remain distinct from a demonstrated invalidation.
 
 Canonical events/references preserve constraints across sessions. Chat compaction
 or a guessed token threshold cannot determine which accepted requirements survive;
@@ -111,7 +128,10 @@ are forbidden without their respective guards and supporting records. Missing
 postconditions/evidence block completion. Restart/replay must preserve recorded
 decisions and detect changed dependencies; it must not blindly repeat external
 effects or synthesize unobserved outputs. Crash safety and effect reconciliation
-require demonstrated behavior before durable workflows are claimed.
+require demonstrated behavior before durable workflows are claimed. In particular,
+interruption after dispatch does not prove the absence of an external effect;
+unknown outcomes require reconciliation or an explicit blocked path under the
+operation's retry/idempotency contract (CAP-WFL-001), not blind replay.
 
 ## INV-007
 
@@ -162,22 +182,28 @@ and physical costs must be represented honestly.
 
 ## INV-011
 
-**Completeness, proportionality, and portability need proof.** Each targeted
-capability must satisfy its whole functional contract. Advanced properties are
+**Completeness, maintainability, proportionality, and portability need proof.**
+Each targeted capability must satisfy its whole functional contract. Advanced properties are
 separate obligations, not substitutes for missing baseline behavior. Select
 trivial/standard/critical methods by auditable rules; neither automatic multi-agent
 ceremony for trivial work nor bypass of qualified review for critical work is
 acceptable. Compatibility is scoped to observed adapter/host configurations.
 Performance and comparative claims identify actual procedures, baselines, resource
 costs, and limitations. Unperformed evaluations remain `NOT_RUN`.
+The [maintainability and contributor acceptance requirements](../engineering-principles.md#maintainability-and-contributor-experience)
+apply proportionally across future milestone exits; their walkthrough is a future
+verification obligation, not a claim that external contributor usability is proven.
 
 ## INV-012
 
 **History and privacy have explicit owners.** Canonical history is logically
-append-only with corrections and supersession links. Transient and ephemeral data
+append-only with corrections and supersession links as a planned logical contract,
+not an unconditional physical-retention guarantee. Transient and ephemeral data
 have distinct retention rules. This does not prohibit authorized privacy-driven
 physical deletion: deletion must propagate to derived indexes, caches, and exports
 under the chosen policy. Retain only authorized non-sensitive audit information;
 a tombstone must not recreate the erased payload. Missing historical data remains
 an explicit limit, never a fabricated reconstruction. Defaults and backup/export
-handling require a privacy decision before persistence is enabled.
+handling require a privacy decision before persistence is enabled under DEC-004.
+Useful execution evidence does not authorize unrestricted sensitive trace capture
+or raw-output retention; their scope and omission policy remain explicit decisions.
