@@ -351,34 +351,65 @@ pub fn inspect_candidate(
     contract: &CandidateBindingContract,
     id: ObservationId,
 ) -> Result<CandidateObservation, InspectionError> {
-    let observation = inspect(path)?;
-    let sample = observation.sample;
-    let repository = RepositoryIdentity::new(sample.root, sample.git_dir, sample.common_dir)
-        .map_err(InspectionError::InvalidObservation)?;
-    let state = RepositoryState::new(
-        Some(repository),
-        sample.head,
-        sample.entries,
-        ObservationCoverage::GitStatus,
-        ObservationConsistency::TwoMatchingSamples,
-    )
-    .map_err(InspectionError::InvalidObservation)?;
-    // Framing prevents ambiguous concatenation. These bytes compare the producer's
-    // observed config/index/status, never claim to identify uncommitted contents.
-    let mut material = Vec::new();
-    for part in [sample.configuration, sample.index, sample.status] {
-        material.extend_from_slice(&(part.len() as u64).to_le_bytes());
-        material.extend_from_slice(&part);
+    inspect(path)?.into_candidate(contract, id)
+}
+
+impl RepositoryObservation {
+    /// Inspect the captured Git executable version, not a caller-supplied value.
+    pub fn git_version(&self) -> &str {
+        &self.git_version
     }
-    let profile = format!(
-        "002-A-v1:{}:{}-{}",
-        observation.git_version,
-        std::env::consts::OS,
-        std::env::consts::ARCH
-    );
-    let basis =
-        ComparisonBasis::new(&profile, material).map_err(InspectionError::InvalidObservation)?;
-    Ok(CandidateObservation::new(id, contract, state, Some(basis)))
+    /// Resolve the typed identity of this completed capture without another Git query.
+    ///
+    /// # Errors
+    /// Returns `InvalidObservation` when the captured locations exceed Core identity bounds.
+    pub fn repository_identity(&self) -> Result<RepositoryIdentity, InspectionError> {
+        RepositoryIdentity::new(
+            self.sample.root.clone(),
+            self.sample.git_dir.clone(),
+            self.sample.common_dir.clone(),
+        )
+        .map_err(InspectionError::InvalidObservation)
+    }
+    /// Consume this actual capture at the existing typed boundary; no state is recaptured.
+    /// Contract and ID are assertions supplied by the integration, not authenticated facts.
+    ///
+    /// # Errors
+    /// Returns `InvalidObservation` if captured state, paths or comparison material
+    /// exceed the existing Core validation bounds.
+    pub fn into_candidate(
+        self,
+        contract: &CandidateBindingContract,
+        id: ObservationId,
+    ) -> Result<CandidateObservation, InspectionError> {
+        let sample = self.sample;
+        let repository = RepositoryIdentity::new(sample.root, sample.git_dir, sample.common_dir)
+            .map_err(InspectionError::InvalidObservation)?;
+        let state = RepositoryState::new(
+            Some(repository),
+            sample.head,
+            sample.entries,
+            ObservationCoverage::GitStatus,
+            ObservationConsistency::TwoMatchingSamples,
+        )
+        .map_err(InspectionError::InvalidObservation)?;
+        // Framing prevents ambiguous concatenation. These bytes compare the producer's
+        // observed config/index/status, never claim to identify uncommitted contents.
+        let mut material = Vec::new();
+        for part in [sample.configuration, sample.index, sample.status] {
+            material.extend_from_slice(&(part.len() as u64).to_le_bytes());
+            material.extend_from_slice(&part);
+        }
+        let profile = format!(
+            "002-A-v1:{}:{}-{}",
+            self.git_version,
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        );
+        let basis = ComparisonBasis::new(&profile, material)
+            .map_err(InspectionError::InvalidObservation)?;
+        Ok(CandidateObservation::new(id, contract, state, Some(basis)))
+    }
 }
 
 fn inspect_between(

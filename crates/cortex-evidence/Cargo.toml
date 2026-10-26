@@ -9,8 +9,5 @@ publish.workspace = true
 [dependencies]
 cortex-core = { path = "../cortex-core" }
 
-[dev-dependencies]
-cortex-cli = { path = "../cortex-cli" }
-
 [lints]
 workspace = true

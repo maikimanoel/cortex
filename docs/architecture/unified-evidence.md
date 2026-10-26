@@ -4,8 +4,9 @@ This is the bounded implementation contract for the library portion of
 [CAP-EVD-002](../product/capability-catalog.md#cap-evd-002). The catalog owns the
 capability contract/status; the [roadmap](../product/roadmap.md#002-first-complete-vertical-slice)
 owns its sequence. The implementation extends [002-B binding](candidate-binding.md)
-without changing [002-A inspection](repository-inspection.md). 002-D CLI integration
-remains planned. Evidence grants no operational authority.
+without changing [002-A inspection](repository-inspection.md).
+[002-D CLI integration](cli-check.md) composes it for one explicit criterion.
+Evidence grants no operational authority.
 
 ## DEC-010: explicit extension, no implicit migration
 
@@ -159,9 +160,10 @@ Text uses the existing 4096-byte UTF-8 bound and control-character restrictions.
 Component lists are capped at 32; candidate bounds remain those of 002-B. Retaining
 an assessment copies its supplied bounded validation context to preserve its basis.
 There is no process/RSS/performance guarantee or unbounded history in this layer.
-Production dependencies remain Evidence -> Core and CLI -> Core. The only new
-Cargo dependency is a workspace-local **dev-dependency** on the CLI library for
-real producer tests; no third-party package is added.
+Production Evidence still depends only on Core. With 002-D, CLI depends on
+Evidence/Core, and real producer integration tests live in the CLI consumer;
+Evidence's former CLI dev-dependency is removed to preserve an acyclic graph.
+The evidence model itself adds no third-party package.
 
 ## Acceptance mechanisms and limits
 
@@ -171,7 +173,7 @@ blocked/not-run/unknown distinctions, source/version/profile mismatch, incomplet
 coverage, sticky invalidation, deterministic repetition, terminal judgments,
 construction bounds, private-text omission, writer failure and legacy preservation.
 A compile-fail doctest rejects implicit legacy verdict conversion.
-[Real-Git tests](../../crates/cortex-evidence/tests/repository_evidence.rs) traverse
+[Real-Git tests](../../crates/cortex-cli/tests/evidence.rs) traverse
 002-A -> 002-B -> Evidence using an actual revision query and explicit comparison.
 They cover clean, dirty, changed/restored, detached, unborn and foreign repositories.
 Repeated clean and dirty checks compare every controlled fixture file/directory,
@@ -182,6 +184,6 @@ existing 002-A/002-B invariance and inspection regressions remain required.
 These are verification mechanisms, not a claim that an arbitrary invocation ran.
 Executed counts, tools, exact candidate tree and delivery evidence belong in the
 external handoff. No independent review, cross-platform assurance, authenticated
-execution, atomic snapshot, privacy policy or hosted CI result is claimed. CAP-EVD-002
-remains IN_PROGRESS across C/D: its 002-C library portion is implemented, while
-[CAP-CLI-003](../product/capability-catalog.md#cap-cli-003) and 002-D remain PLANNED.
+execution, atomic snapshot, privacy policy or hosted CI result is claimed.
+CAP-EVD-002's bounded C/D contract is implemented with the
+[002-D CLI path](cli-check.md); transitive validity/interchange remains planned.

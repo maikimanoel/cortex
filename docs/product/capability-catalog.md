@@ -154,7 +154,7 @@ separate model; legacy values and `Inconclusive` are not implicitly converted.
 ### CAP-EVD-002
 
 **Name:** Unified observations and inspectable assessments.
-**Status:** IN_PROGRESS; 002-C library contract implemented, 002-D CLI integration planned.
+**Status:** IMPLEMENTED for the bounded 002-C/002-D contract.
 **Owner:** Evidence. **Target:** 002-C/002-D.
 **Dependencies:** CAP-CORE-002; extends CAP-EVD-001 without erasing its meaning.
 
@@ -182,15 +182,21 @@ references, versioned mechanism context and reported observation/recording/asses
 times. Independent result/applicability/contextual-validity checks reject unsupported
 success, zero-check acceptance and missing applicability. Known invalidation is
 sticky without rewriting terminal results. Full typed inspection and a redacted,
-non-versioned library writer expose the basis and limits. No legacy conversion,
-runner, authenticated capture, persistence or new CLI command is provided.
+non-versioned library writer expose the basis and limits. The
+[002-D check](../architecture/cli-check.md) adds actual CLI capture/comparison,
+versioned redacted JSON and human output without legacy conversion, a runner,
+authenticated capture or persistence.
 
 **Verification mechanisms:** [Semantic and negative tests](../../crates/cortex-evidence/tests/unified.rs),
-[real-Git cross-crate fixtures](../../crates/cortex-evidence/tests/repository_evidence.rs),
+[real-Git cross-crate fixtures](../../crates/cortex-cli/tests/evidence.rs),
 redaction/I/O tests and a legacy-conversion compile-fail doctest. Executed results
-are candidate-scoped external evidence, not these source links. Full CLI output/exit
-integration remains NOT_RUN until 002-D. **Decisions:** DEC-010 resolved for 002-C;
-DEC-007 scoped identity/time relationships resolved, CLI output/formats deferred.
+are candidate-scoped external evidence, not these source links.
+[CLI output/exit/privacy fixtures](../../crates/cortex-cli/tests/check.rs) and
+[controlled composition tests](../../crates/cortex-cli/src/check/tests.rs) cover
+002-D, including false propositions, failed reinspection and unresolved candidates.
+Failures before any source capture are explicit operational errors without
+fabricated assessments. **Decisions:** DEC-010 resolved for 002-C; DEC-007 resolved
+for 002-C identities/time and minimum 002-D CLI input/output, with later formats deferred.
 
 ### CAP-EVD-003
 
@@ -921,7 +927,7 @@ runner budgets, snapshot identity and later extraction remain open.
 ### CAP-CLI-003
 
 **Name:** First complete task-to-evidence inspection path.
-**Status:** PLANNED.
+**Status:** IMPLEMENTED.
 **Owner:** CLI/delivery integrating core/evidence. **Target:** 002-D.
 **Dependencies:** CAP-CLI-002, CAP-CORE-002, CAP-EVD-002.
 
@@ -939,8 +945,18 @@ the assessed task result.
 **Acceptance:** End-to-end fixtures begin with a real repository and task, produce
 candidate-bound evidence, and inspect it without relabeling. Mismatch, absent
 prerequisite, insufficient evidence, and invalid inputs remain distinguishable.
-**Verification:** NOT_RUN; full CLI/core/evidence integration, output and exit
-contract tests. **Decisions:** DEC-007/010; 002-A alone does not satisfy this entry.
+**Implemented scope:** [002-D's CLI contract](../architecture/cli-check.md) supplies
+`cortex check` for fixed criterion `git.head-equals.v1`, explicit task/revision,
+separate candidate pin/expected HEAD, bounded actual inspections, Core binding and
+Evidence assessment. Human and v1 JSON output preserve dimensions, provenance,
+uncertainty and privacy omissions. A different supported HEAD can FAIL the
+proposition; a wrong pin/dirty/uncertain candidate cannot establish current acceptance.
+
+**Verification mechanisms:** [Actual executable fixtures](../../crates/cortex-cli/tests/check.rs),
+[controlled boundary tests](../../crates/cortex-cli/src/check/tests.rs) and unchanged
+002-A/B/C regressions. Candidate-scoped executed results belong in the external
+handoff. **Decisions:** minimum DEC-007 resolved for this CLI; DEC-010 preserved.
+No arbitrary engineering-task oracle, runner or authenticated execution is implied.
 
 ### CAP-CLI-004
 

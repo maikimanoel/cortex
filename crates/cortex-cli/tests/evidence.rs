@@ -1,13 +1,12 @@
 //! CAP-EVD-002 real Git -> 002-A adapter -> 002-B binding -> evidence integration.
 
-#[path = "../../cortex-cli/tests/support/mod.rs"]
-mod git_fixture;
+mod support;
 
 use cortex_cli::inspect_candidate;
 use cortex_core::{CandidateId, TaskContract, TaskId, binding::*};
 use cortex_evidence::{ExecutionObservation, Provenance, unified::*};
-use git_fixture::Repo;
 use std::{collections::BTreeMap, fs, path::PathBuf, time::SystemTime};
+use support::Repo;
 
 fn contract(repo: &Repo) -> CandidateBindingContract {
     let root = repo.path.canonicalize().unwrap();

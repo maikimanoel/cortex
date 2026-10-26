@@ -5,7 +5,8 @@ This is the bounded implementation contract for
 [002-A inspection](repository-inspection.md), preserving the foundation APIs and
 [INV-001 through INV-005](core-invariants.md). It does not implement evidence
 assessment, execution permission, task completion, persistent history or snapshots.
-[002-C evidence](unified-evidence.md) consumes this boundary; 002-D remains planned.
+[002-C evidence](unified-evidence.md) and [002-D CLI check](cli-check.md) consume
+this boundary without changing its semantics.
 
 ## Decision A: identities and contract revisions
 
@@ -170,4 +171,5 @@ These sources are verification mechanisms. Actual command outcomes, counts,
 versions, candidate tree and private delivery observations belong to the external
 candidate-scoped handoff. This contract claims no independent verification,
 authenticated producer, cross-platform acceptance, complete snapshot or hosted CI
-result. The catalog records CAP-CORE-002 as `IMPLEMENTED`; 002-D remains planned.
+result. The catalog records CAP-CORE-002 as `IMPLEMENTED`; 002-D composes this
+contract through the existing adapter, without identifying dirty snapshots.

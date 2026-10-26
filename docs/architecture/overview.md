@@ -14,8 +14,8 @@ The Cortex foundation contains these actual crates:
 | Crate | Current responsibility | Dependency |
 | --- | --- | --- |
 | `cortex-core` | Foundation contracts, contract revisions, typed repository state and candidate/task binding | Standard library only |
-| `cortex-evidence` | Legacy evidence plus unified result/applicability/validity, versioned context and redacted inspection | `cortex-core` (CLI library only as a test dev-dependency) |
-| `cortex-cli` | Help/version, bounded read-only Git inspection, typed Core adapter and errors | `cortex-core`; local Git and util-linux runtime tools |
+| `cortex-evidence` | Legacy evidence plus unified result/applicability/validity, versioned context and redacted inspection | `cortex-core` |
+| `cortex-cli` | Help/version, bounded Git observation and task-to-evidence CLI check with human/JSON output | `cortex-core`, `cortex-evidence`, JSON serializer; local Git and util-linux |
 
 The accepted [0001 foundation decision](0001-foundation.md) is authoritative for
 those bounded design choices. Rust 1.99.1, edition 2024,
@@ -27,7 +27,8 @@ the CLI package, exposed through its library adapter as well as the executable.
 Core performs no filesystem/process/clock access. [002-C unified evidence](unified-evidence.md)
 consumes those observations programmatically, preserving legacy semantics. It adds
 independent result/applicability/contextual-validity and caller-reported time;
-002-D CLI integration remains planned. Policy enforcement, durable workflows,
+[002-D CLI integration](cli-check.md) now composes one committed-HEAD criterion.
+Policy enforcement, durable workflows,
 persistence, knowledge indexing, agent harnesses and temporal history remain planned.
 
 ## Logical areas and dependency direction
@@ -73,7 +74,8 @@ This is the planned agentic path, not an implemented pipeline. Read-only local
 inspection is the first smaller path: repository input -> bounded Git observation
 -> candidate/contract binding -> evidence -> CLI inspection. It does not require
 an agent, network service, or persistent store. `cortex inspect` alone closes only
-002-A; the complete first slice also requires 002-B, 002-C, and 002-D.
+002-A; `cortex check` completes the bounded first slice by composing 002-B/C/D.
+It checks only committed-HEAD equality; it provides no general task execution.
 
 Before a consequential tool invocation, core policy must check identity, scope,
 target, candidate, tools, and budgets plus external/operator authorization where

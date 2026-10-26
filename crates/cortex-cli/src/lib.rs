@@ -1,7 +1,8 @@
 //! Bounded local Git observation adapter for Cortex domain consumers.
 //!
-//! This entry point exposes existing inspection without a new CLI command or
-//! dependency from Core to infrastructure. No stable serialization is promised.
+//! This library exposes inspection and its typed adapter. The binary separately
+//! composes Core/Evidence for the bounded check command. Core remains independent
+//! of infrastructure; library types have no serialization compatibility promise.
 
 mod inspection;
 

@@ -93,8 +93,9 @@ It validates in-memory task/evidence values, observes supported repositories,
 compares candidate observations against explicit task revisions and independently
 represents assessment result, applicability and contextual validity with reported
 times. Binding does not create an assessment. The CLI prints help/version/inspection;
-task binding and unified evidence remain programmatic pending 002-D. It does not
-yet enforce task permissions, execute agents or persist temporal history.
+`cortex check` now composes task binding and unified evidence for one bounded
+committed-HEAD equality criterion, with human/JSON output. It does not enforce task
+permissions, execute agents or persist temporal history.
 The [roadmap](roadmap.md) schedules that work;
 plans are not execution authorization or evidence of delivery.
 

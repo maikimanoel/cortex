@@ -8,9 +8,10 @@ identity, and the conditions under which observations can support an engineering
 judgment. Future agents may propose or perform authorized work within those
 boundaries. Projects engineered with Cortex do not need to contain AI.
 
-**002-A/B/C provide bounded Git inspection, task binding and unified evidence semantics.**
-The binary supports `cortex inspect`, help and version information. The libraries retain the
-foundation APIs, add deterministic binding through typed observations, and distinguish
+**Milestone 002 delivers a bounded task-to-evidence CLI slice.**
+`cortex inspect` observes repositories; `cortex check` evaluates committed-HEAD
+equality with explicit task/revision and candidate-bound evidence. Help/version
+remain available. The libraries retain foundation APIs and independently represent
 assessment result, applicability and contextual evidence validity. There are no agents,
 task runners, persistence, providers, network services, background workers or telemetry.
 
@@ -32,28 +33,47 @@ the blueprint without changing runtime behavior.
 | [Open decisions](docs/decisions/open-decisions.md) | Unresolved policies and proposed decision points |
 | [Foundation decision](docs/architecture/0001-foundation.md) | Preserved accepted design of the current implementation |
 
-Milestone 002 remains incomplete: 002-A inspection, 002-B task/candidate binding
-and 002-C evidence library semantics are implemented; 002-D CLI integration remains
-planned. See the [inspection contract](docs/architecture/repository-inspection.md),
-[binding contract](docs/architecture/candidate-binding.md) and
-[evidence contract](docs/architecture/unified-evidence.md) for their supported
-scope, limits and acceptance mechanisms. Binding and unified evidence are library
-APIs; `cortex inspect` continues to observe repositories without creating task
-bindings or assessments.
+002-A/B/C/D implement the bounded first slice. See the
+[inspection contract](docs/architecture/repository-inspection.md),
+[binding contract](docs/architecture/candidate-binding.md),
+[evidence contract](docs/architecture/unified-evidence.md) and
+[CLI check contract](docs/architecture/cli-check.md) for scope, limits and acceptance
+mechanisms. `cortex inspect` continues to create no binding or assessment. `check`
+verifies one explicit Git proposition; it does not establish general software
+correctness. Milestones 003 and later remain planned, requiring separate authority.
 
 ## Run locally
 
 Install the toolchain specified in `rust-toolchain.toml` using Rustup. Rust 1.99.1
 with rustfmt and Clippy is pinned; Rust 2024 and Cargo resolver 3 are used.
-Once that toolchain is installed, this workspace has no third-party Rust
-dependencies and builds offline.
+With that toolchain and the locked dependency cache installed, the workspace
+builds offline. The CLI uses a JSON serializer; Core and Evidence still use only
+the standard library and the existing Core dependency. No runtime network service
+is required.
 
 ```sh
 cargo run --offline --locked -p cortex-cli -- --help
 cargo run --offline --locked -p cortex-cli -- --version
 cargo run --offline --locked -p cortex-cli -- inspect
 cargo run --offline --locked -p cortex-cli -- inspect --repo "/path/to/repository"
+cargo run --offline --locked -p cortex-cli -- check --help
 ```
+
+For a bounded task, supply full lowercase commit IDs:
+
+```sh
+cortex check --task release.head --revision 1 \
+  --candidate "$SUBJECT_COMMIT" --expect-head "$REQUIRED_COMMIT" --repo "/path/to/repository"
+cortex check --json --task release.head --revision 1 \
+  --candidate "$SUBJECT_COMMIT" --expect-head "$REQUIRED_COMMIT" --repo "/path/to/repository"
+```
+
+The candidate pin identifies the subject, while expected HEAD is the checked
+proposition. Check exits 0 only for CURRENT PASS, 8 for CURRENT FAIL, and 9 when
+unresolved; operational failures retain codes 1..7. `--json` must immediately
+follow `check`. Schema version 1 preserves dimensions, identities, provenance and
+limits; task revision is a decimal string. See the [full interface](docs/architecture/cli-check.md).
+A stable dirty candidate remains UNKNOWN/UNESTABLISHED, even with matching HEAD.
 
 The executable is named `cortex`. No arguments and `-h` also print help; `-V`
 prints the version. Unsupported or additional arguments exit with code 2 without
@@ -82,17 +102,19 @@ these are not sandbox or hard real-time guarantees.
 | --- | --- |
 | `cortex-core` | Foundation contracts, explicit contract revisions, typed repository state and scoped candidate/task binding |
 | `cortex-evidence` | Legacy reports plus unified candidate-bound result, applicability, validity and redacted library inspection |
-| `cortex-cli` | Help/version, bounded Git inspection, typed Core adapter and observation presentation |
+| `cortex-cli` | Help/version, bounded Git inspection, typed adapter and human/JSON task-to-evidence check |
 
-Both `cortex-evidence` and `cortex-cli` depend on `cortex-core`. The inspection
+The production direction is CLI -> Evidence -> Core, with CLI also using Core.
+The inspection
 adapter supplies actual observations to Core's binding boundary. Foundation
 `TaskContract`, `CandidateId` and evidence APIs retain their meanings. A binding
 retains its exact task revision and scoped observations; it grants no authority,
 does not assess software and does not identify dirty bytes. Reobservation ordering
 is producer-supplied, and trusted integration must actually capture current state.
-No production library depends on the CLI or an agent framework. Evidence tests
-use the existing CLI inspection library through a workspace-local dev-dependency.
-All packages have `publish = false`; version 0.1.0 carries no stable API commitment.
+Core and Evidence do not depend on the CLI. Real-Git evidence integration tests
+live in the CLI consumer, preserving an acyclic graph. All packages have
+`publish = false`; version 0.1.0 carries no general stable library API commitment.
+The narrowly versioned CLI JSON projection is documented separately.
 
 An execution report and a semantic judgment are different values. A newly
 constructed evidence record has no assessment, even when its exit code is zero.
@@ -116,6 +138,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 cargo run --locked -p cortex-cli -- --help
 cargo run --locked -p cortex-cli -- --version
 cargo run --locked -p cortex-cli -- inspect
+cargo run --locked -p cortex-cli -- check --help
 git diff --check
 git diff --cached --check
 git status --short
@@ -128,6 +151,8 @@ tests cover invalid revisions, stale/mismatched/incomplete inputs and real-Git
 translation, including dirty bytes hidden by identical status. Unified evidence
 tests cover independent dimensions, unsupported success, exact context/version
 mismatch, sticky invalidation, legacy compatibility, redaction and real Git reports.
+Actual `check` subprocess tests cover supported/refuted criteria, parsed JSON,
+non-successful binding, explicit errors and repeated read-only operation.
 Inspection permission fixtures require a non-root Linux user; all fixtures are local/offline.
 Validate relative links and anchors in changed Markdown documentation as well.
 Passing tests support these scoped contracts, not comprehensive correctness or
@@ -135,7 +160,8 @@ security certification.
 
 The GitHub Actions workflow has only `workflow_dispatch`, read-only repository
 permissions, and a bounded job timeout. It is prepared for later operator use;
-its presence does not establish a successful remote run. Before dispatching it,
+its presence does not establish a successful remote run. It fetches locked Cargo
+dependencies before offline checks. Before dispatching it,
 establish account usage availability and authorization for hosted execution.
 
 ## Engineering commitments

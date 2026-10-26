@@ -30,7 +30,8 @@ rewriting observations. Actual capture adapters and evaluators remain identifiab
 The existing [002-C in-memory model](unified-evidence.md) adds independent evidence
 dimensions and direct contextual invalidation alongside the preserved foundation
 API. Transitive dependency invalidation, persistent history and interchange remain
-planned; CLI task/evidence integration belongs to 002-D.
+planned. [002-D](cli-check.md) integrates the bounded task/evidence path in the CLI
+without transferring assessment or binding ownership out of their crates.
 
 ## Repository intelligence and unified knowledge index
 

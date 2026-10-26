@@ -1,5 +1,7 @@
 //! The Cortex terminal interface and bounded local repository inspection.
 
+mod check;
+
 use cortex_cli as inspection;
 
 use std::{
@@ -14,6 +16,7 @@ const HELP: &str = "Cortex — evidence-driven software engineering
 
 Usage: cortex [OPTIONS]
        cortex inspect [--repo <PATH>]
+       cortex check [--json] --task <ID> --revision <N> --candidate <OID> --expect-head <OID> [--repo <PATH>]
 
 Options:
   -h, --help       Print help
@@ -21,6 +24,8 @@ Options:
 
 Commands:
   inspect         Observe a local Git worktree (default: current directory)
+  check           Check committed-HEAD equality with candidate-bound evidence
+                  Use cortex check --help for scope and exit codes
 
 Inspection does not verify software; no agent execution commands are available.
 ";
@@ -30,6 +35,7 @@ enum CliError {
     InvalidArguments,
     Output(io::Error),
     Inspection(inspection::InspectionError),
+    Check(check::CheckError),
 }
 
 impl fmt::Display for CliError {
@@ -38,6 +44,7 @@ impl fmt::Display for CliError {
             Self::InvalidArguments => f.write_str("unsupported arguments; use --help"),
             Self::Output(_) => f.write_str("could not write command output"),
             Self::Inspection(error) => error.fmt(f),
+            Self::Check(error) => error.fmt(f),
         }
     }
 }
@@ -47,13 +54,21 @@ impl Error for CliError {
         match self {
             Self::Output(error) => Some(error),
             Self::Inspection(error) => Some(error),
+            Self::Check(error) => Some(error),
             Self::InvalidArguments => None,
         }
     }
 }
 
-fn run(mut args: impl Iterator<Item = OsString>, output: &mut impl Write) -> Result<(), CliError> {
+fn run(
+    mut args: impl Iterator<Item = OsString>,
+    output: &mut impl Write,
+    diagnostics: &mut impl Write,
+) -> Result<u8, CliError> {
     let first = args.next();
+    if first.as_deref() == Some(std::ffi::OsStr::new("check")) {
+        return check::run(args, output, diagnostics).map_err(CliError::Check);
+    }
     if first.as_deref() == Some(std::ffi::OsStr::new("inspect")) {
         let path = match args.next() {
             None => OsString::from("."),
@@ -68,7 +83,10 @@ fn run(mut args: impl Iterator<Item = OsString>, output: &mut impl Write) -> Res
         }
         let observation =
             inspection::inspect(std::path::Path::new(&path)).map_err(CliError::Inspection)?;
-        return observation.write(output).map_err(CliError::Output);
+        return observation
+            .write(output)
+            .map(|()| 0)
+            .map_err(CliError::Output);
     }
     if args.next().is_some() {
         return Err(CliError::InvalidArguments);
@@ -79,18 +97,28 @@ fn run(mut args: impl Iterator<Item = OsString>, output: &mut impl Write) -> Res
         Some("--version" | "-V") => writeln!(output, "cortex {}", env!("CARGO_PKG_VERSION")),
         _ => return Err(CliError::InvalidArguments),
     }
+    .map(|()| 0)
     .map_err(CliError::Output)
 }
 
 fn main() -> ExitCode {
-    match run(std::env::args_os().skip(1), &mut io::stdout().lock()) {
-        Ok(()) => ExitCode::SUCCESS,
+    let mut output = io::stdout().lock();
+    let mut diagnostics = io::stderr().lock();
+    match run(std::env::args_os().skip(1), &mut output, &mut diagnostics) {
+        Ok(code) => ExitCode::from(code),
         Err(error) => {
-            let _ = writeln!(io::stderr().lock(), "cortex: {error}");
+            if let CliError::Check(check) = &error
+                && check.write_machine_error(&mut output).is_err()
+            {
+                let _ = writeln!(diagnostics, "cortex: could not write check output");
+                return ExitCode::FAILURE;
+            }
+            let _ = writeln!(diagnostics, "cortex: {error}");
             match error {
                 CliError::InvalidArguments => ExitCode::from(2),
                 CliError::Output(_) => ExitCode::FAILURE,
                 CliError::Inspection(error) => ExitCode::from(error.exit_code()),
+                CliError::Check(error) => ExitCode::from(error.exit_code()),
             }
         }
     }
@@ -113,7 +141,7 @@ mod tests {
             }
         }
 
-        let error = run(std::iter::empty(), &mut BrokenOutput).unwrap_err();
+        let error = run(std::iter::empty(), &mut BrokenOutput, &mut io::sink()).unwrap_err();
         assert!(
             matches!(error, CliError::Output(ref cause) if cause.kind() == io::ErrorKind::BrokenPipe)
         );

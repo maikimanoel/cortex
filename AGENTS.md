@@ -36,7 +36,8 @@ progressively without claiming unfinished milestones complete.
   depend on core; a CLI command may integrate both. Avoid circular dependencies
   and speculative public interfaces. The inspection adapter supplies typed state
   to Core binding; unified evidence consumes Core observations programmatically.
-  End-to-end CLI evidence integration remains the separately authorized 002-D.
+  The bounded CLI check composes those contracts; later increments still require
+  separate authorization.
 - Use validated construction and typed errors at meaningful boundaries. Keep
   diagnostics useful without repeating private input. Preserve error causes
   where callers need them. Do not introduce unsafe Rust.

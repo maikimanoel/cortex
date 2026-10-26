@@ -82,9 +82,21 @@ retains exact existing task/revision/candidate/capture identities, a separate
 verification observation and assessment identity, versioned verification context
 and caller-reported observation/recording/assessment times. In-memory versions are
 exact references, independent of future format versions. The deliberately redacted
-library summary is not a versioned interchange or CLI schema. Minimum CLI input,
-human/machine outputs and exits remain to be decided before 002-D; persistence,
-Portable Context Packages, memory, graph and harness/transport formats remain deferred.
+library summary is not a versioned interchange or CLI schema. The separate 002-D
+resolution below settles only the minimum CLI interface; persistence, Portable
+Context Packages, memory, graph and harness/transport formats remain deferred.
+
+**002-D scoped resolution:** The [CLI check contract](../architecture/cli-check.md#dec-007-minimum-input-and-criterion)
+selects flag/value task input with explicit task ID/revision and separate subject
+pin/expected HEAD for criterion `git.head-equals.v1`. It uses human output by default
+and `check --json` for a bounded version 1 projection, typed error/uncertainty
+categories, explicit operational versus assessment exits and lossless byte encoding.
+Task revision is a decimal string in JSON. The serializer avoids hand-written JSON
+escaping; no generalized task/configuration language or storage schema is introduced.
+The linked contract specifies fields, limits, privacy and compatibility. Existing
+library APIs and 002-C semantics remain unchanged. Broader formats, persisted
+identity/history, portable interchange and API commitments remain open at their
+original milestone boundaries.
 
 ## DEC-008
 
