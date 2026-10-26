@@ -17,5 +17,6 @@ version = "0.1.0"
 name = "cortex-evidence"
 version = "0.1.0"
 dependencies = [
+ "cortex-cli",
  "cortex-core",
 ]

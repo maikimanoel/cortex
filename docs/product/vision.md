@@ -87,12 +87,15 @@ and performance claims require observations in the stated environments.
 The current implementation retains the three-crate foundation described in the
 [accepted foundation decision](../architecture/0001-foundation.md) and adds
 [002-A bounded local Git inspection](../architecture/repository-inspection.md) and
-[002-B typed candidate/task binding](../architecture/candidate-binding.md).
-It validates in-memory task/evidence values, observes supported repositories, and
-compares candidate observations against explicit task revisions. The CLI prints
-help/version/inspection; bindings are programmatic and create no assessments.
-It does not yet enforce task permissions, execute agents, persist history or implement temporal
-provenance. The [roadmap](roadmap.md) schedules that work;
+[002-B typed candidate/task binding](../architecture/candidate-binding.md), plus
+[002-C unified evidence](../architecture/unified-evidence.md).
+It validates in-memory task/evidence values, observes supported repositories,
+compares candidate observations against explicit task revisions and independently
+represents assessment result, applicability and contextual validity with reported
+times. Binding does not create an assessment. The CLI prints help/version/inspection;
+task binding and unified evidence remain programmatic pending 002-D. It does not
+yet enforce task permissions, execute agents or persist temporal history.
+The [roadmap](roadmap.md) schedules that work;
 plans are not execution authorization or evidence of delivery.
 
 Cortex does not promise infallibility, universal compatibility, or objectively

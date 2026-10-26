@@ -5,8 +5,9 @@ It resolves the inspection portions of [DEC-005](../decisions/open-decisions.md#
 and [DEC-011](../decisions/open-decisions.md#dec-011). It does not bind tasks, create
 snapshot identities, persist evidence, assess software, or grant permission.
 [002-B binding](candidate-binding.md) now consumes this inspection through a typed
-library adapter. Milestones 002-C/D remain planned; the inspection command still
-creates no task binding or assessment. The accepted foundation APIs are unchanged.
+library adapter, also used by [002-C evidence](unified-evidence.md). 002-D remains
+planned; the inspection command still creates no task binding or assessment.
+The accepted foundation APIs are unchanged.
 
 ## Interface and meaning
 

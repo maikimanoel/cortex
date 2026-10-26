@@ -35,7 +35,8 @@ progressively without claiming unfinished milestones complete.
 - Keep `cortex-core` independent of infrastructure and the CLI. Evidence may
   depend on core; a CLI command may integrate both. Avoid circular dependencies
   and speculative public interfaces. The inspection adapter supplies typed state
-  to Core binding; evidence integration remains a future increment.
+  to Core binding; unified evidence consumes Core observations programmatically.
+  End-to-end CLI evidence integration remains the separately authorized 002-D.
 - Use validated construction and typed errors at meaningful boundaries. Keep
   diagnostics useful without repeating private input. Preserve error causes
   where callers need them. Do not introduce unsafe Rust.

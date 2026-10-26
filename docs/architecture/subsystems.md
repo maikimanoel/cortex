@@ -27,7 +27,10 @@ their mechanisms/inputs/configuration/versions/time, not claims of success as
 trusted commands. Produces scoped judgments with reasons and limitations; it
 cannot approve an operation. Dependency changes invalidate consumers without
 rewriting observations. Actual capture adapters and evaluators remain identifiable.
-The existing in-memory model implements only its foundation subset.
+The existing [002-C in-memory model](unified-evidence.md) adds independent evidence
+dimensions and direct contextual invalidation alongside the preserved foundation
+API. Transitive dependency invalidation, persistent history and interchange remain
+planned; CLI task/evidence integration belongs to 002-D.
 
 ## Repository intelligence and unified knowledge index
 

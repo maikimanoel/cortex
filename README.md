@@ -8,10 +8,10 @@ identity, and the conditions under which observations can support an engineering
 judgment. Future agents may propose or perform authorized work within those
 boundaries. Projects engineered with Cortex do not need to contain AI.
 
-**Milestones 002-A/B provide bounded Git inspection and typed candidate/task binding.**
+**002-A/B/C provide bounded Git inspection, task binding and unified evidence semantics.**
 The binary supports `cortex inspect`, help and version information. The libraries retain the
-foundation's in-memory contracts and evidence rules; Core adds deterministic
-binding through typed observations and the inspection adapter. There are no agents,
+foundation APIs, add deterministic binding through typed observations, and distinguish
+assessment result, applicability and contextual evidence validity. There are no agents,
 task runners, persistence, providers, network services, background workers or telemetry.
 
 ## Product blueprint
@@ -32,12 +32,14 @@ the blueprint without changing runtime behavior.
 | [Open decisions](docs/decisions/open-decisions.md) | Unresolved policies and proposed decision points |
 | [Foundation decision](docs/architecture/0001-foundation.md) | Preserved accepted design of the current implementation |
 
-Milestone 002 remains incomplete: 002-A inspection and 002-B task/candidate binding
-are implemented. Unified evidence (002-C) and end-to-end CLI integration (002-D)
-remain planned. See the [inspection contract](docs/architecture/repository-inspection.md)
-and [binding contract](docs/architecture/candidate-binding.md) for their supported
-scope, limits and acceptance mechanisms. Binding is a library API; `cortex inspect`
-continues to observe repositories without creating task bindings or assessments.
+Milestone 002 remains incomplete: 002-A inspection, 002-B task/candidate binding
+and 002-C evidence library semantics are implemented; 002-D CLI integration remains
+planned. See the [inspection contract](docs/architecture/repository-inspection.md),
+[binding contract](docs/architecture/candidate-binding.md) and
+[evidence contract](docs/architecture/unified-evidence.md) for their supported
+scope, limits and acceptance mechanisms. Binding and unified evidence are library
+APIs; `cortex inspect` continues to observe repositories without creating task
+bindings or assessments.
 
 ## Run locally
 
@@ -79,7 +81,7 @@ these are not sandbox or hard real-time guarantees.
 | Crate | Current responsibility |
 | --- | --- |
 | `cortex-core` | Foundation contracts, explicit contract revisions, typed repository state and scoped candidate/task binding |
-| `cortex-evidence` | Task/candidate-bound provenance, reported execution status, and explicit assessments |
+| `cortex-evidence` | Legacy reports plus unified candidate-bound result, applicability, validity and redacted library inspection |
 | `cortex-cli` | Help/version, bounded Git inspection, typed Core adapter and observation presentation |
 
 Both `cortex-evidence` and `cortex-cli` depend on `cortex-core`. The inspection
@@ -88,14 +90,19 @@ adapter supplies actual observations to Core's binding boundary. Foundation
 retains its exact task revision and scoped observations; it grants no authority,
 does not assess software and does not identify dirty bytes. Reobservation ordering
 is producer-supplied, and trusted integration must actually capture current state.
-No library depends on the CLI or an agent framework. All packages have
-`publish = false`; version 0.1.0 carries no stable API commitment.
+No production library depends on the CLI or an agent framework. Evidence tests
+use the existing CLI inspection library through a workspace-local dev-dependency.
+All packages have `publish = false`; version 0.1.0 carries no stable API commitment.
 
 An execution report and a semantic judgment are different values. A newly
 constructed evidence record has no assessment, even when its exit code is zero.
-Pass requires an explicitly supplied rationale and a completed zero-exit report.
-These checks cannot establish whether the supplied report or reasoning is true.
-An assessment grants no human authorization.
+The legacy API retains its original zero-exit/rationale preconditions and terminal
+`Inconclusive`. The separate unified model additionally requires applicable,
+CURRENT context, positive relevant checks and an explicit matching oracle for PASS.
+UNKNOWN, NOT_RUN, BLOCKED and examined N/A remain distinct. Known invalidation is
+sticky; a historical PASS can be STALE. Missing validity is UNESTABLISHED. No
+conversion invents legacy metadata. These checks cannot authenticate caller
+reports or establish the truth of their reasoning. Assessments grant no authority.
 
 ## Verify
 
@@ -105,6 +112,7 @@ cargo fmt --all -- --check
 cargo check --workspace --locked
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 cargo run --locked -p cortex-cli -- --help
 cargo run --locked -p cortex-cli -- --version
 cargo run --locked -p cortex-cli -- inspect
@@ -117,8 +125,10 @@ Behavioral tests exercise the CLI as a subprocess, real temporary Git repositori
 read-only content/metadata invariance, resource failures, concurrent-change rejection,
 input boundaries, provenance retention and observation/assessment rules. Binding
 tests cover invalid revisions, stale/mismatched/incomplete inputs and real-Git
-translation, including dirty bytes hidden by identical status. Inspection
-permission fixtures require a non-root Linux user; all fixtures are local/offline.
+translation, including dirty bytes hidden by identical status. Unified evidence
+tests cover independent dimensions, unsupported success, exact context/version
+mismatch, sticky invalidation, legacy compatibility, redaction and real Git reports.
+Inspection permission fixtures require a non-root Linux user; all fixtures are local/offline.
 Validate relative links and anchors in changed Markdown documentation as well.
 Passing tests support these scoped contracts, not comprehensive correctness or
 security certification.

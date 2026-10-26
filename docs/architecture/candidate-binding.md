@@ -5,7 +5,7 @@ This is the bounded implementation contract for
 [002-A inspection](repository-inspection.md), preserving the foundation APIs and
 [INV-001 through INV-005](core-invariants.md). It does not implement evidence
 assessment, execution permission, task completion, persistent history or snapshots.
-002-C and 002-D remain planned.
+[002-C evidence](unified-evidence.md) consumes this boundary; 002-D remains planned.
 
 ## Decision A: identities and contract revisions
 
@@ -119,7 +119,7 @@ not a new complete-candidate ID. Ignored files, byte identity outside Git semant
 unobserved changes, software correctness and execution authority are not established.
 Binding decisions are domain correspondence results, not `Verdict`, `PASS` or a
 conversion of foundation evidence. [DEC-010](../decisions/open-decisions.md#dec-010)
-remains open before 002-C.
+is resolved for the separate 002-C model; binding still never creates an assessment.
 
 ## Decision C: the Core and inspection boundary
 
@@ -170,4 +170,4 @@ These sources are verification mechanisms. Actual command outcomes, counts,
 versions, candidate tree and private delivery observations belong to the external
 candidate-scoped handoff. This contract claims no independent verification,
 authenticated producer, cross-platform acceptance, complete snapshot or hosted CI
-result. The capability catalog records `IMPLEMENTED`; 002-C/D remain planned.
+result. The catalog records CAP-CORE-002 as `IMPLEMENTED`; 002-D remains planned.

@@ -14,7 +14,7 @@ The Cortex foundation contains these actual crates:
 | Crate | Current responsibility | Dependency |
 | --- | --- | --- |
 | `cortex-core` | Foundation contracts, contract revisions, typed repository state and candidate/task binding | Standard library only |
-| `cortex-evidence` | Descriptive provenance, caller-reported execution status, optional terminal assessment | `cortex-core` |
+| `cortex-evidence` | Legacy evidence plus unified result/applicability/validity, versioned context and redacted inspection | `cortex-core` (CLI library only as a test dev-dependency) |
 | `cortex-cli` | Help/version, bounded read-only Git inspection, typed Core adapter and errors | `cortex-core`; local Git and util-linux runtime tools |
 
 The accepted [0001 foundation decision](0001-foundation.md) is authoritative for
@@ -24,9 +24,11 @@ The CLI resolves actual Git commits in [002-A inspection](repository-inspection.
 and supplies typed state to [002-B Core binding](candidate-binding.md). Shared
 state types have one definition in Core; Git capture and presentation remain in
 the CLI package, exposed through its library adapter as well as the executable.
-Core performs no filesystem/process/clock access. Evidence semantics are unchanged.
-Policy enforcement, durable workflows, persistence, knowledge indexing, agent
-harnesses and temporal provenance remain planned.
+Core performs no filesystem/process/clock access. [002-C unified evidence](unified-evidence.md)
+consumes those observations programmatically, preserving legacy semantics. It adds
+independent result/applicability/contextual-validity and caller-reported time;
+002-D CLI integration remains planned. Policy enforcement, durable workflows,
+persistence, knowledge indexing, agent harnesses and temporal history remain planned.
 
 ## Logical areas and dependency direction
 
@@ -127,13 +129,14 @@ database, graph service, vector store, or event-storage schema.
 
 The current Rust `Verdict` variants are `Pass`, `Fail`, and `Inconclusive`, and the
 current `ExecutionObservation` variants describe execution status. There are no
-result/applicability/validity dimensions, timestamps, or dependency invalidation.
-The planned vocabulary in [INV-002](core-invariants.md#inv-002) is a requirement
-for future work, not an alias for today's API. In particular, `Inconclusive` does
-not encode why a check was unknown, not run, or blocked. Model extensions must
-preserve the original observation and cannot infer a missing distinction or timestamp.
-Resolve [DEC-010](../decisions/open-decisions.md#dec-010) before extending that
-model in 002-C; do not rewrite the accepted foundation decision retroactively.
+result/applicability/validity dimensions, timestamps, or dependency invalidation
+in that legacy model. `Inconclusive` does not encode why a check was unknown,
+not run, or blocked. The separate [002-C model](unified-evidence.md) implements
+[INV-002](core-invariants.md#inv-002)'s bounded evidence dimensions, caller-reported
+times and direct contextual invalidation without inferring legacy metadata.
+[DEC-010](../decisions/open-decisions.md#dec-010) records this scoped resolution;
+the accepted foundation decision is not rewritten. Transitive dependency tracking,
+persistent history and interchange remain planned.
 
 Similarly, `CandidateId` still checks object-ID syntax only. 002-A resolves real
 commits; 002-B retains contract revisions, local worktree identities, scoped

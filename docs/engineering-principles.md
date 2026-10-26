@@ -33,8 +33,11 @@ must define limits, cancellation, cleanup, and terminal conditions for the
 operations they introduce. State changes need explicit allowed transitions and
 must leave a valid state when rejected.
 
-Current text contracts have finite byte limits; evidence transitions are atomic
-in-memory updates. Future process execution requires separate controls for time,
+Current text contracts have finite byte limits. Foundation evidence transitions
+are atomic in-memory updates. Unified evidence preserves observations and terminal
+judgments on rejection; a valid context examination can separately retain a newly
+observed invalidation even when a conclusive judgment is rejected. Future process
+execution requires separate controls for time,
 output, filesystem access, memory, and process cleanup. In-memory validation is
 not an operating-system sandbox.
 

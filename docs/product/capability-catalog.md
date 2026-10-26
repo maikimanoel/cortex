@@ -148,12 +148,13 @@ fail. All 18 observation/verdict pairs obey execution preconditions. Rejected
 pass, rationale, or replacement preserves the original value and provenance.
 **Verification:** [Source](../../crates/cortex-evidence/src/lib.rs) and
 [behavioral tests](../../crates/cortex-evidence/tests/evidence.rs); run evidence
-is separate. Extension semantics remain open in DEC-010.
+is separate. The [002-C extension](../architecture/unified-evidence.md) is a
+separate model; legacy values and `Inconclusive` are not implicitly converted.
 
 ### CAP-EVD-002
 
 **Name:** Unified observations and inspectable assessments.
-**Status:** PLANNED.
+**Status:** IN_PROGRESS; 002-C library contract implemented, 002-D CLI integration planned.
 **Owner:** Evidence. **Target:** 002-C/002-D.
 **Dependencies:** CAP-CORE-002; extends CAP-EVD-001 without erasing its meaning.
 
@@ -175,8 +176,21 @@ implicit in structured fields or export.
 version/time; absent execution is not `PASS`, an insufficient oracle is `UNKNOWN`,
 and a missing prerequisite is `BLOCKED`. A zero-test invocation cannot establish
 behavioral acceptance. Redacted exports preserve the useful result and limits.
-**Verification:** NOT_RUN; end-to-end real-candidate fixtures, semantic negative
-cases, and export/privacy checks. **Decisions:** DEC-007/010.
+**Implemented 002-C scope:** The [evidence contract](../architecture/unified-evidence.md)
+defines validated caller reports, exact task/candidate/observation/assessment
+references, versioned mechanism context and reported observation/recording/assessment
+times. Independent result/applicability/contextual-validity checks reject unsupported
+success, zero-check acceptance and missing applicability. Known invalidation is
+sticky without rewriting terminal results. Full typed inspection and a redacted,
+non-versioned library writer expose the basis and limits. No legacy conversion,
+runner, authenticated capture, persistence or new CLI command is provided.
+
+**Verification mechanisms:** [Semantic and negative tests](../../crates/cortex-evidence/tests/unified.rs),
+[real-Git cross-crate fixtures](../../crates/cortex-evidence/tests/repository_evidence.rs),
+redaction/I/O tests and a legacy-conversion compile-fail doctest. Executed results
+are candidate-scoped external evidence, not these source links. Full CLI output/exit
+integration remains NOT_RUN until 002-D. **Decisions:** DEC-010 resolved for 002-C;
+DEC-007 scoped identity/time relationships resolved, CLI output/formats deferred.
 
 ### CAP-EVD-003
 

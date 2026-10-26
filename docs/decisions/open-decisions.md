@@ -77,6 +77,15 @@ exchange. Before 004-C/004-D, define parallel-workspace coordination and guarded
 integration/effect records without treating worktrees as sandboxes. Dependencies:
 CAP-CTX-002, CAP-WFL-003/004. No format or workspace implementation is selected.
 
+**002-C scoped resolution:** The [evidence contract](../architecture/unified-evidence.md#identity-provenance-and-time)
+retains exact existing task/revision/candidate/capture identities, a separate
+verification observation and assessment identity, versioned verification context
+and caller-reported observation/recording/assessment times. In-memory versions are
+exact references, independent of future format versions. The deliberately redacted
+library summary is not a versioned interchange or CLI schema. Minimum CLI input,
+human/machine outputs and exits remain to be decided before 002-D; persistence,
+Portable Context Packages, memory, graph and harness/transport formats remain deferred.
+
 ## DEC-008
 
 **Evaluation cases, baselines, and comparison-publication policy.** Select
@@ -95,12 +104,23 @@ authority. Dependencies: DEC-001/002/003, CAP-CLI-006, and the 006 integration e
 
 ## DEC-010
 
-**Evidence semantic extension.** Before 002-C, decide how richer result,
-applicability, validity, temporal provenance, and observation kinds extend today's
-in-memory model. Preserve its original meaning and never fabricate missing time,
-execution, or failure reasons. Options include retaining the foundation value as
-a bounded report or introducing a new domain representation; no conversion or
-storage schema is selected here. Dependencies: CAP-EVD-002 and CAP-CORE-002.
+**Evidence semantic extension — resolved for 002-C.** The
+[evidence contract](../architecture/unified-evidence.md#dec-010-explicit-extension-no-implicit-migration)
+selects a separate `cortex_evidence::unified` representation. Foundation evidence
+and terminal `Inconclusive` retain their original meanings, with no inferred or
+implicit conversion of missing distinctions, identities or times. Extending the
+legacy enum or inferring richer metadata was rejected because it would alter
+existing semantics or invent facts.
+
+Result, applicability and contextual validity are independent. Conclusive judgments
+require an explicit applicable/examined scope and current candidate/profile
+correspondence; PASS/FAIL additionally require relevant checks and a matching oracle.
+Known invalidation is sticky while historical judgments remain unchanged. Missing
+validity cannot imply CURRENT. Reports remain unauthenticated caller assertions;
+no assessment grants permission. The linked contract owns construction rules,
+limits, redaction and compatibility. No storage schema, transitive dependency graph,
+runner or persistence migration is selected. Dependencies: CAP-EVD-002 and CAP-CORE-002;
+DEC-007's later format/CLI decisions remain open.
 
 ## DEC-011
 
@@ -121,8 +141,8 @@ race limitations. Dirty snapshot identity and later extraction coverage remain o
 selects explicit caller-assigned task revisions, scoped observation ordering,
 exact contract applicability, canonical local worktree identity, bounded comparison
 material and Core correspondence rules. Matching dirty status remains insufficient
-for content identity; no dirty snapshot mechanism is selected. DEC-010 still
-requires a separate evidence-model decision before 002-C.
+for content identity; no dirty snapshot mechanism is selected. DEC-010's separate
+002-C resolution consumes these limits without strengthening them.
 
 ## DEC-012
 

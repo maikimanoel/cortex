@@ -3,6 +3,9 @@
 //! Callers supply observations and provenance. This library validates consistency;
 //! it neither executes verification nor authenticates that a report is truthful.
 
+/// Candidate-bound evidence with independent result, applicability and validity.
+pub mod unified;
+
 use cortex_core::{CandidateId, TaskContract};
 use std::{error::Error, fmt};
 
