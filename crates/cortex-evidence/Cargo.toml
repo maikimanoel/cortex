@@ -1,0 +1,13 @@
+[package]
+name = "cortex-evidence"
+description = "Candidate-bound observations and assessments for Cortex"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+cortex-core = { path = "../cortex-core" }
+
+[lints]
+workspace = true

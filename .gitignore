@@ -1,0 +1,15 @@
+/target/
+
+# Local credentials, editor state, and operating-system files.
+.env
+.env.*
+*.pem
+*.key
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Operator data and private working materials do not belong in source control.
+/.cortex/
+/private/

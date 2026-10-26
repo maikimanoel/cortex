@@ -1,0 +1,96 @@
+//! The initial Cortex command interface; no work is executed by this milestone.
+
+use std::{
+    error::Error,
+    ffi::OsString,
+    fmt,
+    io::{self, Write},
+    process::ExitCode,
+};
+
+const HELP: &str = "Cortex — evidence-driven software engineering
+
+Usage: cortex [OPTIONS]
+
+Options:
+  -h, --help       Print help
+  -V, --version    Print version
+
+Milestone 001 provides domain contracts only; no execution commands are available.
+";
+
+#[derive(Debug)]
+enum CliError {
+    InvalidArguments,
+    Output(io::Error),
+}
+
+impl fmt::Display for CliError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidArguments => f.write_str("unsupported arguments; use --help"),
+            Self::Output(_) => f.write_str("could not write command output"),
+        }
+    }
+}
+
+impl Error for CliError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Output(error) => Some(error),
+            Self::InvalidArguments => None,
+        }
+    }
+}
+
+fn run(mut args: impl Iterator<Item = OsString>, output: &mut impl Write) -> Result<(), CliError> {
+    let first = args.next();
+    if args.next().is_some() {
+        return Err(CliError::InvalidArguments);
+    }
+    match first.as_deref().and_then(|arg| arg.to_str()) {
+        None if first.is_none() => output.write_all(HELP.as_bytes()),
+        Some("--help" | "-h") => output.write_all(HELP.as_bytes()),
+        Some("--version" | "-V") => writeln!(output, "cortex {}", env!("CARGO_PKG_VERSION")),
+        _ => return Err(CliError::InvalidArguments),
+    }
+    .map_err(CliError::Output)
+}
+
+fn main() -> ExitCode {
+    match run(std::env::args_os().skip(1), &mut io::stdout().lock()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            let _ = writeln!(io::stderr().lock(), "cortex: {error}");
+            match error {
+                CliError::InvalidArguments => ExitCode::from(2),
+                CliError::Output(_) => ExitCode::FAILURE,
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn output_failure_is_propagated_with_its_cause() {
+        struct BrokenOutput;
+        impl Write for BrokenOutput {
+            fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+                Err(io::Error::from(io::ErrorKind::BrokenPipe))
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let error = run(std::iter::empty(), &mut BrokenOutput).unwrap_err();
+        assert!(
+            matches!(error, CliError::Output(ref cause) if cause.kind() == io::ErrorKind::BrokenPipe)
+        );
+        assert!(error.source().is_some());
+    }
+}

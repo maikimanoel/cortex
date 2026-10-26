@@ -1,0 +1,46 @@
+name: Cortex foundation checks
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  workspace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the selected candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
+
+      - name: Validate workspace metadata
+        run: cargo metadata --format-version 1 --locked --offline
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check compilation
+        run: cargo check --workspace --locked --offline
+
+      - name: Check lints
+        run: cargo clippy --workspace --all-targets --locked --offline -- -D warnings
+
+      - name: Run behavioral tests
+        run: cargo test --workspace --locked --offline
+
+      - name: Smoke test the command interface
+        run: |
+          cargo run --locked --offline -p cortex-cli -- --help
+          cargo run --locked --offline -p cortex-cli -- --version
+
+      - name: Check repository hygiene
+        run: |
+          git diff --check
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
