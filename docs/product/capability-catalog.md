@@ -391,6 +391,12 @@ Logical corrections preserve the meaning of retained history, not an uncondition
 promise of physical retention. Authorized deletion/omission follows CAP-SEC-002 and
 DEC-004; missing policy must not be replaced by an append-only storage assumption.
 
+Future persistence must satisfy the [durable admission contract](../architecture/temporal-records.md#durable-admission):
+atomic acceptance, explicit uncertain completion, exact reconciliation, validated
+restart reconstruction and bounded corruption/version/concurrency failures.
+The [lifecycle and owner-policy boundary](../architecture/temporal-records.md#privacy-lifecycle)
+governs removal and unavailable history; this planning does not deliver storage.
+
 Learning records distinguish a reported diagnosis, a confirmed defect and a
 verified repair. Retain the affected and repaired candidate references, minimal
 reproduction, regression/evidence references, provenance and applicability limits;
@@ -849,6 +855,11 @@ redaction without reconstructing erased payloads (INV-004/007/008/012).
 authorized deletion removes canonical payload and derived/cache copies under
 scope; a retained tombstone does not disclose it. An inaccessible backup is an
 explicit remaining limitation, not a completed deletion claim.
+The [lifecycle contract](../architecture/temporal-records.md#privacy-lifecycle)
+distinguishes correction/withdrawal from redaction/physical removal across all
+historical cutoffs and controlled copies; the linked owner-policy choices remain
+unapproved. Completion must state observed scope and residual copies, not imply
+universal erasure or fabricate missing predecessor history.
 **Verification:** NOT_RUN; retention, correction, deletion-propagation and redaction
 integration tests. **Decisions:** DEC-004/007; no retention defaults selected.
 

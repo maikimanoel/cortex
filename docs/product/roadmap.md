@@ -123,11 +123,21 @@ The implemented first slice of existing 003-A provides
 [canonical temporal records](../architecture/temporal-records.md): record/correct
 requirements and decisions, inspect immutable history and answer domain-time and
 recording-cutoff queries using existing candidate observations. This completes
-neither full 003-A nor CAP-MEM-001. The next bounded checkpoint should settle the
-necessary DEC-004 privacy/layer and DEC-007 durable acceptance boundaries before a
-persistent extension; DEC-011 remains a separate snapshot gate. Persistence needs
-actual crash/recovery/deletion acceptance. No backend, new crate, CLI command or
-public format is selected. 003-B through 003-F remain PLANNED.
+neither full 003-A nor CAP-MEM-001. The documentation-only privacy/durable-history
+checkpoint defines [lifecycle and admission obligations](../architecture/temporal-records.md#durable-history-extension-contract-only),
+with explicit owner policy alternatives under DEC-004 and a conditional local
+transaction-store recommendation under DEC-007. It implements no storage and closes
+neither decision overall. DEC-011 remains a separate snapshot gate.
+
+The next bounded implementation, only after owner policy and technical qualification,
+is the [first local durable adapter](../architecture/temporal-records.md#future-persistence-acceptance):
+one complete candidate-scoped collection, restart-safe admission/reconciliation,
+owner-approved whole-collection removal and fault/concurrency acceptance. Review the
+required narrow Core comparison-material projection; select a private codec, not
+a public package format. Preserve existing in-memory behavior and all 002 contracts.
+Targeted lifecycle views, transient/ephemeral retention, copies/sync and snapshots
+remain separate work. No new crate, backend dependency or CLI command is approved
+by this checkpoint. 003-B through 003-F remain PLANNED.
 
 003-B/003-C supply source facts and dependency validity; 003-F grounds material
 technical assumptions in those candidate/versioned sources under CAP-CTX-001.

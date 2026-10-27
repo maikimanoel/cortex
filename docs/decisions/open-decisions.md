@@ -54,6 +54,20 @@ capture, persistence or export. It selects no retention duration, consent policy
 sensitive-data default or physical-erasure guarantee. These still gate persistent
 memory; logical correction is not authorized deletion/omission behavior.
 
+**Durable-history disposition: OPEN for owner policy.** The
+[lifecycle contract](../architecture/temporal-records.md#privacy-lifecycle) separates
+correction, withdrawal, redaction, managed-file deletion and independent copies.
+Privacy restrictions cover historical cutoffs; a tombstone is not physical erasure.
+The [six owner policy gates](../architecture/temporal-records.md#owner-policy-gates)
+present explicit alternatives and an unapproved first-profile recommendation:
+capture/classification, access/location, retention/layers, removal/remnants,
+deletion/confidentiality assurance and copies/restoration/disclosure. No default,
+consent, delegation, retention duration, permitted audit remnant or erasure claim
+is approved by this checkpoint. Unknown answers block persistent capture/disclosure.
+Whole-collection removal is recommended first because the existing Core rejects
+missing predecessors; targeted redaction needs an explicit gap-aware contract.
+Trace policy before 004-D and broader privacy behavior remain open.
+
 ## DEC-005
 
 **Default execution, isolation, and CI budgets.** Choose explicit time, CPU,
@@ -133,10 +147,31 @@ and Core API select distinct logical/version identities, one retained observatio
 caller-reported source references, nonempty half-open domain intervals, inclusive
 recording cutoffs and atomic linear corrections. Equal recording times use
 predecessor order; no wall clock, persistent schema or public compatibility promise
-is selected. Persisted schemas, transactions, crash recovery, migration
-and storage remain undecided until an actual durable consumer is authorized.
+is selected. The planned durable contract below now defines transaction/outcome
+obligations; persisted schemas, engine qualification, recovery implementation,
+migration and storage remain undecided until an actual durable consumer is authorized.
 Evaluate journal, transactional and snapshot-plus-log alternatives against those
 contracts, not architectural symmetry. No new crate or public format is selected.
+
+**Durable-history scoped resolution; DEC-007 remains OPEN overall.** The
+[admission contract](../architecture/temporal-records.md#durable-admission) requires
+atomic record/ordinal/context acceptance, confirmed rejection versus uncertain
+completion, exact reconciliation after a lost reply, lossless constructor-based
+reconstruction and explicit corrupt/unsupported input. Core stays independent of
+I/O; the [boundary review](../architecture/temporal-records.md#core-encoding-and-concurrency-boundaries)
+identifies the later narrow comparison-material projection needed for a faithful
+codec. No Rust API changes here. Lifecycle exclusion must cover removal as well as
+admission; recovery writes require explicit authority.
+
+The [storage assessment](../architecture/temporal-records.md#storage-assessment)
+compares framed journaling, snapshot replacement and local transactions. It
+recommends one SQLite rollback-journal adapter, conditional on DEC-004 owner policy
+and binding/host/build qualification. This is not backend/dependency approval or
+an implemented durability guarantee. The private codec, instance identity,
+coordination mechanism and future migration need an implementation contract;
+broader graph, package, harness and public-format choices stay open. Reopen this
+recommendation for a stronger approved privacy threat model, unacceptable native
+dependency constraints or changed concurrency/host requirements.
 
 ## DEC-008
 
@@ -228,6 +263,12 @@ work, choose and verify clean-commit-only versus an explicit immutable working
 snapshot scope, coverage/exclusions, content correspondence and race behavior.
 Dirty status equality cannot select that mechanism. This remains an open gate,
 not a completed CAP-CORE-002 extension.
+
+Lossless persistence of an existing supplied observation does not require a new
+snapshot mechanism and does not close DEC-011. Reload preserves dirty/unborn/
+detached/incomplete distinctions, opaque comparison material and byte-path/platform
+limits; it neither samples Git nor refreshes validity. A later extractor or immutable
+dirty snapshot still needs its separate coverage/correspondence decision.
 
 ## DEC-012
 

@@ -152,8 +152,10 @@ Similarly, `CandidateId` still checks object-ID syntax only. 002-A resolves real
 commits; 002-B retains contract revisions, local worktree identities, scoped
 observations and correspondence decisions. It does not identify dirty bytes or
 produce an atomic snapshot. Snapshot identity remains planned for 003-A. Typed
-permissions, principals, resource budgets, requirement/decision identities,
-skills, and workflows remain planned extensions, not existing core types.
+permissions, principals, resource budgets, skills and workflows remain planned
+extensions. Logical requirement/decision and immutable version identities are now
+provided by the first in-memory temporal-record slice; durable admission and
+privacy lifecycle behavior remain [planned contracts](temporal-records.md#durable-history-extension-contract-only).
 
 ## Trust, deployment, and evolution
 
