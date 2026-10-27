@@ -28,7 +28,7 @@ This does not require a fixed checklist, formal method or agent topology for eve
 | 001 — Repository Foundation | DELIVERED: Cortex source foundation; local/remote verification and private delivery require candidate-scoped handoff evidence | None | Actual three-crate workspace, CLI behavior, minimal contract tests, private remote, configured CI |
 | 001A — Product Blueprint | Documentation artifact defined here; checkpoint acceptance/commit/push must be established in its handoff | 001 | Complete catalog, consistent architecture/roadmap/decisions, link and scope audits, local checks, verified private documentation commit/push |
 | 002 — First Vertical Slice | DELIVERED: bounded 002-A/B/C/D slice; candidate-scoped local/remote verification and private delivery in handoff | 001A | All 002-A/B/C/D exits; real task-to-candidate-to-evidence-to-inspection end-to-end tests and honest failure/unknown cases |
-| 003 — Temporal Knowledge & Memory | IN_PROGRESS: first in-memory 003-A slice only | 002; privacy/storage/coverage decisions | Graph extraction/query/conflict/invalidation, memory supersession/time/staleness, retrieval/context and portable handoff correctness |
+| 003 — Temporal Knowledge & Memory | IN_PROGRESS: canonical history and first encrypted 003-A store | 002; privacy/storage/coverage decisions | Graph extraction/query/conflict/invalidation, memory supersession/time/staleness, retrieval/context and portable handoff correctness |
 | 004 — Typed Skills, Workflows & Harness | PLANNED | 003; authority, profile, adapter and budget decisions | Typed composition/guards, durable continuation, effective host isolation, real authorized/denied invocations, traces and recovery |
 | 005 — Governed Evolution & Evaluation | PLANNED | 004; evaluation decisions | Reproducible evaluation and regression evidence, audited proposal dispositions, no self-approval or recursive privilege expansion |
 | 006 — Unified Integration | PLANNED | 005 and all scheduled subsystem contracts | End-to-end evidence/authority/temporal coherence, exports, actual interoperability/portability and security validation with no bypass paths |
@@ -112,32 +112,31 @@ demo nor an append-only log alone satisfies the exit.
 
 | Increment | Scope/capabilities | Dependency and exit evidence |
 | --- | --- | --- |
-| 003-A (IN_PROGRESS) | Canonical history/layers [CAP-MEM-001](capability-catalog.md#cap-mem-001), privacy gate [CAP-SEC-002](capability-catalog.md#cap-sec-002), snapshot extension [CAP-CORE-002](capability-catalog.md#cap-core-002) | First in-memory canonical requirement/decision slice implemented; full exit still needs DEC-004/007/011, layer/privacy and snapshot contracts, and actual persistence/recovery evidence before durability claims |
+| 003-A (IN_PROGRESS) | Canonical history/layers [CAP-MEM-001](capability-catalog.md#cap-mem-001), privacy gate [CAP-SEC-002](capability-catalog.md#cap-sec-002), snapshot extension [CAP-CORE-002](capability-catalog.md#cap-core-002) | Core history and first encrypted local adapter implemented with restart/recovery/removal tests; full exit still needs remaining DEC-004/007/011, layer/privacy and snapshot contracts; stronger host/durability claims require further qualification |
 | 003-B | Unified derived index/extractors [CAP-KNW-001](capability-catalog.md#cap-knw-001) | 003-A, declared adapter coverage; multi-language/code/document/schema/artifact fixtures, spans/relations, declared source/configuration/parser/rule dependencies, incremental versus full semantic recomputation and diagnosed divergence, explicit unsupported/dependency coverage |
 | 003-C | Temporal queries/conflicts/impact [CAP-KNW-002](capability-catalog.md#cap-knw-002), invalidation [CAP-EVD-003](capability-catalog.md#cap-evd-003), historical recovery [CAP-MEM-002](capability-catalog.md#cap-mem-002) | 003-A/B; origin/disposition separation, historical and late-correction queries, conflict reconciliation, context-bound evidence/knowledge validity, transitive invalidation and justified non-impact, no CURRENT claim from insufficient dependency coverage |
 | 003-D | Local retrieval [CAP-KNW-003](capability-catalog.md#cap-knw-003), recovery integration CAP-MEM-002 | 003-C; declared relevance/negative cases, bounded results, no unauthorized/stale-as-current material, one shared index |
 | 003-E | Handoffs [CAP-MEM-003](capability-catalog.md#cap-mem-003), privacy behavior CAP-SEC-002, CLI surfaces [CAP-CLI-004](capability-catalog.md#cap-cli-004) | 003-C/D; portable round-trip, source map, integrity rejection, candidate mismatch -> STALE, redaction and authorized deletion propagation |
 | 003-F | Context assembly [CAP-CTX-001](capability-catalog.md#cap-ctx-001), CLI surfaces CAP-CLI-004 | 003-D/E; versioned source selection, provenance, resource/token limits, visible omissions/staleness, no authority from recovered context |
 
-The implemented first slice of existing 003-A provides
-[canonical temporal records](../architecture/temporal-records.md): record/correct
-requirements and decisions, inspect immutable history and answer domain-time and
-recording-cutoff queries using existing candidate observations. This completes
-neither full 003-A nor CAP-MEM-001. The documentation-only privacy/durable-history
-checkpoint defines [lifecycle and admission obligations](../architecture/temporal-records.md#durable-history-extension-contract-only),
-with explicit owner policy alternatives under DEC-004 and a conditional local
-transaction-store recommendation under DEC-007. It implements no storage and closes
-neither decision overall. DEC-011 remains a separate snapshot gate.
+The implemented slices of existing 003-A provide
+[canonical temporal records](../architecture/temporal-records.md) and a
+[first encrypted local adapter](../architecture/0002-durable-history.md): record/correct
+requirements and decisions, retain exact candidate observations, reconstruct both
+time axes after restart and reconcile uncertain admission. Whole-collection removal
+is the initial privacy mutation. SQLite/rusqlite with stable SQLCipher Community
+and explicit caller keys implements the approved single-operator profile; it adds
+native build prerequisites, not a new crate or CLI command.
 
-The next bounded implementation, only after owner policy and technical qualification,
-is the [first local durable adapter](../architecture/temporal-records.md#future-persistence-acceptance):
-one complete candidate-scoped collection, restart-safe admission/reconciliation,
-owner-approved whole-collection removal and fault/concurrency acceptance. Review the
-required narrow Core comparison-material projection; select a private codec, not
-a public package format. Preserve existing in-memory behavior and all 002 contracts.
-Targeted lifecycle views, transient/ephemeral retention, copies/sync and snapshots
-remain separate work. No new crate, backend dependency or CLI command is approved
-by this checkpoint. 003-B through 003-F remain PLANNED.
+This completes neither full 003-A nor CAP-MEM-001/CAP-SEC-002. DEC-004/007 remain open
+outside their scoped initial resolutions; DEC-011 is a separate snapshot gate.
+The [acceptance boundary](../architecture/temporal-records.md#persistence-acceptance-and-remaining-scope)
+records process-crash coverage versus unexecuted physical I/O/flush and power-loss
+qualification. The next bounded assurance step should qualify those host/fault
+assumptions before extending durability claims. Targeted lifecycle views,
+transient/ephemeral retention, copies/sync and snapshots remain separate work.
+003-B through 003-F remain PLANNED; no knowledge extraction or broader memory
+behavior follows merely from storing a collection.
 
 003-B/003-C supply source facts and dependency validity; 003-F grounds material
 technical assumptions in those candidate/versioned sources under CAP-CTX-001.

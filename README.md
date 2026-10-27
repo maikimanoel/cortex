@@ -10,24 +10,27 @@ boundaries. Projects engineered with Cortex do not need to contain AI.
 
 **Pre-alpha.** The source implements the bounded capabilities below; it is not
 production-ready and makes no general API-stability or cross-platform guarantee.
-Milestone 003 has begun with bounded in-memory canonical history; its remaining
-capabilities and Milestones 004–006 remain planned. Source preparation does not authorize a public
-launch, binary release or package publication.
+Milestone 003 has begun with canonical history and its first encrypted local store;
+its remaining capabilities and Milestones 004–006 remain planned. Source preparation
+does not authorize a public launch, binary release or package publication.
 
 **Milestone 002 delivers a bounded task-to-evidence CLI slice.**
 `cortex inspect` observes repositories; `cortex check` evaluates committed-HEAD
 equality with explicit task/revision and candidate-bound evidence. Help/version
 remain available. The libraries retain foundation APIs and independently represent
 assessment result, applicability and contextual evidence validity. There are no agents,
-task runners, persistence, providers, network services, background workers or telemetry.
+task runners, providers, network services, background workers or telemetry. A bounded
+Linux library adapter now persists explicitly submitted canonical history through
+SQLCipher; it adds no storage command or automatic collection.
 
 ## Product blueprint
 
 The planned platform combines typed operational authority, mandatory evidence,
 and temporal provenance. These are product requirements; the foundation does not
-yet implement permission enforcement or persistent memory. Checkpoint 001A records
-the blueprint; the first 003-A slice now supplies deterministic in-memory
-[requirement/decision history](docs/architecture/temporal-records.md) in Core.
+yet implement permission enforcement or general persistent memory. Checkpoint 001A records
+the blueprint; 003-A now supplies deterministic in-memory
+[requirement/decision history](docs/architecture/temporal-records.md) in Core and
+its bounded encrypted storage adapter.
 
 | Document | Canonical responsibility |
 | --- | --- |
@@ -57,6 +60,11 @@ Use Linux with Rustup, Git supporting `--no-lazy-fetch`, and util-linux
 Rust 1.99.1 with rustfmt and Clippy is pinned in `rust-toolchain.toml`; Rust 2024
 and Cargo resolver 3 are used. Other platforms are not currently supported by
 repository inspection.
+The Linux storage build also needs a C compiler, `pkg-config`, and stable OpenSSL 3
+development headers/libraries. Check `cc --version` and `pkg-config --modversion openssl`.
+SQLCipher Community is compiled from the locked source dependency and links system
+libcrypto; no beta cipher or network service is needed at runtime. Qualification
+currently covers Linux x86_64 with OpenSSL 3.6.5, not every OpenSSL 3 host.
 
 Obtain the source and bootstrap the toolchain and dependency cache with network
 access. Cloning the repository currently requires authorized GitHub access while
@@ -72,8 +80,9 @@ cargo build --workspace --locked --offline
 
 An empty Cargo cache cannot run the offline commands until the locked fetch
 succeeds. Repeat the fetch when required dependencies change. After setup, the
-workspace builds and verifies offline. The CLI uses a JSON serializer; Core and
-Evidence still use only the standard library and the existing Core dependency.
+workspace builds and verifies offline. The CLI library uses JSON/SQLCipher and small
+key/host helpers; Core and Evidence still use only the standard library and the
+existing Core dependency.
 No runtime network service is required. From the workspace root:
 
 ```sh
@@ -137,7 +146,7 @@ these are not sandbox or hard real-time guarantees.
 | --- | --- |
 | `cortex-core` | Foundation contracts, contract revisions, typed candidate/task binding and bounded in-memory canonical temporal records |
 | `cortex-evidence` | Legacy reports plus unified candidate-bound result, applicability, validity and redacted library inspection |
-| `cortex-cli` | Help/version, bounded Git inspection, typed adapter and human/JSON task-to-evidence check |
+| `cortex-cli` | Help/version, bounded Git inspection, typed adapter, human/JSON task-to-evidence check and encrypted history infrastructure |
 
 The production direction is CLI -> Evidence -> Core, with CLI also using Core.
 The inspection
@@ -150,6 +159,15 @@ Core and Evidence do not depend on the CLI. Real-Git evidence integration tests
 live in the CLI consumer, preserving an acyclic graph. All packages have
 `publish = false`; version 0.1.0 carries no general stable library API commitment.
 The narrowly versioned CLI JSON projection is documented separately.
+
+The [encrypted-history decision](docs/architecture/0002-durable-history.md) defines
+the new `cortex_cli::history_store` library interface. The operator supplies an
+explicit private location outside the source repository, a `StoreKey` containing
+32 random raw-key bytes and typed Core data. Keys are never command-line arguments
+or stored beside the database. Create/open, explicit recovery, admission,
+reconciliation and requested whole-collection removal are bounded operations.
+No default location, automatic capture, backup, sync, export or lost-key recovery
+exists. Restoring historical data does not refresh evidence or grant authority.
 
 An execution report and a semantic judgment are different values. A newly
 constructed evidence record has no assessment, even when its exit code is zero.
@@ -232,5 +250,6 @@ payloads, and reference materials outside this Git repository.
 The official destination is the private repository `maikimanoel/cortex`. Keep it
 private. CORTEX is licensed under the [MIT License](LICENSE), copyright (c) 2026
 Maiki Manoel. Third-party dependencies retain their own applicable license terms.
+See [third-party notices](THIRD_PARTY_NOTICES.md) for the linked storage components.
 All workspace packages remain unpublished. Do not publish packages, create releases,
 or change visibility without separate authorization.

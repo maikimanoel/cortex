@@ -6,4 +6,8 @@
 
 mod inspection;
 
+/// Explicit operator-controlled encrypted canonical-history persistence.
+#[cfg(target_os = "linux")]
+pub mod history_store;
+
 pub use inspection::{InspectionError, RepositoryObservation, inspect, inspect_candidate};

@@ -95,7 +95,9 @@ represents assessment result, applicability and contextual validity with reporte
 times. Binding does not create an assessment. The CLI prints help/version/inspection;
 `cortex check` now composes task binding and unified evidence for one bounded
 committed-HEAD equality criterion, with human/JSON output. It does not enforce task
-permissions, execute agents or persist temporal history.
+permissions or execute agents. The first 003-A library slices add canonical temporal
+history and bounded encrypted local persistence with explicit operator inputs;
+general memory/recovery and the remaining 003 contracts remain incomplete.
 The [roadmap](roadmap.md) schedules that work;
 plans are not execution authorization or evidence of delivery.
 

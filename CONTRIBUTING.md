@@ -1,8 +1,8 @@
 # Contributing to CORTEX
 
 CORTEX is pre-alpha. Milestones 001 and 002 are delivered. Milestone 003 has begun
-with bounded in-memory canonical history; remaining 003 increments and 004–006
-remain planned.
+with canonical history and a bounded encrypted local store; remaining 003 increments
+and 004–006 remain planned.
 Maiki Manoel maintains the project and reviews external contributions through
 GitHub pull requests. Automated checks support that review. There is no CLA or
 DCO sign-off requirement. Submit only material you have the right to contribute
@@ -37,8 +37,8 @@ explicitly; a passing count is not a general correctness or security guarantee.
 - `cortex-core`: deterministic task/candidate contracts and binding; no Git or CLI.
 - `cortex-evidence`: observations and assessments, including independent result,
   applicability and validity; depends on Core.
-- `cortex-cli`: command parsing, bounded Git observation and task-to-evidence
-  integration; depends on Core and Evidence.
+- `cortex-cli`: command parsing, bounded Git observation, task-to-evidence
+  integration and encrypted history infrastructure; depends on Core and Evidence.
 
 Start with the [architecture overview](docs/architecture/overview.md),
 [subsystem ownership](docs/architecture/subsystems.md),

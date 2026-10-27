@@ -431,6 +431,13 @@ impl ComparisonBasis {
     pub fn profile(&self) -> &str {
         &self.profile
     }
+    /// Explicitly borrow private comparison bytes for a qualified lossless adapter.
+    ///
+    /// These bytes may contain private repository context. Access grants no disclosure
+    /// permission; callers must apply handling policy. Default Debug stays redacted.
+    pub fn material(&self) -> &[u8] {
+        &self.material
+    }
 }
 impl fmt::Debug for ComparisonBasis {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

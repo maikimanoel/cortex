@@ -373,14 +373,14 @@ store, model, performance claim, or activation is selected.
 ### CAP-MEM-001
 
 **Name:** Canonical history and memory layers.
-**Status:** IN_PROGRESS; bounded canonical in-memory requirement/decision slice implemented.
+**Status:** IN_PROGRESS; bounded canonical history and first encrypted local adapter implemented.
 **Owner:** Memory/continuity. **Target:** 003-A foundations; learning/recovery
 integration in 003-C/003-D.
 **Dependencies:** CAP-CORE-002, CAP-EVD-002, policy decisions DEC-004/007.
 
 The [003-A temporal-record contract](../architecture/temporal-records.md) defines
-the implemented first in-memory slice; it does not complete persistence, layer retention,
-cross-candidate recovery or the whole capability.
+the implemented Core slice and first encrypted persistence adapter; layer retention,
+cross-candidate recovery and the whole capability remain incomplete.
 
 **Functional contract:** Retain logically append-only canonical requirements,
 decisions, and learning history with identities, provenance, version references,
@@ -391,11 +391,12 @@ Logical corrections preserve the meaning of retained history, not an uncondition
 promise of physical retention. Authorized deletion/omission follows CAP-SEC-002 and
 DEC-004; missing policy must not be replaced by an append-only storage assumption.
 
-Future persistence must satisfy the [durable admission contract](../architecture/temporal-records.md#durable-admission):
+Persistence must satisfy the [durable admission contract](../architecture/temporal-records.md#durable-admission):
 atomic acceptance, explicit uncertain completion, exact reconciliation, validated
 restart reconstruction and bounded corruption/version/concurrency failures.
 The [lifecycle and owner-policy boundary](../architecture/temporal-records.md#privacy-lifecycle)
-governs removal and unavailable history; this planning does not deliver storage.
+governs removal and unavailable history; the [accepted initial storage decision](../architecture/0002-durable-history.md)
+records the approved profile, implementation and qualified scope.
 
 Learning records distinguish a reported diagnosis, a confirmed defect and a
 verified repair. Retain the affected and repaired candidate references, minimal
@@ -418,15 +419,21 @@ remembered; a claimed repair without its verification remains unverified.
 canonical requirements/decisions against one retained candidate observation.
 Validated linear chains support independent domain-time and recording-cutoff
 queries, immutable originals, atomic rejection, finite retained history and
-redacted diagnostics. There is no persistence, layer retention, deletion,
-learning/recovery consumer or snapshot implementation.
+redacted diagnostics. `cortex_cli::history_store` persists one exact collection
+through SQLCipher, with explicit create/recover/load, durable ordinal admission,
+exact reconciliation and whole-collection removal. There is no general layer
+retention, targeted redaction, learning/recovery consumer or snapshot implementation.
 **Verification mechanisms:** [Core temporal tests](../../crates/cortex-core/tests/temporal.rs)
 cover corrections, temporal boundaries, invalid transitions, deterministic
 reconstruction, exact limits and privacy; [real-Git tests](../../crates/cortex-cli/tests/temporal.rs)
 retain candidate distinctions and unchanged evidence. Candidate-scoped execution
-results remain in the external handoff. Retention/deletion/persistence acceptance
-is NOT_RUN and unimplemented. **Decisions:** DEC-004/007 before enabling persistence;
-DEC-011 before snapshot extensions. The full capability remains incomplete.
+results remain in the external handoff. [Storage tests](../../crates/cortex-cli/src/history_store/tests.rs)
+and [real-Git consumers](../../crates/cortex-cli/tests/history_store.rs) cover encrypted
+restart, temporal preservation, crash/reconciliation, contention, corruption,
+capacity and whole-store removal. Physical I/O/flush fault injection and power-loss
+qualification are NOT_RUN; selective lifecycle and layer retention are unimplemented.
+**Decisions:** DEC-004/007 have initial-profile scoped resolutions, remaining broader
+questions stay open; DEC-011 precedes snapshots. The full capability remains incomplete.
 
 ### CAP-MEM-002
 
@@ -836,7 +843,7 @@ integration cases. **Decisions:** DEC-005/006/012; no certification is claimed.
 ### CAP-SEC-002
 
 **Name:** Privacy-aware retention, deletion, and audit.
-**Status:** PLANNED.
+**Status:** IN_PROGRESS; encrypted local canonical store and whole-collection removal implemented.
 **Owner:** Security/privacy with canonical record owners.
 **Target:** 003-A policy gate/003-E behavior; integration in 006-A.
 **Dependencies:** DEC-004, CAP-EVD-002; memory/index owners implement propagation.
@@ -857,11 +864,17 @@ scope; a retained tombstone does not disclose it. An inaccessible backup is an
 explicit remaining limitation, not a completed deletion claim.
 The [lifecycle contract](../architecture/temporal-records.md#privacy-lifecycle)
 distinguishes correction/withdrawal from redaction/physical removal across all
-historical cutoffs and controlled copies; the linked owner-policy choices remain
-unapproved. Completion must state observed scope and residual copies, not imply
+historical cutoffs and controlled copies. The initial local-operator profile is
+approved; broader privacy policy remains open. Completion must state observed scope and residual copies, not imply
 universal erasure or fabricate missing predecessor history.
-**Verification:** NOT_RUN; retention, correction, deletion-propagation and redaction
-integration tests. **Decisions:** DEC-004/007; no retention defaults selected.
+**Bounded implementation/verification:** The [storage decision](../architecture/0002-durable-history.md)
+and [tests](../../crates/cortex-cli/src/history_store/tests.rs) cover caller-keyed
+SQLCipher, no plaintext fallback, confidential sentinels, diagnostics, explicit
+whole-collection removal and interrupted-removal resume. No automatic capture,
+copies or restoration. Completion covers managed live files, not forensic erasure.
+Selective redaction, copy propagation, layer expiry and broader privacy integration
+remain PLANNED/NOT_RUN. **Decisions:** scoped DEC-004/007 approval selects manual
+canonical retention without eviction; broader defaults remain open.
 
 ### CAP-SEC-003
 

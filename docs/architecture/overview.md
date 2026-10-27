@@ -15,7 +15,7 @@ The Cortex foundation contains these actual crates:
 | --- | --- | --- |
 | `cortex-core` | Foundation contracts, candidate/task binding and bounded in-memory canonical temporal records | Standard library only |
 | `cortex-evidence` | Legacy evidence plus unified result/applicability/validity, versioned context and redacted inspection | `cortex-core` |
-| `cortex-cli` | Help/version, bounded Git observation and task-to-evidence CLI check with human/JSON output | `cortex-core`, `cortex-evidence`, JSON serializer; local Git and util-linux |
+| `cortex-cli` | Existing command interface, Git observation and explicit encrypted-history library adapter | Core/Evidence, JSON/codec and SQLCipher binding; local Git/util-linux and OpenSSL 3 build prerequisites |
 
 The accepted [0001 foundation decision](0001-foundation.md) is authoritative for
 those bounded design choices. Rust 1.99.1, edition 2024,
@@ -29,9 +29,12 @@ consumes those observations programmatically, preserving legacy semantics. It ad
 independent result/applicability/contextual-validity and caller-reported time;
 [002-D CLI integration](cli-check.md) now composes one committed-HEAD criterion.
 Policy enforcement, durable workflows,
-persistence, knowledge indexing and agent harnesses remain planned. The first
+knowledge indexing and agent harnesses remain planned. The first
 [003-A slice](temporal-records.md) adds in-memory requirement/decision history
 without changing the binding or evidence models.
+The [first durable slice](0002-durable-history.md) adds a Linux operator-controlled
+SQLCipher adapter that reconstructs validated Core history; broader persistence,
+privacy lifecycle and recovery features remain planned.
 
 ## Logical areas and dependency direction
 
@@ -125,14 +128,15 @@ domain/recording-time semantics. Candidate-scoped graph intervals, conflict
 dispositions, supersession, and dependency invalidation allow explicit historical
 queries. Corrections preserve what was previously recorded; authorized physical
 deletion is a separate privacy operation whose downstream effects must be handled.
-Backend, format, transaction, and compatibility decisions remain
-[open](../decisions/open-decisions.md); these responsibilities do not mandate a
-database, graph service, vector store, or event-storage schema.
+Backend, format, transaction and compatibility decisions beyond the
+[first canonical store](0002-durable-history.md) remain
+[open](../decisions/open-decisions.md). These planned graph responsibilities do
+not select another database, graph service, vector store or event-storage schema.
 
 The [003-A temporal-record contract](temporal-records.md) defines the implemented
 first in-memory requirement/decision history slice and its separate privacy,
 persistence and snapshot gates. Logical memory ownership is implemented cohesively
-in Core; no memory crate or storage adapter is introduced. Existing evidence
+in Core, with the first qualified adapter in the CLI library. Existing evidence
 semantics remain unchanged, and full 003-A is not delivered.
 
 ## Foundation reconciliation and extension seams
@@ -146,7 +150,7 @@ not run, or blocked. The separate [002-C model](unified-evidence.md) implements
 times and direct contextual invalidation without inferring legacy metadata.
 [DEC-010](../decisions/open-decisions.md#dec-010) records this scoped resolution;
 the accepted foundation decision is not rewritten. Transitive dependency tracking,
-persistent history and interchange remain planned.
+cross-candidate recovery and interchange remain planned.
 
 Similarly, `CandidateId` still checks object-ID syntax only. 002-A resolves real
 commits; 002-B retains contract revisions, local worktree identities, scoped
@@ -155,7 +159,7 @@ produce an atomic snapshot. Snapshot identity remains planned for 003-A. Typed
 permissions, principals, resource budgets, skills and workflows remain planned
 extensions. Logical requirement/decision and immutable version identities are now
 provided by the first in-memory temporal-record slice; durable admission and
-privacy lifecycle behavior remain [planned contracts](temporal-records.md#durable-history-extension-contract-only).
+privacy lifecycle extensions remain scoped by the [temporal contract](temporal-records.md#durable-history-extension-contract-and-first-implementation).
 
 ## Trust, deployment, and evolution
 

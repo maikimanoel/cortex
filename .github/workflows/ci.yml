@@ -27,6 +27,12 @@ jobs:
       - name: Fetch locked dependencies
         run: cargo fetch --locked
 
+      - name: Check native storage prerequisites
+        run: |
+          cc --version
+          pkg-config --atleast-version=3.0 openssl
+          pkg-config --modversion openssl
+
       - name: Validate workspace metadata
         run: cargo metadata --format-version 1 --locked --offline
 

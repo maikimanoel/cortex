@@ -1,4 +1,4 @@
-# Temporal record foundations (003-A, first in-memory slice)
+# Temporal record foundations (003-A)
 
 This defines the implemented first slice of [003-A](../product/roadmap.md#003-temporal-knowledge-and-memory),
 under [CAP-MEM-001](../product/capability-catalog.md#cap-mem-001),
@@ -6,8 +6,10 @@ under [CAP-MEM-001](../product/capability-catalog.md#cap-mem-001),
 [CAP-CORE-002](../product/capability-catalog.md#cap-core-002). The catalog owns
 requirements; this document owns the bounded domain contract implemented in
 [`cortex_core::temporal`](../../crates/cortex-core/src/temporal/mod.rs).
-This is partial 003-A/CAP-MEM-001 progress, not a durable memory system.
-Persisted formats, backends and broader public compatibility commitments remain open.
+The first encrypted local adapter is specified by the accepted
+[durable-history decision](0002-durable-history.md). This remains partial
+003-A/CAP-MEM-001 progress, not the complete memory subsystem. Its private format
+selects no public interchange or general compatibility commitment.
 
 ## First usable slice and ownership
 
@@ -22,7 +24,7 @@ empty memory crate or storage facade. This slice does not complete 003-A or CAP-
 | Memory/continuity | Logical ownership of canonical records, corrections and historical interpretation |
 | `cortex-core` | A cohesive temporal-record module with validated values, bounded transitions and queries; no filesystem, clock sampling, Git, CLI or backend dependency |
 | `cortex-evidence` | Existing verification provenance, observations and assessments; no competing result/applicability/validity model or history-to-PASS conversion |
-| `cortex-cli` | Existing observation producer and commands unchanged; real-Git consumer tests can supply observations to Core |
+| `cortex-cli` | Existing observation producer, encrypted local history adapter and real-Git consumer tests; commands unchanged |
 
 Reuse `TaskId`/`ContractRevision` for actual task references and
 `CandidateObservation` for captured context, including its existing
@@ -71,7 +73,7 @@ and handling remain trusted caller obligations, not inferred from author names.
   revalidate a live repository.
 
 Unavailable history here means a missing named version/predecessor in the supplied
-collection. This slice adds no storage reader or external source resolver.
+collection. The adapter reconstructs that collection without resolving external sources.
 
 Attached, detached, unborn, dirty and incomplete observations retain their existing
 distinctions; absent commits stay absent. Same-HEAD captures with different dirty
@@ -90,7 +92,8 @@ reconstruction, not a crash-safe journal or external-effect replay.
 
 [`record.rs`](../../crates/cortex-core/src/temporal/record.rs) owns validated values;
 [`mod.rs`](../../crates/cortex-core/src/temporal/mod.rs) owns collection transitions
-and queries. No new crate, dependency, CLI command or Evidence API is introduced.
+and queries. Core adds no crate/dependency, CLI command or Evidence API; the
+adapter's native dependencies are isolated in CLI infrastructure.
 
 | Interface | Contract |
 | --- | --- |
@@ -144,15 +147,16 @@ Errors and default debug/summary output omit private bodies, raw candidate/task
 context and caller-supplied source details; explicit accessors may expose supplied
 data. Constructors cannot detect all secrets,
 prove consent or authenticate handling labels. Use synthetic/non-sensitive fixtures.
-No automatic capture, disk writing, serialization/export, background retention or
-payload logging is provided. Dropping ordinary memory is not secure erasure.
+Core provides no I/O; the separately invoked adapter persists explicit submissions
+only. No automatic capture, export, background retention or payload logging is
+provided. Dropping ordinary memory is not secure erasure.
 
 ## Consequential gates and alternatives
 
 | Boundary | Minimum contract and unresolved choice | Decision point |
 | --- | --- | --- |
-| Privacy/layers | INV-012/CAP-SEC-002 require inspection/correction, authorized deletion and honest gaps. The [lifecycle contract](#privacy-lifecycle) separates those operations; [owner policy gates](#owner-policy-gates) remain unapproved. Unknown policy blocks persistent capture/disclosure. | DEC-004 before persistent memory; trace policy before 004-D |
-| Persistence/replay | The [durable admission contract](#durable-admission) defines atomic acceptance, uncertain completion and reconstruction. The [storage assessment](#storage-assessment) recommends one local transactional adapter; backend qualification, encoding and migration implementation remain open. Demonstrate crash behavior before claiming durability. | DEC-007 before the first durable adapter in 003-A |
+| Privacy/layers | INV-012/CAP-SEC-002 require inspection/correction, authorized deletion and honest gaps. The [lifecycle contract](#privacy-lifecycle) separates operations; the [initial operator profile](#owner-policy-gates) is approved. Broader layers, delegation and selective removal remain open. | Scoped DEC-004 resolution for this adapter; trace policy before 004-D |
+| Persistence/replay | The [durable admission contract](#durable-admission) defines atomic acceptance, uncertain completion and reconstruction. The [accepted decision](0002-durable-history.md) selects the qualified encrypted SQLite adapter and private format; migration and stronger host/durability claims remain open. | Scoped DEC-007 resolution; reopen before format/host changes |
 | Candidate/snapshot | Reuse bounded 002-A/B observations. Clean-commit-only extraction and a separately observed immutable dirty manifest are possible later scopes; equal HEAD/status selects neither. Full 003-A still needs the scheduled snapshot decision before that extension. | DEC-011 before snapshots; extractor coverage before 003-B |
 | Time/identity | Record/version, domain/recording time and task/candidate/capture references remain distinct. Internal values select no persisted-format version, portable project ID or cross-branch total order. | Minimum rules above; durable identity/format under DEC-007 |
 | Evidence/invalidation | 002-C direct checks remain unchanged. Supersession supplies changed references; transitive invalidation/non-impact and incomplete dependency coverage belong to CAP-EVD-003. A lookup cannot refresh PASS. | 003-C; no second evidence authority in 003-A |
@@ -161,8 +165,8 @@ payload logging is provided. Dropping ordinary memory is not secure erasure.
 Logical append-only correction describes retained history, not permanent physical
 retention or an override of authorized deletion. Future deletion must propagate to
 indexes/caches/exports under selected policy; tombstones must not recreate erased
-content. Unavailable backups/history remain explicit gaps. This kernel provides
-neither privacy-deletion enforcement nor production persistence.
+content. Unavailable backups/history remain explicit gaps. Core provides no privacy
+I/O; the adapter's whole-collection removal does not implement selective lifecycle views.
 
 ## Acceptance mechanisms and remaining scope
 
@@ -186,17 +190,18 @@ external implementation handoff; test source alone is not execution evidence.
 Core owns domain tests. Real-Git boundary tests belong in the CLI consumer using
 existing fixtures, preserving dependency direction. Keep invariants documented and
 errors cohesive; no generic framework/new dependency is justified. Full 003-A still
-needs privacy/layer and snapshot gates; persistence needs actual recovery/deletion
-tests. Extraction, cross-candidate recovery, portable packages, rule registries,
+needs the remaining privacy/layer and snapshot gates. Adapter recovery/deletion
+tests are described below. Extraction, cross-candidate recovery, portable packages, rule registries,
 workflows and empirical evaluation retain later roadmap exits.
 
-## Durable history extension: contract only
+## Durable history extension: contract and first implementation
 
-The following requirements govern a **future**, separately authorized implementation
-under CAP-MEM-001 and CAP-SEC-002. No storage, lifecycle operation, recovery, format
-or new authority mechanism is implemented by this documentation checkpoint.
-DEC-004 remains open for owner policy; DEC-007 is resolved only for the technical
-admission/reconstruction obligations below, not a backend or public protocol.
+The following obligations govern CAP-MEM-001 and CAP-SEC-002. The
+[first encrypted adapter](0002-durable-history.md) implements create, recovery/load,
+admission, reconciliation and whole-collection removal. Logical withdrawal,
+selective redaction and external-copy propagation remain future contracts.
+DEC-004/007 retain broader open questions; neither this adapter nor its format
+creates a new authority mechanism or public protocol.
 
 ### Privacy lifecycle
 
@@ -233,27 +238,24 @@ queries and Evidence's result/applicability/validity meanings stay unchanged.
 
 ### Owner policy gates
 
-Every recommendation below is **unapproved**. Missing answers block real persistent
-capture/disclosure; documenting an option does not select it. Broader trace capture,
-team governance and synchronization policies remain at their original milestones.
+The owner approved the initial profile below; the accepted
+[storage decision](0002-durable-history.md) records its implementation and qualification.
+These choices do not settle broader trace, multi-principal or synchronization policy.
 
-| Question | Concrete alternatives | Recommended first profile and consequence |
+| Policy area | Approved initial profile | Deferred obligation |
 | --- | --- | --- |
-| Capture/classification | Explicit submitted canonical data only; or automated/expanded capture with classification and consent controls | Explicit operator-submitted, declared non-sensitive requirements/decisions and their full necessary candidate context only. No transcripts, environment secrets or automatic working-context capture. Classification is a caller declaration, not proof that a secret is absent |
-| Access/location | One operator-owned local directory; or shared/project-managed storage with a defined identity/access model | One explicit private directory outside the inspected repository, controlled by the operator, with restrictive host permissions. No implicit current-directory/default store, account or remote service. Owner must approve the operator/delegate model and whether local plaintext is acceptable |
-| Retention/layers | Manual retention until authorized removal; or explicit per-layer expiry schedules | Canonical history retained until explicit removal, subject to finite capacity with no silent eviction. Transient/ephemeral material is not admitted by this adapter; their future durations remain open. Capacity limits are not retention policy |
-| Removal/remnants | Whole-collection deletion first; or targeted redaction/deletion with gap-aware views. No persisted receipt; or expressly permitted non-sensitive receipt | Whole-collection deletion as the first privacy mutation, with explicit approval of its broader scope; finer redaction/withdrawal deferred. Recommend no persistent payload-derived receipt by default; owner must approve any coordination/remnant metadata. Never expand a narrow deletion request to unrelated data automatically |
-| Deletion/confidentiality assurance | Removal from covered managed files with disclosed residual-media/memory risks; or a stronger forensic threat model requiring additional protection | Declare managed-file removal only. OS snapshots, unallocated blocks, SSD remapping, swap, crash dumps and caller-held in-memory clones are not securely erased by ordinary deletion. Stronger requirements block this profile pending an encryption/key/lifecycle design; none is selected here |
-| Copies/restoration/disclosure | No automatic copies; or registered managed backups/exports/synchronization with propagation and restoration rules | No automatic backup, export, import or sync. Operator must identify pre-existing external copies and permitted inspection/receipt disclosure. Future restore must reconcile removal directives or refuse activation when their absence cannot be established; external copies cannot be silently declared deleted |
+| Capture/classification | Explicit canonical requirements/decisions and necessary full candidate context only; no transcript, secret or background capture | Caller must classify submissions; constructors cannot prove consent or detect every secret. Expanded collection needs separate controls |
+| Access/location | One trusted explicitly authorized local operator; a private selected directory outside inspected repositories; caller-supplied encryption key | No delegated identity/permission engine, shared-user access or universal host support |
+| Retention/layers | Retain canonical history until explicit authorized removal within finite capacity; fail instead of silently evicting | Transient/ephemeral expiry and sensitive trace policies remain open |
+| Removal/remnants | Whole collection only; no retained payload-derived receipt. Empty directory/lock remain; a random 16-byte instance intent exists while removal is pending | Selective redaction/withdrawal needs gap-aware views; no narrow request may silently delete a broader collection |
+| Confidentiality/deletion | SQLCipher from the initial persisted record; removal of covered managed live files with disclosed limitations | No universal forensic erasure, key recovery/rotation, secure RAM guarantee or assurance over snapshots, swap and external copies |
+| Copies/disclosure | No automatic backup, export, import, synchronization or restoration; inspection remains an explicit caller operation | Independent copies need their own authority and observations; getters do not authorize unrestricted disclosure |
 
-The selected policy must have an inspectable version/reference distinct from task,
-record and storage-format versions. Changing policy requires explicit review, not
-an implicit rewrite of historical consent. Unknown policy blocks dependent actions;
-it does not prevent unrelated in-memory operations. Human inspection/export is
-disclosure: explicit getters do not authorize unrestricted dumps or raw diagnostics.
-Engine journals and staging files are protected store data within the approved
-capture/removal scope, even when external backups are disabled; they are not an
-exception to minimization or deletion accounting.
+The persisted policy reference `local-operator-encrypted-v1` is distinct from task,
+record and private format versions. Unknown policies are rejected, not implicitly
+migrated. Policy changes require explicit review. Engine journals are protected
+store data, not an exception to minimization or removal accounting. Missing broader
+policy blocks only its dependent operations, not approved initial-profile admission.
 
 ### Durable admission
 
@@ -340,16 +342,18 @@ framework, storage-neutral DTO authority or CLI command is required by this cont
 Its private decoding representation must reconstruct validated Core values rather
 than duplicate temporal-policy decisions. Evidence is not stored or reassessed here.
 
-There is one concrete API prerequisite for a lossless adapter:
-`ComparisonBasis::material` is private and currently has no accessor. A later
-implementation must review a narrow explicit borrowed accessor or equivalent
-projection, retaining redacted default `Debug`. It must not drop that material,
-serialize `Debug`, infer replacement provenance or add storage dependencies to Core.
-The handling policy must cover those bytes, which can contain private repository
-metadata. This checkpoint changes no Rust API.
+`ComparisonBasis::material()` is the narrow explicit borrowed projection used for
+lossless encoding. It retains redacted default `Debug`; encoding never serializes
+Debug, drops comparison material or adds storage dependencies to Core. The handling
+policy covers those potentially private bytes.
 
-The first codec needs a private format/version identifier, bounded length/count
-validation and explicit unknown-version/tag rejection. Preserve all `u64` values,
+The Linux library exposes `HistoryStore::create/open/load/admit/reconcile/remove`
+and explicit `resume_removal`, `StoreKey`, `StoreId`, `Access`, typed completion
+outcomes and removal requests. See [the implementation](../../crates/cortex-cli/src/history_store/mod.rs)
+and its Rustdoc example. No live connection or key is retained in a store handle.
+
+Private format 1 uses bounded JSON projections, strict fields/schema/tags and
+explicit unknown-version rejection. It is not a public interchange format. Preserve all `u64` values,
 exact seconds/nanoseconds, optional fields and Unix path/branch bytes without lossy
 UTF-8 conversion, floating-point numbers or unchecked signed casts. Failure to
 represent a time/path on the reader's platform is explicit unsupported input.
@@ -358,17 +362,18 @@ detect covered accidental corruption, not authenticate records. Private format
 versioning selects no Portable Context Package or stable public protocol. The first
 reader may reject every other version; no silent automatic migration is required.
 
-Allow one writer and transaction-consistent readers; contention has a finite busy
-deadline and explicit retryable error, not unbounded retry. All cooperating opens,
+The adapter serializes all cooperating operations, including readers, using a
+standard-library exclusive file lock with a five-second contention deadline. Engine
+busy errors are immediate and typed; there is no unbounded retry. All cooperating opens,
 admissions, recovery and removal must share lifecycle exclusion: database transaction
 locks alone do not make unlinking a file with other open handles safe. Whole-store
 removal requires quiescing those handles and guarding against replacement/identity
 changes; retain any necessary non-sensitive coordination file only under policy.
 Caller-owned Core clones remain historical data, not revocable live handles.
 
-Recovery may write store metadata. A future `recover-and-load` operation must declare
-that effect and require write authority; a truly read-only inspection must report
-recovery-required instead of silently upgrading access. The Git `inspect` command
+Recovery may write store metadata. `Access::Recover` explicitly permits that effect;
+`Access::ReadOnly` conservatively refuses a nonempty journal with recovery-required
+instead of silently upgrading access. The Git `inspect` command
 retains its existing read-only contract and never becomes a store recovery command.
 Do not remove an interrupted engine's journal as generic cleanup. Unavailable locks,
 unsupported filesystems, symlinks/identity changes or required permission controls
@@ -376,8 +381,8 @@ must fail explicitly; no hostile-host sandbox or network-filesystem support is i
 
 Initial adapter budgets are one context/collection, existing Core count/text/source
 and observation bounds, 64 MiB encoded main-store/input size, 256 MiB managed working
-files and a five-second lock-contention budget. Qualify enforcement, temporary-file
-accounting and codec fit before implementation; a stricter encoded limit may reject
+files and a five-second lock-contention budget. The per-record encoded limit is 1 MiB; memory-only temporary storage, checked
+managed-file sizes, engine page limits and bounded decoding implement this scope; a stricter encoded limit may reject
 an otherwise valid Core value explicitly, never truncate it. Bound decoded counts
 and allocations before materialization and bound engine-managed file growth.
 These are logical input/working-file limits, not RSS, hard I/O-deadline or performance
@@ -388,7 +393,8 @@ bounded and free of raw records, candidate buffers and arbitrary tool transcript
 ### Storage assessment
 
 This compares mechanisms for this bounded store, not alternative product subsystems.
-None has been implemented or qualified for CORTEX durability/privacy acceptance.
+The transactional option is selected for the first adapter. The other alternatives
+were assessed, not implemented as additional backends.
 
 | Approach | Correctness/recovery obligations | Privacy and evolution | Dependency/maintenance cost |
 | --- | --- | --- | --- |
@@ -396,31 +402,29 @@ None has been implemented or qualified for CORTEX durability/privacy acceptance.
 | Complete snapshot with atomic replacement | Write/validate/synchronize a new bounded image, replace under exclusion and synchronize required directory metadata; distinguish pre/post-replacement recovery | Simpler whole-history reconstruction, but old/temp images are additional protected copies; every admission rewrites the image | Plausible small-store alternative; host-specific replacement/locking and recovery protocol remain application responsibilities |
 | Local SQLite transaction store | Validate through Core inside serialized admission; retain explicit ordinals; qualify journal/sync settings, error mapping and recovery | Whole-store removal includes engine sidecars/temp data; row deletion alone is not physical erasure; codec/version policy remains CORTEX-owned | Adds a reviewed Rust binding/native engine and build provenance obligations, while delegating page transactions/locking/recovery to one existing engine |
 
-**Recommendation, not backend approval:** use one local SQLite adapter with rollback
-journaling (`DELETE`) and `synchronous=EXTRA`, after owner policy and dependency/host
-qualification. Verify effective settings rather than assuming defaults or ignoring
-unsupported options. Prefer no WAL, virtual tables, extension loading, attached
-databases or untrusted SQL in this slice. Ordinary-table `secure_delete=ON` can be
-part of a qualified removal procedure; it is not a complete filesystem/copy-erasure
-guarantee. Keep engine recovery files intact until authorized recovery/removal.
+**Selected initial direction:** SQLite via rusqlite with stable bundled SQLCipher
+Community and system OpenSSL 3, rollback journaling (`DELETE`) and
+`synchronous=EXTRA`. The adapter verifies effective settings and rejects plaintext,
+unsupported provider/header/mode/schema/format input. No WAL, virtual tables,
+extension loading, attached databases or untrusted SQL interface is provided.
+`secure_delete=ON` is not a filesystem/copy-erasure guarantee. Recovery files remain
+intact until authorized recovery/removal.
 
-The rationale is to avoid maintaining a second transaction/recovery engine while
-preserving a small local store. The cost is a native dependency, extra protected
-files and a required safe-binding/build/license/toolchain review. No Cargo dependency
-is selected or added here. Finalize the private codec and store-instance/lifecycle
-coordination mechanism in the separately authorized implementation contract.
-Reopen the recommendation if an approved privacy threat model requires stronger
-protection, native-engine constraints are unacceptable, or measured/required
-multi-writer/host support changes. No distributed store or interchangeable backend
-framework follows from this choice.
+The [accepted decision](0002-durable-history.md) records exact qualified versions,
+key handling, Linux constraints, dependency/license costs and reopening conditions.
+Selecting an engine delegates page recovery, not CORTEX's admission rules. No
+interchangeable backend framework or public persistence schema follows.
 
-### Future persistence acceptance
+### Persistence acceptance and remaining scope
 
-All cases below are **NOT_RUN future acceptance**, separate from the executed
-in-memory/002 regression suite. Tests must use controlled temporary stores and
-actual separate processes where restart/locking is the property. Process-kill tests
-alone do not establish power-loss durability; injected I/O/flush faults or an
-appropriate filesystem/engine fault harness must state its modeled limits.
+[Storage tests](../../crates/cortex-cli/src/history_store/tests.rs) and
+[real-Git integration tests](../../crates/cortex-cli/tests/history_store.rs) exercise
+these mechanisms alongside existing Core/002 regressions. Candidate-scoped outcomes
+and counts belong in the external handoff. The table specifies the oracle, not a
+claim of independent assurance. Actual separate processes cover restart/locking.
+Process-kill tests do not establish power-loss durability. Engine capacity, commit
+contention and permissions are exercised; physical short-write/flush fault injection
+and power interruption remain NOT_RUN. Later targeted lifecycle remains planned.
 
 | Case | Discriminating oracle |
 | --- | --- |
@@ -441,11 +445,14 @@ appropriate filesystem/engine fault harness must state its modeled limits.
 | Later targeted lifecycle | Only when separately authorized: withdrawal remains distinguishable from removal; redacted payload cannot be recovered at any cutoff, and chain gaps are explicit without fabricated records |
 | Privacy/authority regression | Sentinel payload/context never leaks into forbidden logs/receipts; replay does not execute checks/tools, refresh CURRENT, grant permission or promote inference to PASS |
 
-The recommended first persistence implementation is one operator-scoped local
-adapter: explicit create, bounded recover/load, one-record admission, exact
-reconciliation and owner-approved whole-collection removal, with restart/fault/
-contention tests and a private versioned codec. It depends on the owner answers
-above, backend/binding qualification and the narrow Core projection review.
-Until then it is not authorized or ready for real private-data capture. Targeted
+The first operator-scoped adapter now implements explicit create, bounded recovery/
+load, one-record admission, exact reconciliation and whole-collection removal with
+restart/fault/contention tests and a private codec. Correct/wrong/missing keys,
+no plaintext fallback and confidential sentinels in covered at-rest files and process
+output have focused tests. Temporary storage is configured to memory; inspected
+active store descriptors do not establish exhaustive RAM or host-file coverage.
+
+The next bounded assurance increment should qualify physical I/O/flush failures
+and the supported host assumptions before stronger durability claims. Targeted
 redaction/withdrawal, per-layer expiry, backup/export/sync, cross-candidate recovery,
-new snapshots, graph storage and workflow durability remain outside that increment.
+new snapshots, graph storage and workflow durability remain separate work.

@@ -48,25 +48,22 @@ sensitive trace capture, access, omission/redaction and retention limits. Useful
 execution evidence does not authorize unrestricted storage of raw tool output.
 Dependencies: CAP-MEM-001/002/003 and CAP-SEC-002.
 
-**003-A preparation boundary:** The [temporal-record contract](../architecture/temporal-records.md)
-bounds an in-memory domain slice with synthetic/non-sensitive inputs and no automatic
-capture, persistence or export. It selects no retention duration, consent policy,
-sensitive-data default or physical-erasure guarantee. These still gate persistent
-memory; logical correction is not authorized deletion/omission behavior.
+**003-A scoped owner resolution; DEC-004 remains OPEN overall.** The
+[initial operator profile](../architecture/temporal-records.md#owner-policy-gates)
+is approved and implemented by the [first encrypted adapter](../architecture/0002-durable-history.md):
+explicit canonical submissions with necessary candidate context, one trusted local
+operator/private location, caller-supplied encryption key, manual retention within
+finite limits, whole-collection removal and no automatic external copies or restore.
+Correction preserves retained history; removal covers managed live files rather
+than universal erasure. The empty directory/lock and pending random-instance intent
+contain no canonical payload. Caller classification is not proof of absent secrets.
 
-**Durable-history disposition: OPEN for owner policy.** The
-[lifecycle contract](../architecture/temporal-records.md#privacy-lifecycle) separates
-correction, withdrawal, redaction, managed-file deletion and independent copies.
-Privacy restrictions cover historical cutoffs; a tombstone is not physical erasure.
-The [six owner policy gates](../architecture/temporal-records.md#owner-policy-gates)
-present explicit alternatives and an unapproved first-profile recommendation:
-capture/classification, access/location, retention/layers, removal/remnants,
-deletion/confidentiality assurance and copies/restoration/disclosure. No default,
-consent, delegation, retention duration, permitted audit remnant or erasure claim
-is approved by this checkpoint. Unknown answers block persistent capture/disclosure.
-Whole-collection removal is recommended first because the existing Core rejects
-missing predecessors; targeted redaction needs an explicit gap-aware contract.
-Trace policy before 004-D and broader privacy behavior remain open.
+The [lifecycle contract](../architecture/temporal-records.md#privacy-lifecycle)
+keeps withdrawal, selective redaction and independent copies distinct. These need
+separate gap-aware views and policy before implementation; a tombstone is not
+physical deletion. Transient/ephemeral durations, delegated or shared access,
+backup/export handling, rotation/recovery and sensitive trace policy before 004-D
+remain open. The approved initial profile is not a universal privacy default.
 
 ## DEC-005
 
@@ -89,6 +86,12 @@ no-charge execution boundary before running CI; quota exhaustion must be reporte
 as a block, not bypassed. The workflow uses no uploaded artifacts or caches. Actual remote
 execution is candidate-bound handoff evidence, never inferred from configuration.
 Future execution/sandbox budgets remain open.
+
+**003-A adapter limits:** Core bounds plus 64 MiB encoded input/main database,
+1 MiB encoded record, 256 MiB checked managed working files and five seconds of
+cooperative lifecycle lock contention. The [storage decision](../architecture/0002-durable-history.md)
+scopes enforcement and limitations; this is not a global quota, hard I/O timeout,
+RSS guarantee or agent-execution budget.
 
 ## DEC-006
 
@@ -118,8 +121,8 @@ integration/effect records without treating worktrees as sandboxes. Dependencies
 CAP-CTX-002, CAP-WFL-003/004. Before 004-C, define the minimum durable effect record
 and operation-specific retry/reconciliation semantics for CAP-WFL-001, linked to
 actual harness dispatch and applicable Core authority. Prefer a bounded local-first
-contract before considering distributed coordination. No format, transaction/backend
-or workspace implementation is selected; lifecycle requirements are not a schema.
+contract before considering distributed coordination. The scoped resolutions below select only their actual consumers; future graph,
+transport and workspace formats remain open. Lifecycle requirements are not a schema.
 
 **002-C scoped resolution:** The [evidence contract](../architecture/unified-evidence.md#identity-provenance-and-time)
 retains exact existing task/revision/candidate/capture identities, a separate
@@ -147,31 +150,27 @@ and Core API select distinct logical/version identities, one retained observatio
 caller-reported source references, nonempty half-open domain intervals, inclusive
 recording cutoffs and atomic linear corrections. Equal recording times use
 predecessor order; no wall clock, persistent schema or public compatibility promise
-is selected. The planned durable contract below now defines transaction/outcome
-obligations; persisted schemas, engine qualification, recovery implementation,
-migration and storage remain undecided until an actual durable consumer is authorized.
-Evaluate journal, transactional and snapshot-plus-log alternatives against those
-contracts, not architectural symmetry. No new crate or public format is selected.
+is selected. The durable scoped resolution below extends this model without changing its
+query or correction semantics. No public compatibility promise follows.
 
 **Durable-history scoped resolution; DEC-007 remains OPEN overall.** The
 [admission contract](../architecture/temporal-records.md#durable-admission) requires
-atomic record/ordinal/context acceptance, confirmed rejection versus uncertain
-completion, exact reconciliation after a lost reply, lossless constructor-based
-reconstruction and explicit corrupt/unsupported input. Core stays independent of
-I/O; the [boundary review](../architecture/temporal-records.md#core-encoding-and-concurrency-boundaries)
-identifies the later narrow comparison-material projection needed for a faithful
-codec. No Rust API changes here. Lifecycle exclusion must cover removal as well as
-admission; recovery writes require explicit authority.
+atomic record/ordinal/context acceptance, explicit uncertain completion, exact
+reconciliation and lossless validated reconstruction. The accepted
+[storage decision](../architecture/0002-durable-history.md) selects SQLite/rusqlite,
+stable SQLCipher Community, system OpenSSL 3 and the explicit raw-key boundary for
+this initial Linux adapter. Private format 1 stores one exact context and durable
+ordinals, rejects unsupported formats/policies and performs no automatic migration.
+`ComparisonBasis::material()` supplies the reviewed borrowed projection; Core
+remains independent of serialization and I/O. Lifecycle exclusion covers recovery,
+admission and removal; read-only access cannot silently perform recovery writes.
 
 The [storage assessment](../architecture/temporal-records.md#storage-assessment)
-compares framed journaling, snapshot replacement and local transactions. It
-recommends one SQLite rollback-journal adapter, conditional on DEC-004 owner policy
-and binding/host/build qualification. This is not backend/dependency approval or
-an implemented durability guarantee. The private codec, instance identity,
-coordination mechanism and future migration need an implementation contract;
-broader graph, package, harness and public-format choices stay open. Reopen this
-recommendation for a stronger approved privacy threat model, unacceptable native
-dependency constraints or changed concurrency/host requirements.
+retains the alternatives and rationale. Local functional qualification and process
+crash tests are not physical power-loss or cross-platform assurance. Reopen for
+engine/provider/build/host changes, stronger privacy needs or changed concurrency.
+Public interchange, migrations, key rotation/recovery, graph/package/harness
+formats and broader compatibility remain open at their actual decision points.
 
 ## DEC-008
 

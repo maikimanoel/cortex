@@ -33,7 +33,7 @@ Producers declare verification context/coverage under INV-004; Evidence owns val
 while knowledge owns the extraction dependency declarations in CAP-KNW-001.
 The existing [002-C in-memory model](unified-evidence.md) adds independent evidence
 dimensions and direct contextual invalidation alongside the preserved foundation
-API. Transitive dependency invalidation, persistent history and interchange remain
+API. Transitive dependency invalidation, evidence persistence and interchange remain
 planned. [002-D](cli-check.md) integrates the bounded task/evidence path in the CLI
 without transferring assessment or binding ownership out of their crates.
 
@@ -59,6 +59,10 @@ store. A handoff includes evidence and source maps under disclosure policy.
 Consumers verify integrity/candidate correspondence; stale or missing context
 does not grant privileges. Record owners and security/privacy jointly handle
 correction, retention, and authorized deletion propagation.
+The first [canonical-history adapter](0002-durable-history.md) persists requirements,
+decisions and their exact candidate context without refreshing observations or
+storing assessments. It provides whole-collection removal; broader recovery and
+selective lifecycle operations remain planned.
 
 ## Skills and registry
 
