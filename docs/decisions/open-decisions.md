@@ -25,11 +25,16 @@ not imply legal clearance. Decision point: 007. Dependency: CAP-CLI-006.
 
 ## DEC-003
 
-**Contribution and intellectual-property governance.** Decide contribution
-terms, ownership/permission requirements, and review responsibilities before
-accepting outside contributions. Neither a private repository nor agent-generated
-work settles those questions. Dependencies: CAP-SKL-002 and CAP-CLI-006; decide
-before outside contributions, even if that occurs before 007.
+**Contribution and intellectual-property governance — initial source policy
+resolved for 002-P2.** Maiki Manoel maintains CORTEX. External source contributions
+use GitHub pull requests, maintainer review and automated validation, preserving
+architectural contracts. No CLA or DCO sign-off is required. Contributors must have
+the right to submit their material under MIT and retain applicable third-party
+notices. [CONTRIBUTING.md](../../CONTRIBUTING.md) owns the practical process.
+This does not grant public visibility or settle future skill-registry submission,
+moderation, broader governance or additional third-party rights questions.
+Dependencies: CAP-SKL-002 and CAP-CLI-006; settle those remaining questions before
+their actual external consumers.
 
 ## DEC-004
 
@@ -49,13 +54,21 @@ Dependencies: CAP-MEM-001/002/003 and CAP-SEC-002.
 memory, operation, output/data-volume, path/network, and cleanup bounds appropriate
 to each actual operation and host. Set the bounded inspection limits before
 002-A and agent/sandbox defaults before 004-D. Hosted CI usage and authorization
-must be established before any dispatch. The foundation's existing ten-minute
-manual job timeout is a configured limit, not a universal product budget.
+must be established before hosted execution. The configured ten-minute CI job
+timeout is a scoped limit, not a universal product budget.
 Dependencies: CAP-CLI-002/005, CAP-CORE-003, CAP-HRN-001, and CAP-EVL-001.
 
 **002-A scoped resolution:** The [inspection contract](../architecture/repository-inspection.md#finite-budgets)
 sets time, capture, operation, entry and Linux address-space limits, prerequisite
 failures and cleanup limits. This does not select agent/sandbox or hosted-CI policy.
+
+**002-P2 scoped resolution:** The owner authorizes PR/main/manual validation in
+one standard GitHub-hosted Linux job within the included free allowance. No paid
+runners, payment methods, upgrades or charges are authorized. Establish the
+no-charge execution boundary before running CI; quota exhaustion must be reported
+as a block, not bypassed. The workflow uses no uploaded artifacts or caches. Actual remote
+execution is candidate-bound handoff evidence, never inferred from configuration.
+Future execution/sandbox budgets remain open.
 
 ## DEC-006
 
@@ -125,10 +138,21 @@ and CAP-EVO-002. No benchmark score or superiority claim is approved here.
 
 ## DEC-009
 
-**Public release scope and approval.** Decide the intended audience, distribution,
-release scope, privacy/history review, and explicit owner approval before any
-public launch. Technical completion of 007 is preparation, not publication
-authority. Dependencies: DEC-001/002/003, CAP-CLI-006, and the 006 integration exits.
+**Public release scope and approval — pre-alpha source scope resolved for
+002-P2; launch approval remains open.** The owner approves preparation for an early
+MIT source-only pre-alpha launch of the delivered 001/002 capabilities, before
+003–006. This is a scoped exception to the full-platform 007 sequence, not 006/007
+completion or permission to change visibility. No binary release, version tag,
+package publication, production-readiness or general API-stability claim is needed
+or authorized. [002-P1/P2/P3](../product/roadmap.md#pre-alpha-source-preparation-and-launch-checkpoints)
+separates audit, remediation and the later explicit owner launch decision.
+
+Before 002-P3 public access, retain history/privacy disposition, DEC-002 brand
+review, provider-managed metadata review and explicit owner approval as gates.
+[SECURITY.md](../../SECURITY.md) records the approved private-reporting route and
+its required launch-time activation/verification. No alternate contact or support
+SLA is selected. Technical preparation never grants publication authority. The
+full-platform 007 contract still depends on 006 and applicable DEC-001/002/003 exits.
 
 ## DEC-010
 

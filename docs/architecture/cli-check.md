@@ -10,6 +10,10 @@ No general task runner, agent, permission engine or persistence is provided.
 
 ## DEC-007: minimum input and criterion
 
+The examples use the executable name. From an uninstalled source checkout, prefix
+each invocation with `cargo run --offline --locked -p cortex-cli --` in place of
+`cortex`; see [setup and runnable examples](../../README.md#run-locally).
+
 ```sh
 cortex check --task release.head --revision 1 \
   --candidate "$SUBJECT_COMMIT" --expect-head "$REQUIRED_COMMIT" \
@@ -239,4 +243,4 @@ limits, output overflow and temporal ordering. Existing inspection concurrency a
 resource tests remain required. Invariance comparisons exclude atime and do not
 establish ACL/xattr equality or forensic write-attempt tracing. Executed counts,
 source tree, tools and private delivery observations belong in the external handoff;
-test source and manual CI configuration are not execution evidence.
+test source and CI configuration are not execution evidence.

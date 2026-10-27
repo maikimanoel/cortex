@@ -1,6 +1,10 @@
-name: Cortex foundation checks
+name: Cortex checks
 
 on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -8,6 +12,7 @@ permissions:
 
 jobs:
   workspace:
+    name: Rust workspace
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -37,10 +42,20 @@ jobs:
       - name: Run behavioral tests
         run: cargo test --workspace --locked --offline
 
+      - name: Build warning-free documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps --locked --offline
+
       - name: Smoke test the command interface
         run: |
           cargo run --locked --offline -p cortex-cli -- --help
           cargo run --locked --offline -p cortex-cli -- --version
+          cargo run --locked --offline -p cortex-cli -- inspect
+          cargo run --locked --offline -p cortex-cli -- check --help
+          cortex_ci_head=$(git rev-parse --verify HEAD)
+          cargo run --locked --offline -p cortex-cli -- check --json --task ci.head --revision 1 \
+            --candidate "$cortex_ci_head" --expect-head "$cortex_ci_head"
 
       - name: Check repository hygiene
         run: |

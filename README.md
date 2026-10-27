@@ -8,6 +8,11 @@ identity, and the conditions under which observations can support an engineering
 judgment. Future agents may propose or perform authorized work within those
 boundaries. Projects engineered with Cortex do not need to contain AI.
 
+**Pre-alpha.** The source implements the bounded capabilities below; it is not
+production-ready and makes no general API-stability or cross-platform guarantee.
+Milestones 003–006 remain planned. Source preparation does not authorize a public
+launch, binary release or package publication.
+
 **Milestone 002 delivers a bounded task-to-evidence CLI slice.**
 `cortex inspect` observes repositories; `cortex check` evaluates committed-HEAD
 equality with explicit task/revision and candidate-bound evidence. Help/version
@@ -44,12 +49,29 @@ correctness. Milestones 003 and later remain planned, requiring separate authori
 
 ## Run locally
 
-Install the toolchain specified in `rust-toolchain.toml` using Rustup. Rust 1.99.1
-with rustfmt and Clippy is pinned; Rust 2024 and Cargo resolver 3 are used.
-With that toolchain and the locked dependency cache installed, the workspace
-builds offline. The CLI uses a JSON serializer; Core and Evidence still use only
-the standard library and the existing Core dependency. No runtime network service
-is required.
+Use Linux with Rustup, Git supporting `--no-lazy-fetch`, and util-linux
+`/usr/bin/prlimit`. Tests should run as a non-root user for permission fixtures.
+Rust 1.99.1 with rustfmt and Clippy is pinned in `rust-toolchain.toml`; Rust 2024
+and Cargo resolver 3 are used. Other platforms are not currently supported by
+repository inspection.
+
+Obtain the source and bootstrap the toolchain and dependency cache with network
+access. Cloning the repository currently requires authorized GitHub access while
+it remains private:
+
+```sh
+git clone https://github.com/maikimanoel/cortex.git
+cd cortex
+rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
+cargo fetch --locked
+cargo build --workspace --locked --offline
+```
+
+An empty Cargo cache cannot run the offline commands until the locked fetch
+succeeds. Repeat the fetch when required dependencies change. After setup, the
+workspace builds and verifies offline. The CLI uses a JSON serializer; Core and
+Evidence still use only the standard library and the existing Core dependency.
+No runtime network service is required. From the workspace root:
 
 ```sh
 cargo run --offline --locked -p cortex-cli -- --help
@@ -59,14 +81,24 @@ cargo run --offline --locked -p cortex-cli -- inspect --repo "/path/to/repositor
 cargo run --offline --locked -p cortex-cli -- check --help
 ```
 
-For a bounded task, supply full lowercase commit IDs:
+For a bounded task in the current repository, use its actual full commit ID as
+both subject and expected revision:
 
 ```sh
-cortex check --task release.head --revision 1 \
-  --candidate "$SUBJECT_COMMIT" --expect-head "$REQUIRED_COMMIT" --repo "/path/to/repository"
-cortex check --json --task release.head --revision 1 \
-  --candidate "$SUBJECT_COMMIT" --expect-head "$REQUIRED_COMMIT" --repo "/path/to/repository"
+cortex_subject_commit=$(git rev-parse --verify HEAD)
+cargo run --offline --locked -p cortex-cli -- check --task release.head --revision 1 \
+  --candidate "$cortex_subject_commit" --expect-head "$cortex_subject_commit"
+cargo run --offline --locked -p cortex-cli -- check --json --task release.head --revision 1 \
+  --candidate "$cortex_subject_commit" --expect-head "$cortex_subject_commit"
 ```
+
+These examples can PASS in a supported clean checkout; a dirty checkout remains
+unresolved. To inspect another repository, add `--repo "/path/to/repository"`
+and obtain the subject commit from that repository. Change `--expect-head` to
+the full lowercase commit ID required by the criterion when testing a different
+expectation. `cargo run` builds and runs the executable; it does not install a
+global `cortex` command. Interface documentation uses `cortex` as the executable
+name; the source-tree prefix above works without installation.
 
 The candidate pin identifies the subject, while expected HEAD is the checked
 proposition. Check exits 0 only for CURRENT PASS, 8 for CURRENT FAIL, and 9 when
@@ -129,16 +161,16 @@ reports or establish the truth of their reasoning. Assessments grant no authorit
 ## Verify
 
 ```sh
-cargo metadata --format-version 1 --locked
+cargo metadata --format-version 1 --locked --offline
 cargo fmt --all -- --check
-cargo check --workspace --locked
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --locked
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
-cargo run --locked -p cortex-cli -- --help
-cargo run --locked -p cortex-cli -- --version
-cargo run --locked -p cortex-cli -- inspect
-cargo run --locked -p cortex-cli -- check --help
+cargo check --workspace --locked --offline
+cargo clippy --workspace --all-targets --locked --offline -- -D warnings
+cargo test --workspace --locked --offline
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --offline
+cargo run --locked --offline -p cortex-cli -- --help
+cargo run --locked --offline -p cortex-cli -- --version
+cargo run --locked --offline -p cortex-cli -- inspect
+cargo run --locked --offline -p cortex-cli -- check --help
 git diff --check
 git diff --cached --check
 git status --short
@@ -158,11 +190,23 @@ Validate relative links and anchors in changed Markdown documentation as well.
 Passing tests support these scoped contracts, not comprehensive correctness or
 security certification.
 
-The GitHub Actions workflow has only `workflow_dispatch`, read-only repository
-permissions, and a bounded job timeout. It is prepared for later operator use;
-its presence does not establish a successful remote run. It fetches locked Cargo
-dependencies before offline checks. Before dispatching it,
-establish account usage availability and authorization for hosted execution.
+The [GitHub Actions workflow](.github/workflows/ci.yml) checks pull requests to
+`main`, pushes to `main`, and manual requests in one standard Linux job named
+`Rust workspace`. It uses read-only repository permissions, a pinned checkout
+without persisted credentials, and a ten-minute timeout. It fetches locked Cargo
+dependencies before offline checks, including warning-free Rustdoc. No secrets,
+privileged pull-request trigger, caches or uploaded artifacts are configured.
+Hosted execution requires authorized included capacity; it must not incur
+unapproved charges. Inspect the actual run and commit before claiming CI success.
+
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for focused pull requests, local checks and
+maintainer review. Report ordinary bugs and discuss proposed features through
+GitHub issues. For suspected vulnerabilities, follow [SECURITY.md](SECURITY.md)
+and avoid public disclosure. GitHub Private Vulnerability Reporting must be
+activated and verified during the separately authorized public launch; this
+preparation does not claim it is already available.
 
 ## Engineering commitments
 

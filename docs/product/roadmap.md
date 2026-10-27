@@ -25,9 +25,9 @@ This does not require a fixed checklist, formal method or agent topology for eve
 
 | Milestone | Current readiness | Dependency | Exit evidence |
 | --- | --- | --- | --- |
-| 001 — Repository Foundation | DELIVERED: Cortex source foundation; local verification and private delivery require candidate-scoped handoff evidence; remote CI remains NOT_RUN until authorized execution | None | Actual three-crate workspace, CLI behavior, minimal contract tests, private remote, configured manual CI |
+| 001 — Repository Foundation | DELIVERED: Cortex source foundation; local/remote verification and private delivery require candidate-scoped handoff evidence | None | Actual three-crate workspace, CLI behavior, minimal contract tests, private remote, configured CI |
 | 001A — Product Blueprint | Documentation artifact defined here; checkpoint acceptance/commit/push must be established in its handoff | 001 | Complete catalog, consistent architecture/roadmap/decisions, link and scope audits, local checks, verified private documentation commit/push |
-| 002 — First Vertical Slice | DELIVERED: bounded 002-A/B/C/D slice; candidate-scoped local verification/private delivery in handoff; remote CI NOT_RUN | 001A | All 002-A/B/C/D exits; real task-to-candidate-to-evidence-to-inspection end-to-end tests and honest failure/unknown cases |
+| 002 — First Vertical Slice | DELIVERED: bounded 002-A/B/C/D slice; candidate-scoped local/remote verification and private delivery in handoff | 001A | All 002-A/B/C/D exits; real task-to-candidate-to-evidence-to-inspection end-to-end tests and honest failure/unknown cases |
 | 003 — Temporal Knowledge & Memory | PLANNED | 002; privacy/storage/coverage decisions | Graph extraction/query/conflict/invalidation, memory supersession/time/staleness, retrieval/context and portable handoff correctness |
 | 004 — Typed Skills, Workflows & Harness | PLANNED | 003; authority, profile, adapter and budget decisions | Typed composition/guards, durable continuation, effective host isolation, real authorized/denied invocations, traces and recovery |
 | 005 — Governed Evolution & Evaluation | PLANNED | 004; evaluation decisions | Reproducible evaluation and regression evidence, audited proposal dispositions, no self-approval or recursive privilege expansion |
@@ -90,9 +90,9 @@ redacted library inspection. The [002-D contract](../architecture/cli-check.md)
 composes all three through actual Git captures, an explicit revision-equality
 oracle, unified evidence and human/JSON output. CAP-EVD-002 and CAP-CLI-003 implement
 that bounded contract. Their local acceptance and private delivery observations
-belong to candidate-scoped external handoffs; remote CI remains NOT_RUN. This does
-not deliver agents, complete candidate snapshots, permission enforcement or temporal
-history. 003 remains planned and gated by its privacy/storage/coverage decisions.
+belong to candidate-scoped external handoffs, including actual remote CI outcomes.
+This does not deliver agents, complete candidate snapshots, permission enforcement
+or temporal history. 003 remains planned and gated by its privacy/storage/coverage decisions.
 
 ## Checkpoint 002-E: documentation consolidation
 
@@ -211,6 +211,29 @@ verification, recording limitations. Exit evidence is a reviewed candidate and
 the actual required decisions. Public access, tag/release creation, package
 publication, and launch each remain subject to explicit separate owner authority.
 This roadmap grants none of them.
+
+## Pre-alpha source preparation and launch checkpoints
+
+The owner-approved DEC-009 exception allows early source access to delivered
+001/002 without claiming 003–006 or the full-platform 007 exit. These checkpoints
+use the existing CAP-CLI-005/006 owners; they introduce no runtime capability.
+
+- **002-P1:** Read-only repository, history, security and contributor-readiness
+  audit. Findings and unknowns remain in the private candidate-scoped handoff.
+- **002-P2:** Authorized remediation and private delivery: reproducible setup,
+  initial contribution/security policies, PR/main/manual CI, actual included-capacity
+  hosted execution and dependency analysis. Record actual results and unresolved
+  gates in its handoff; workflow configuration is not a successful run.
+- **002-P3:** Separate owner decision before public visibility. Resolve history
+  disclosure, brand and provider-metadata gates; inspect the exact proposed public
+  refs/candidate and actual CI evidence. Approve applicable free GitHub controls,
+  enable and verify private vulnerability reporting when visibility permits, and
+  apply main-branch checks compatible with a single maintainer. No release, tag or
+  package publication follows implicitly from source visibility.
+
+The repository remains private during P2. The source is pre-alpha, with no general
+API-stability, production-readiness or expanded platform guarantee. The full 007
+milestone and CAP-CLI-006 remain planned under their complete contracts.
 
 ## Explicit future backlog
 

@@ -162,9 +162,10 @@ the permitted project documentation to:
 
 Record prerequisites, attempted steps, failures and the assessed candidate; an
 internal rehearsal is not independent external usability evidence. These are
-future observable requirements. Contributor governance, permitted submission and
-review responsibilities remain DEC-003 decisions before accepting outside work;
-this document does not authorize public access or contribution intake.
+observable requirements; 002-P2 rehearses the scoped pre-alpha source path without
+claiming independent external acceptance. DEC-003's approved initial maintainer/PR
+policy is documented in [CONTRIBUTING.md](../CONTRIBUTING.md); broader governance
+remains deferred. This document does not authorize public access.
 
 **Change review:** Preserve contract compatibility, accurate documentation, relevant
 tests, security/privacy boundaries, resource/error semantics and evidence validity.

@@ -1063,15 +1063,18 @@ tests. **Decisions:** DEC-005/006/007; no complete command tree selected now.
 
 ### CAP-CLI-005
 
-**Name:** Foundation development and manual CI configuration.
+**Name:** Workspace development and bounded CI validation.
 **Status:** IMPLEMENTED.
 **Owner:** CLI/delivery. **Target:** 001, maintained in every increment.
 **Dependencies:** The three workspace crates and installed pinned toolchain.
 
 **Functional contract:** Provide a shared Cargo workspace/lockfile, pinned Rust
 toolchain, unpublished packages, documented local verification commands, and a
-manual-only read-only CI definition with a bounded job and pinned checkout.
-No automatic job, package publication, or release is enabled. Workspace packages
+least-privilege CI definition for PRs to main, pushes to main and manual execution,
+with one bounded standard Linux job and pinned checkout. Fetch locked dependencies
+before offline verification, including warning-free Rustdoc. No secrets or
+privileged untrusted-code trigger is configured. Package publication and releases
+remain disabled. Workspace packages
 inherit the owner-selected MIT License under DEC-001.
 
 **Advanced properties:** Controlled build inputs and least-privilege CI
@@ -1079,12 +1082,15 @@ inherit the owner-selected MIT License under DEC-001.
 
 **Acceptance:** Workspace metadata agrees with the crate graph; local formatting,
 compilation, lint and behavioral checks actually run against the candidate. CI
-configuration has only `workflow_dispatch`, read-only permissions, and no persisted
-checkout credentials. Remote success requires a separately authorized actual run.
+configuration has the approved PR/main/manual triggers, read-only permissions,
+no persisted checkout credentials and a ten-minute job timeout. A cold Cargo cache
+can follow documented fetch/build/check instructions without a global CLI install.
+Remote success requires an actual run for the intended candidate within authorized
+included capacity; quota blocks remain explicit.
 **Verification:** [Workspace](../../Cargo.toml), [toolchain](../../rust-toolchain.toml),
 [workflow](../../.github/workflows/ci.yml), and [commands](../../README.md#verify).
-Remote CI is `NOT_RUN` in the observed starting state. **Decision:** DEC-005 before
-dispatch; the checkpoint does not authorize changing this configuration.
+Actual execution outcomes belong in candidate-scoped handoffs. **Decision:** DEC-005
+governs included-capacity-only hosted usage; configuration alone establishes no pass.
 
 ### CAP-CLI-006
 
@@ -1092,6 +1098,11 @@ dispatch; the checkpoint does not authorize changing this configuration.
 **Status:** PLANNED.
 **Owner:** CLI/delivery with owner decisions. **Target:** 007.
 **Dependencies:** Full 006 exits, CAP-SEC-002/003, DEC-001/002/003/009.
+
+**Scoped early-source exception:** DEC-009 permits 002-P1/P2/P3 preparation and
+separately approved public access to the delivered 001/002 pre-alpha source before
+006. This does not complete this full-platform capability or its 007 exit. Keep
+003–006 planned and distinguish source access from releases, tags and packages.
 
 **Functional contract:** Prepare a reviewed release candidate with license decision,
 repository/history/privacy review, distribution/versioning and operation/support

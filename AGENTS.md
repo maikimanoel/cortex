@@ -61,7 +61,7 @@ progressively without claiming unfinished milestones complete.
   publish packages or releases, add paid services, or upload private planning materials.
 - Minimize dependencies. Review origin, maintenance, license obligations, and
   concrete need before introducing one. Keep `Cargo.lock` tracked and use the
-  pinned toolchain. Recheck the manual workflow when changing toolchain inputs.
+  pinned toolchain. Recheck the CI workflow when changing toolchain inputs.
 
 Before handoff, run the verification commands in `README.md` against the final
 candidate. Inspect test counts and failures. Review the staged diff, whitespace,
@@ -70,8 +70,11 @@ results, unavailable tools, and limitations outside the repository when evidence
 contains private operational details. A failed or unexecuted check remains so
 until a new observation justifies a different conclusion.
 
-The CI workflow is manual-only. Do not add automatic triggers or dispatch hosted
-jobs before account usage and authorization are established. Do not describe a
-workflow file as a passing remote pipeline. Handoffs must distinguish completed
+The CI workflow checks pull requests and pushes to main, with optional manual
+execution, under the approved standard Linux included-capacity policy. Keep token
+permissions read-only, checkout credentials unpersisted, and untrusted pull requests
+away from secrets and privileged execution. Do not select paid runners, add payment
+methods or incur unapproved charges; report quota blocks explicitly. Do not describe
+a workflow file as a passing remote pipeline. Handoffs must distinguish completed
 work, observed verification, pending work, and risks; do not claim broad readiness
 or independent review from a local self-review.
