@@ -127,6 +127,10 @@ Backend, format, transaction, and compatibility decisions remain
 [open](../decisions/open-decisions.md); these responsibilities do not mandate a
 database, graph service, vector store, or event-storage schema.
 
+The planned [003-A temporal-record contract](temporal-records.md) bounds the first
+in-memory requirement/decision history slice and its separate privacy, persistence
+and snapshot gates. It changes no current runtime or evidence semantics.
+
 ## Foundation reconciliation and extension seams
 
 The current Rust `Verdict` variants are `Pass`, `Fail`, and `Inconclusive`, and the

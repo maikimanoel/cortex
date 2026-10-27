@@ -118,6 +118,21 @@ demo nor an append-only log alone satisfies the exit.
 | 003-E | Handoffs [CAP-MEM-003](capability-catalog.md#cap-mem-003), privacy behavior CAP-SEC-002, CLI surfaces [CAP-CLI-004](capability-catalog.md#cap-cli-004) | 003-C/D; portable round-trip, source map, integrity rejection, candidate mismatch -> STALE, redaction and authorized deletion propagation |
 | 003-F | Context assembly [CAP-CTX-001](capability-catalog.md#cap-ctx-001), CLI surfaces CAP-CLI-004 | 003-D/E; versioned source selection, provenance, resource/token limits, visible omissions/staleness, no authority from recovered context |
 
+The next bounded implementation recommendation is the first in-memory slice of
+existing 003-A: [canonical temporal records](../architecture/temporal-records.md).
+It records/corrects requirements and decisions and answers domain/recording-time
+queries using existing candidate observations. It requires separate implementation
+authorization and completes neither full 003-A nor CAP-MEM-001. Privacy/layer
+policy and snapshot extensions remain gates; persistence additionally requires
+DEC-004/007 resolutions and actual crash/recovery/deletion acceptance. No backend,
+new crate, CLI command or public format is selected by this preparation.
+
+003-B/003-C supply source facts and dependency validity; 003-F grounds material
+technical assumptions in those candidate/versioned sources under CAP-CTX-001.
+003-A retains learning references without certifying diagnoses; confirmed-defect
+and verified-repair recovery integrates with CAP-MEM-002 in 003-C/003-D. Qualified
+rule promotion and empirical learning evaluation retain their 004/005 boundaries.
+
 Exit requires all these contracts, including historical validity, conflicts,
 memory corrections, privacy limits, and independent inspection of exports. Storage
 choices must support the semantics; they are not prerequisites imposed by this
@@ -133,6 +148,14 @@ Canonical events survive chat-window limits, and compaction/retrieval must retai
 material constraints or declare missing/stale context without guessed token thresholds.
 
 ## 004: typed skills, workflows, and effective execution
+
+Quality contracts are integrated into existing owners: 004-A binds protected
+acceptance baselines and authorized revisions under CAP-CORE-003; 004-B qualifies
+engineering-verification rules under CAP-SKL-002 before trusted blocking use;
+004-C selects target-language/ecosystem methods and protected versus changed
+behavior under CAP-WFL-002. This early rule qualification does not depend on the
+later 005 evaluation service or alter Core's authority checks. Existing effect
+reconciliation, current authority and cancellation contracts remain mandatory.
 
 | Increment | Scope/capabilities | Dependency and exit evidence |
 | --- | --- | --- |
@@ -164,6 +187,11 @@ verification; neither a clean Git merge nor branch-local evidence substitutes fo
 integrated acceptance under CAP-WFL-004.
 
 ## 005: governed evolution and evaluation
+
+CAP-EVL-002 evaluates defect-learning and rule changes against missed defects,
+false positives, regressions, maintainability, resource use and reviewer burden;
+test-count growth alone is not an improvement result. CAP-EVL-001 owns the protected
+case population and accounting, with DEC-008 retaining comparison/oracle policy.
 
 | Increment | Scope/capabilities | Dependency and exit evidence |
 | --- | --- | --- |

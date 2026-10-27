@@ -48,6 +48,12 @@ sensitive trace capture, access, omission/redaction and retention limits. Useful
 execution evidence does not authorize unrestricted storage of raw tool output.
 Dependencies: CAP-MEM-001/002/003 and CAP-SEC-002.
 
+**003-A preparation boundary:** The [temporal-record contract](../architecture/temporal-records.md)
+bounds an in-memory domain slice with synthetic/non-sensitive inputs and no automatic
+capture, persistence or export. It selects no retention duration, consent policy,
+sensitive-data default or physical-erasure guarantee. These still gate persistent
+memory; logical correction is not authorized deletion/omission behavior.
+
 ## DEC-005
 
 **Default execution, isolation, and CI budgets.** Choose explicit time, CPU,
@@ -121,6 +127,13 @@ The linked contract specifies fields, limits, privacy and compatibility. Existin
 library APIs and 002-C semantics remain unchanged. Broader formats, persisted
 identity/history, portable interchange and API commitments remain open at their
 original milestone boundaries.
+
+**003-A preparation boundary:** The temporal-record contract selects only minimum
+deterministic in-memory identity, temporal and correction rules in existing Core.
+Public signatures and persisted schemas, transactions, crash recovery, migration
+and storage remain undecided until an actual durable consumer is authorized.
+Evaluate journal, transactional and snapshot-plus-log alternatives against those
+contracts, not architectural symmetry. No new crate or public format is selected.
 
 ## DEC-008
 
@@ -206,7 +219,19 @@ material and Core correspondence rules. Matching dirty status remains insufficie
 for content identity; no dirty snapshot mechanism is selected. DEC-010's separate
 002-C resolution consumes these limits without strengthening them.
 
+**003-A preparation boundary:** The in-memory record slice preserves supplied
+observation states; it creates no new snapshot identity. Before snapshot/extraction
+work, choose and verify clean-commit-only versus an explicit immutable working
+snapshot scope, coverage/exclusions, content correspondence and race behavior.
+Dirty status equality cannot select that mechanism. This remains an open gate,
+not a completed CAP-CORE-002 extension.
+
 ## DEC-012
+
+Before 004-A/004-B, decide the initial acceptance-baseline amendment authority and
+rule-qualification/trusted-blocking policy under CAP-CORE-003/CAP-SKL-002. Protected
+baselines must allow authorized evolution; an unqualified engineering rule cannot
+become an authority decision. This does not select reviewer counts or risk thresholds.
 
 **Proportional profiles and required reviewers.** Before 004-C, establish
 auditable classification rules for trivial/standard/critical work and the qualified

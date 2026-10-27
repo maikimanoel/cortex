@@ -123,6 +123,15 @@ check that correspondence at the effect boundary; a prior plan/declaration canno
 substitute for it. Invalid, incomplete or indeterminate authorization never allows
 execution. Core remains the policy authority; harness/skill consumers enforce it.
 
+Task contracts identify the authorized behavior change, protected behavior and a
+versioned acceptance baseline. Its governed material includes criteria, tests,
+fixtures, assertions, verifier configuration and test discovery. Permission to edit
+that material is not permission to weaken acceptance. An authorized baseline change
+needs an explicit revision, applicable approval and fresh evidence; retain the prior
+baseline and its evidence. Unapproved or indeterminate changes cannot obtain
+acceptance from a more favorable result. This does not make tests immutable or
+route every ordinary test change through harness-evolution governance.
+
 **Advanced properties:** Non-amplifying delegation, versioned policy, temporal
 decision provenance, and auditable consumption at invocation (INV-001/004/006/008).
 Model proposals, operator authorizations, results, evaluations, and transitions
@@ -133,6 +142,9 @@ another tool, larger budget, changed candidate, or broader path/network access i
 blocked before effects. Wrong/absent approval cannot be supplied by tool text.
 Changing the resource, constraints or execution context after planning requires
 applicable authorization at dispatch; uncertain correspondence blocks the effect.
+Disabling test discovery or deleting a governed assertion cannot silently turn a
+failing task into accepted work. An authorized baseline improvement receives a new
+revision and candidate-bound checks rather than relabeling the old result.
 **Verification:** NOT_RUN; policy boundary/property tests and real host-denial
 integration tests. **Decisions:** DEC-005/006/012; no numeric budgets selected.
 
@@ -362,8 +374,13 @@ store, model, performance claim, or activation is selected.
 
 **Name:** Canonical history and memory layers.
 **Status:** PLANNED.
-**Owner:** Memory/continuity. **Target:** 003-A.
+**Owner:** Memory/continuity. **Target:** 003-A foundations; learning/recovery
+integration in 003-C/003-D.
 **Dependencies:** CAP-CORE-002, CAP-EVD-002, policy decisions DEC-004/007.
+
+The [003-A temporal-record contract](../architecture/temporal-records.md) bounds
+the first in-memory slice; it does not complete persistence, layer retention,
+cross-candidate recovery or the whole capability.
 
 **Functional contract:** Retain logically append-only canonical requirements,
 decisions, and learning history with identities, provenance, version references,
@@ -374,6 +391,14 @@ Logical corrections preserve the meaning of retained history, not an uncondition
 promise of physical retention. Authorized deletion/omission follows CAP-SEC-002 and
 DEC-004; missing policy must not be replaced by an append-only storage assumption.
 
+Learning records distinguish a reported diagnosis, a confirmed defect and a
+verified repair. Retain the affected and repaired candidate references, minimal
+reproduction, regression/evidence references, provenance and applicability limits;
+missing confirmation stays explicit. The 003-A record foundation retains supplied
+references without authenticating them. Evidence-linked learning and recovery
+consumers integrate in 003-C/003-D under CAP-MEM-002; this does not introduce an
+automatic learning or rule-promotion mechanism in 003-A.
+
 **Advanced properties:** Bitemporal queries and privacy-compatible deletion without
 silently rewriting retained history (INV-004/005/007/012). Canonical memory is an
 authority for its records, never a source of new operational permission.
@@ -381,6 +406,8 @@ authority for its records, never a source of new operational permission.
 **Acceptance:** Superseding a decision preserves both identities and applicable
 times; querying before/after a late recording gives the appropriate perspective.
 Transient/ephemeral retention does not silently delete required canonical facts.
+A reported diagnosis cannot become confirmed reusable knowledge merely by being
+remembered; a claimed repair without its verification remains unverified.
 **Verification:** NOT_RUN; supersession, temporal-boundary, invalid-event and
 retention tests. **Decisions:** DEC-004/007 before enabling persistence.
 
@@ -477,13 +504,24 @@ absent postconditions/evidence, and incompatible composition. Require behavioral
 tests before stable promotion. Skills cannot independently change core policy,
 the harness, permissions, or registry.
 
+Before an imported or generated engineering-verification rule can supply an
+authoritative blocking finding, qualify its exact version for a declared
+applicability domain with a discriminating positive example, a negative or
+near-neighbor example, and documented limitations. Retain the qualification
+evidence. Generation or registration alone is insufficient; changed rules require
+requalification. An unqualified rule cannot assert a verified defect, while an
+unavailable required qualified check keeps the task unresolved. Qualification does
+not replace Core's authority checks or allow execution when authorization is absent.
+
 **Advanced properties:** Non-amplifying composition and immutable versioned traces
 (INV-001/004/006/008/009). Promotion uses CAP-EVO-002, not self-certification.
 
 **Acceptance:** Compatible composition carries outputs and evidence correctly;
 incompatible types fail construction or a declared runtime guard before effects.
 Imported instructions requesting extra permissions are rejected. Untested skills
-cannot become stable. **Verification:** NOT_RUN; construction/runtime negative
+cannot become stable. A rule that also rejects its valid near-neighbor fails
+qualification and cannot become a trusted blocker; a missing required qualification
+is not PASS. **Verification:** NOT_RUN; construction/runtime negative
 cases and real unauthorized-tool tests. **Decisions:** DEC-003/005/007.
 
 ## F. Typed workflows and engineering methods
@@ -541,6 +579,15 @@ reliability, and delivery. Specification-first and test-driven methods are avail
 when suitable. Inspect states, guards, and evidence expectations before running.
 Unsupported classification or missing qualified review blocks the affected path.
 
+Select contracts, verification mechanisms and risk controls for the target
+project's language, ecosystem, architecture and task, rather than CORTEX's Rust
+implementation language. All selected methods use the same candidate/evidence and
+authority semantics. Required unsupported verification remains explicit. Distinguish
+the authorized behavior delta from behavior that must remain stable. Where relevant,
+include cross-language/component contracts for serialization, nullability, units,
+identifiers, errors, persistence and compatibility; no universal compatibility
+promise is inferred. Core owns acceptance-baseline identity/approval, not the method.
+
 **Advanced properties:** Proportionality with no bypass of contract-required review,
 explicit specialization boundaries, and evidence-backed method selection
 (INV-001/004/006/011).
@@ -548,6 +595,10 @@ explicit specialization boundaries, and evidence-backed method selection
 **Acceptance:** A trivial task need not spawn agents or formal analysis; a critical
 task cannot skip its required qualified review. A specialist cannot invoke tools
 outside its grant. Workflow inspection has no execution effects.
+Equivalent tasks in different ecosystems select their applicable checks rather
+than an assumed universal verifier. A refactor that changes protected interface
+semantics fails its contracted checks even if unrelated tests pass; an authorized
+migration identifies the revised baseline and obtains fresh evidence.
 **Verification:** NOT_RUN; profile/guard cases and complete representative methods.
 **Decisions:** DEC-006/012; no risk thresholds or reviewer policy invented here.
 
@@ -868,6 +919,10 @@ coordination cost, and regressions. Local branch completion is not the endpoint
 when integration and revalidation remain outstanding. Improvement claims require
 appropriately controlled comparisons with the protected accounting of CAP-EVL-001;
 missing/failed attempts cannot be filtered away to manufacture a better denominator.
+When evaluating confirmed-defect learning or engineering rules, include missed
+defects, false positives, new regressions, maintainability effects and reviewer
+burden alongside observed resource use and downstream task outcomes. A larger test
+count alone cannot establish improved engineering quality.
 
 **Advanced properties:** Candidate-bound, resource-aware empirical promotion and
 honest uncertainty (INV-004/005/009/011).
@@ -876,6 +931,9 @@ honest uncertainty (INV-004/005/009/011).
 despite improved aggregate score. A study changing both model and harness cannot
 claim isolated harness benefit without evidence. A parallel run with fast local
 completion but failed integrated checks cannot count as a faster verified outcome.
+An approach adding tests while increasing missed defects or false-positive review
+work cannot claim improvement from test counts alone; report those outcomes and
+unmeasured dimensions explicitly.
 **Verification:** NOT_RUN; adversarial oracle/reward cases and reproducible
 controlled comparisons.
 **Decisions:** DEC-008/012; no superiority or publication claim exists.
@@ -897,12 +955,20 @@ budget-truncated material is visible. Context never grants operational authority
 Compaction/retrieval preserve material constraints from canonical events and
 references, independent of chat-window limits or any guessed token threshold.
 
+Ground material technical assumptions in candidate-relevant symbols/APIs, dependency
+versions, schemas, contracts or observed behavior using the shared index and source
+references. Separate supported facts from inferences and unresolved assumptions;
+partial coverage or missing source cannot substantiate a current technical claim.
+Do not create another knowledge index to perform this validation.
+
 **Advanced properties:** Reproducible assembly configuration, temporal dependencies,
 and privacy-aware source selection (INV-001/004/005/007/008).
 
 **Acceptance:** Repeated deterministic assembly for fixed inputs is inspectably
 consistent; candidate changes invalidate affected context. Over-budget content
 has declared truncation, and a retrieved instruction cannot elevate permissions.
+An API supported only by another dependency version cannot be presented as grounded
+current context; incomplete source coverage remains explicit rather than fabricated.
 **Verification:** NOT_RUN; assembly/source-map, budget, staleness and injection
 cases. **Decisions:** DEC-004/005/007; token accounting is adapter-aware.
 
