@@ -10,7 +10,8 @@ boundaries. Projects engineered with Cortex do not need to contain AI.
 
 **Pre-alpha.** The source implements the bounded capabilities below; it is not
 production-ready and makes no general API-stability or cross-platform guarantee.
-Milestones 003–006 remain planned. Source preparation does not authorize a public
+Milestone 003 has begun with bounded in-memory canonical history; its remaining
+capabilities and Milestones 004–006 remain planned. Source preparation does not authorize a public
 launch, binary release or package publication.
 
 **Milestone 002 delivers a bounded task-to-evidence CLI slice.**
@@ -24,8 +25,9 @@ task runners, persistence, providers, network services, background workers or te
 
 The planned platform combines typed operational authority, mandatory evidence,
 and temporal provenance. These are product requirements; the foundation does not
-yet implement permission enforcement or temporal history. Checkpoint 001A records
-the blueprint without changing runtime behavior.
+yet implement permission enforcement or persistent memory. Checkpoint 001A records
+the blueprint; the first 003-A slice now supplies deterministic in-memory
+[requirement/decision history](docs/architecture/temporal-records.md) in Core.
 
 | Document | Canonical responsibility |
 | --- | --- |
@@ -45,7 +47,8 @@ the blueprint without changing runtime behavior.
 [CLI check contract](docs/architecture/cli-check.md) for scope, limits and acceptance
 mechanisms. `cortex inspect` continues to create no binding or assessment. `check`
 verifies one explicit Git proposition; it does not establish general software
-correctness. Milestones 003 and later remain planned, requiring separate authority.
+correctness. The first 003-A library slice adds temporal records; remaining
+increments require separate authority.
 
 ## Run locally
 
@@ -132,7 +135,7 @@ these are not sandbox or hard real-time guarantees.
 
 | Crate | Current responsibility |
 | --- | --- |
-| `cortex-core` | Foundation contracts, explicit contract revisions, typed repository state and scoped candidate/task binding |
+| `cortex-core` | Foundation contracts, contract revisions, typed candidate/task binding and bounded in-memory canonical temporal records |
 | `cortex-evidence` | Legacy reports plus unified candidate-bound result, applicability, validity and redacted library inspection |
 | `cortex-cli` | Help/version, bounded Git inspection, typed adapter and human/JSON task-to-evidence check |
 
@@ -187,6 +190,10 @@ Actual `check` subprocess tests cover supported/refuted criteria, parsed JSON,
 non-successful binding, explicit errors and repeated read-only operation.
 Inspection permission fixtures require a non-root Linux user; all fixtures are local/offline.
 Validate relative links and anchors in changed Markdown documentation as well.
+Core temporal tests additionally exercise immutable corrections, independent
+domain/recording times, historical cutoffs, atomic rejection, limits and redaction;
+real-Git consumer tests preserve capture state and unchanged evidence. History is
+not durable, live verification or operational permission.
 Passing tests support these scoped contracts, not comprehensive correctness or
 security certification.
 

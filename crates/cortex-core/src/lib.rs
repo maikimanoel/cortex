@@ -5,6 +5,9 @@
 /// Typed repository observations and candidate-bound task contracts.
 pub mod binding;
 
+/// Bounded in-memory canonical requirement and decision history.
+pub mod temporal;
+
 use std::{error::Error, fmt};
 
 /// Maximum task identifier size in UTF-8 bytes (identifiers are ASCII).
@@ -57,22 +60,7 @@ pub struct TaskId(String);
 impl TaskId {
     /// Validate a task identifier before allocating its owned representation.
     pub fn new(value: &str) -> Result<Self, ContractError> {
-        if value.len() > MAX_TASK_ID_BYTES {
-            return Err(ContractError::TooLong {
-                field: "task_id",
-                max_bytes: MAX_TASK_ID_BYTES,
-            });
-        }
-        if value.trim().is_empty() {
-            return Err(ContractError::Blank("task_id"));
-        }
-        if !value.as_bytes()[0].is_ascii_alphanumeric()
-            || !value
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
-        {
-            return Err(ContractError::InvalidCharacter("task_id"));
-        }
+        validate_identifier("task_id", value)?;
         Ok(Self(value.to_owned()))
     }
 
@@ -146,6 +134,26 @@ impl TaskContract {
     pub fn acceptance(&self) -> &str {
         &self.acceptance
     }
+}
+
+fn validate_identifier(field: &'static str, value: &str) -> Result<(), ContractError> {
+    if value.len() > MAX_TASK_ID_BYTES {
+        return Err(ContractError::TooLong {
+            field,
+            max_bytes: MAX_TASK_ID_BYTES,
+        });
+    }
+    if value.trim().is_empty() {
+        return Err(ContractError::Blank(field));
+    }
+    if !value.as_bytes()[0].is_ascii_alphanumeric()
+        || !value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+    {
+        return Err(ContractError::InvalidCharacter(field));
+    }
+    Ok(())
 }
 
 fn validate_text(field: &'static str, value: &str) -> Result<(), ContractError> {

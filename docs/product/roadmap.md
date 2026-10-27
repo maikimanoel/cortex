@@ -28,7 +28,7 @@ This does not require a fixed checklist, formal method or agent topology for eve
 | 001 — Repository Foundation | DELIVERED: Cortex source foundation; local/remote verification and private delivery require candidate-scoped handoff evidence | None | Actual three-crate workspace, CLI behavior, minimal contract tests, private remote, configured CI |
 | 001A — Product Blueprint | Documentation artifact defined here; checkpoint acceptance/commit/push must be established in its handoff | 001 | Complete catalog, consistent architecture/roadmap/decisions, link and scope audits, local checks, verified private documentation commit/push |
 | 002 — First Vertical Slice | DELIVERED: bounded 002-A/B/C/D slice; candidate-scoped local/remote verification and private delivery in handoff | 001A | All 002-A/B/C/D exits; real task-to-candidate-to-evidence-to-inspection end-to-end tests and honest failure/unknown cases |
-| 003 — Temporal Knowledge & Memory | PLANNED | 002; privacy/storage/coverage decisions | Graph extraction/query/conflict/invalidation, memory supersession/time/staleness, retrieval/context and portable handoff correctness |
+| 003 — Temporal Knowledge & Memory | IN_PROGRESS: first in-memory 003-A slice only | 002; privacy/storage/coverage decisions | Graph extraction/query/conflict/invalidation, memory supersession/time/staleness, retrieval/context and portable handoff correctness |
 | 004 — Typed Skills, Workflows & Harness | PLANNED | 003; authority, profile, adapter and budget decisions | Typed composition/guards, durable continuation, effective host isolation, real authorized/denied invocations, traces and recovery |
 | 005 — Governed Evolution & Evaluation | PLANNED | 004; evaluation decisions | Reproducible evaluation and regression evidence, audited proposal dispositions, no self-approval or recursive privilege expansion |
 | 006 — Unified Integration | PLANNED | 005 and all scheduled subsystem contracts | End-to-end evidence/authority/temporal coherence, exports, actual interoperability/portability and security validation with no bypass paths |
@@ -92,7 +92,8 @@ oracle, unified evidence and human/JSON output. CAP-EVD-002 and CAP-CLI-003 impl
 that bounded contract. Their local acceptance and private delivery observations
 belong to candidate-scoped external handoffs, including actual remote CI outcomes.
 This does not deliver agents, complete candidate snapshots, permission enforcement
-or temporal history. 003 remains planned and gated by its privacy/storage/coverage decisions.
+or temporal history. The subsequent first 003-A slice adds bounded in-memory history;
+the remaining 003 contracts retain their privacy/storage/coverage gates.
 
 ## Checkpoint 002-E: documentation consolidation
 
@@ -111,21 +112,22 @@ demo nor an append-only log alone satisfies the exit.
 
 | Increment | Scope/capabilities | Dependency and exit evidence |
 | --- | --- | --- |
-| 003-A | Canonical history/layers [CAP-MEM-001](capability-catalog.md#cap-mem-001), privacy gate [CAP-SEC-002](capability-catalog.md#cap-sec-002), snapshot extension [CAP-CORE-002](capability-catalog.md#cap-core-002) | 002, DEC-004/007/011; identity, supersession, bitemporal boundary and layer-retention tests before persistence |
+| 003-A (IN_PROGRESS) | Canonical history/layers [CAP-MEM-001](capability-catalog.md#cap-mem-001), privacy gate [CAP-SEC-002](capability-catalog.md#cap-sec-002), snapshot extension [CAP-CORE-002](capability-catalog.md#cap-core-002) | First in-memory canonical requirement/decision slice implemented; full exit still needs DEC-004/007/011, layer/privacy and snapshot contracts, and actual persistence/recovery evidence before durability claims |
 | 003-B | Unified derived index/extractors [CAP-KNW-001](capability-catalog.md#cap-knw-001) | 003-A, declared adapter coverage; multi-language/code/document/schema/artifact fixtures, spans/relations, declared source/configuration/parser/rule dependencies, incremental versus full semantic recomputation and diagnosed divergence, explicit unsupported/dependency coverage |
 | 003-C | Temporal queries/conflicts/impact [CAP-KNW-002](capability-catalog.md#cap-knw-002), invalidation [CAP-EVD-003](capability-catalog.md#cap-evd-003), historical recovery [CAP-MEM-002](capability-catalog.md#cap-mem-002) | 003-A/B; origin/disposition separation, historical and late-correction queries, conflict reconciliation, context-bound evidence/knowledge validity, transitive invalidation and justified non-impact, no CURRENT claim from insufficient dependency coverage |
 | 003-D | Local retrieval [CAP-KNW-003](capability-catalog.md#cap-knw-003), recovery integration CAP-MEM-002 | 003-C; declared relevance/negative cases, bounded results, no unauthorized/stale-as-current material, one shared index |
 | 003-E | Handoffs [CAP-MEM-003](capability-catalog.md#cap-mem-003), privacy behavior CAP-SEC-002, CLI surfaces [CAP-CLI-004](capability-catalog.md#cap-cli-004) | 003-C/D; portable round-trip, source map, integrity rejection, candidate mismatch -> STALE, redaction and authorized deletion propagation |
 | 003-F | Context assembly [CAP-CTX-001](capability-catalog.md#cap-ctx-001), CLI surfaces CAP-CLI-004 | 003-D/E; versioned source selection, provenance, resource/token limits, visible omissions/staleness, no authority from recovered context |
 
-The next bounded implementation recommendation is the first in-memory slice of
-existing 003-A: [canonical temporal records](../architecture/temporal-records.md).
-It records/corrects requirements and decisions and answers domain/recording-time
-queries using existing candidate observations. It requires separate implementation
-authorization and completes neither full 003-A nor CAP-MEM-001. Privacy/layer
-policy and snapshot extensions remain gates; persistence additionally requires
-DEC-004/007 resolutions and actual crash/recovery/deletion acceptance. No backend,
-new crate, CLI command or public format is selected by this preparation.
+The implemented first slice of existing 003-A provides
+[canonical temporal records](../architecture/temporal-records.md): record/correct
+requirements and decisions, inspect immutable history and answer domain-time and
+recording-cutoff queries using existing candidate observations. This completes
+neither full 003-A nor CAP-MEM-001. The next bounded checkpoint should settle the
+necessary DEC-004 privacy/layer and DEC-007 durable acceptance boundaries before a
+persistent extension; DEC-011 remains a separate snapshot gate. Persistence needs
+actual crash/recovery/deletion acceptance. No backend, new crate, CLI command or
+public format is selected. 003-B through 003-F remain PLANNED.
 
 003-B/003-C supply source facts and dependency validity; 003-F grounds material
 technical assumptions in those candidate/versioned sources under CAP-CTX-001.

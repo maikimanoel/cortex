@@ -1,6 +1,8 @@
 # Contributing to CORTEX
 
-CORTEX is pre-alpha. Milestones 001 and 002 are delivered; 003–006 remain planned.
+CORTEX is pre-alpha. Milestones 001 and 002 are delivered. Milestone 003 has begun
+with bounded in-memory canonical history; remaining 003 increments and 004–006
+remain planned.
 Maiki Manoel maintains the project and reviews external contributions through
 GitHub pull requests. Automated checks support that review. There is no CLA or
 DCO sign-off requirement. Submit only material you have the right to contribute

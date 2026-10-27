@@ -128,9 +128,12 @@ library APIs and 002-C semantics remain unchanged. Broader formats, persisted
 identity/history, portable interchange and API commitments remain open at their
 original milestone boundaries.
 
-**003-A preparation boundary:** The temporal-record contract selects only minimum
-deterministic in-memory identity, temporal and correction rules in existing Core.
-Public signatures and persisted schemas, transactions, crash recovery, migration
+**003-A in-memory scoped resolution:** The [temporal-record contract](../architecture/temporal-records.md#rust-api-and-validation-boundary)
+and Core API select distinct logical/version identities, one retained observation,
+caller-reported source references, nonempty half-open domain intervals, inclusive
+recording cutoffs and atomic linear corrections. Equal recording times use
+predecessor order; no wall clock, persistent schema or public compatibility promise
+is selected. Persisted schemas, transactions, crash recovery, migration
 and storage remain undecided until an actual durable consumer is authorized.
 Evaluate journal, transactional and snapshot-plus-log alternatives against those
 contracts, not architectural symmetry. No new crate or public format is selected.

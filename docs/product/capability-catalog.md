@@ -373,13 +373,13 @@ store, model, performance claim, or activation is selected.
 ### CAP-MEM-001
 
 **Name:** Canonical history and memory layers.
-**Status:** PLANNED.
+**Status:** IN_PROGRESS; bounded canonical in-memory requirement/decision slice implemented.
 **Owner:** Memory/continuity. **Target:** 003-A foundations; learning/recovery
 integration in 003-C/003-D.
 **Dependencies:** CAP-CORE-002, CAP-EVD-002, policy decisions DEC-004/007.
 
-The [003-A temporal-record contract](../architecture/temporal-records.md) bounds
-the first in-memory slice; it does not complete persistence, layer retention,
+The [003-A temporal-record contract](../architecture/temporal-records.md) defines
+the implemented first in-memory slice; it does not complete persistence, layer retention,
 cross-candidate recovery or the whole capability.
 
 **Functional contract:** Retain logically append-only canonical requirements,
@@ -408,8 +408,19 @@ times; querying before/after a late recording gives the appropriate perspective.
 Transient/ephemeral retention does not silently delete required canonical facts.
 A reported diagnosis cannot become confirmed reusable knowledge merely by being
 remembered; a claimed repair without its verification remains unverified.
-**Verification:** NOT_RUN; supersession, temporal-boundary, invalid-event and
-retention tests. **Decisions:** DEC-004/007 before enabling persistence.
+**Bounded implementation:** `cortex_core::temporal` records, corrects and inspects
+canonical requirements/decisions against one retained candidate observation.
+Validated linear chains support independent domain-time and recording-cutoff
+queries, immutable originals, atomic rejection, finite retained history and
+redacted diagnostics. There is no persistence, layer retention, deletion,
+learning/recovery consumer or snapshot implementation.
+**Verification mechanisms:** [Core temporal tests](../../crates/cortex-core/tests/temporal.rs)
+cover corrections, temporal boundaries, invalid transitions, deterministic
+reconstruction, exact limits and privacy; [real-Git tests](../../crates/cortex-cli/tests/temporal.rs)
+retain candidate distinctions and unchanged evidence. Candidate-scoped execution
+results remain in the external handoff. Retention/deletion/persistence acceptance
+is NOT_RUN and unimplemented. **Decisions:** DEC-004/007 before enabling persistence;
+DEC-011 before snapshot extensions. The full capability remains incomplete.
 
 ### CAP-MEM-002
 

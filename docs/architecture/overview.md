@@ -13,7 +13,7 @@ The Cortex foundation contains these actual crates:
 
 | Crate | Current responsibility | Dependency |
 | --- | --- | --- |
-| `cortex-core` | Foundation contracts, contract revisions, typed repository state and candidate/task binding | Standard library only |
+| `cortex-core` | Foundation contracts, candidate/task binding and bounded in-memory canonical temporal records | Standard library only |
 | `cortex-evidence` | Legacy evidence plus unified result/applicability/validity, versioned context and redacted inspection | `cortex-core` |
 | `cortex-cli` | Help/version, bounded Git observation and task-to-evidence CLI check with human/JSON output | `cortex-core`, `cortex-evidence`, JSON serializer; local Git and util-linux |
 
@@ -29,7 +29,9 @@ consumes those observations programmatically, preserving legacy semantics. It ad
 independent result/applicability/contextual-validity and caller-reported time;
 [002-D CLI integration](cli-check.md) now composes one committed-HEAD criterion.
 Policy enforcement, durable workflows,
-persistence, knowledge indexing, agent harnesses and temporal history remain planned.
+persistence, knowledge indexing and agent harnesses remain planned. The first
+[003-A slice](temporal-records.md) adds in-memory requirement/decision history
+without changing the binding or evidence models.
 
 ## Logical areas and dependency direction
 
@@ -127,9 +129,11 @@ Backend, format, transaction, and compatibility decisions remain
 [open](../decisions/open-decisions.md); these responsibilities do not mandate a
 database, graph service, vector store, or event-storage schema.
 
-The planned [003-A temporal-record contract](temporal-records.md) bounds the first
-in-memory requirement/decision history slice and its separate privacy, persistence
-and snapshot gates. It changes no current runtime or evidence semantics.
+The [003-A temporal-record contract](temporal-records.md) defines the implemented
+first in-memory requirement/decision history slice and its separate privacy,
+persistence and snapshot gates. Logical memory ownership is implemented cohesively
+in Core; no memory crate or storage adapter is introduced. Existing evidence
+semantics remain unchanged, and full 003-A is not delivered.
 
 ## Foundation reconciliation and extension seams
 
