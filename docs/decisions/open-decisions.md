@@ -145,14 +145,23 @@ MIT source-only pre-alpha launch of the delivered 001/002 capabilities, before
 completion or permission to change visibility. No binary release, version tag,
 package publication, production-readiness or general API-stability claim is needed
 or authorized. [002-P1/P2/P3](../product/roadmap.md#pre-alpha-source-preparation-and-launch-checkpoints)
-separates audit, remediation and the later explicit owner launch decision.
+separates audit, remediation and final readiness preparation. Public visibility
+still requires a subsequent explicit owner decision.
 
-Before 002-P3 public access, retain history/privacy disposition, DEC-002 brand
+Before any public access, retain history/privacy disposition, DEC-002 brand
 review, provider-managed metadata review and explicit owner approval as gates.
 [SECURITY.md](../../SECURITY.md) records the approved private-reporting route and
 its required launch-time activation/verification. No alternate contact or support
 SLA is selected. Technical preparation never grants publication authority. The
 full-platform 007 contract still depends on 006 and applicable DEC-001/002/003 exits.
+
+**002-P3 readiness boundary:** Successful local checks do not satisfy an unexecuted
+remote-CI gate. Review the normal path with actual restored remote execution and
+any proposed temporary pre-alpha source-only exception separately. An exception
+requires explicit owner acceptance of its candidate, scope, residual risk,
+compensating verification and expiration conditions; none is approved here.
+Keep unavailable CI and unperformed remote checks explicit. Preparation or an
+exception decision alone never authorizes public visibility.
 
 ## DEC-010
 

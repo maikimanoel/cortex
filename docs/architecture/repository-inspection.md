@@ -223,5 +223,6 @@ write-attempt tracing are not established by these comparisons.
 Executed acceptance and tool versions are recorded against the final candidate
 in the external milestone handoff. Test source is a mechanism, not an execution
 record. The catalog uses `IMPLEMENTED`; candidate-specific local results do not
-promise a future candidate's result or a passing hosted pipeline. Remote CI remains
-`NOT_RUN`. See [README verification](../../README.md#verify) for required commands.
+promise a future candidate's result or a passing hosted pipeline. Report hosted-CI
+availability separately from remote Rust execution in the candidate-scoped handoff.
+See [README verification](../../README.md#verify) for required commands.

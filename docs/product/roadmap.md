@@ -224,14 +224,17 @@ use the existing CAP-CLI-005/006 owners; they introduce no runtime capability.
   initial contribution/security policies, PR/main/manual CI, actual included-capacity
   hosted execution and dependency analysis. Record actual results and unresolved
   gates in its handoff; workflow configuration is not a successful run.
-- **002-P3:** Separate owner decision before public visibility. Resolve history
-  disclosure, brand and provider-metadata gates; inspect the exact proposed public
-  refs/candidate and actual CI evidence. Approve applicable free GitHub controls,
-  enable and verify private vulnerability reporting when visibility permits, and
-  apply main-branch checks compatible with a single maintainer. No release, tag or
-  package publication follows implicitly from source visibility.
+- **002-P3:** Final readiness review and private publication preparation. Inspect
+  the exact proposed public refs/candidate, privacy, dependency, contributor and
+  local-verification evidence; report unresolved history-disclosure, brand and
+  provider-metadata gates. Assess a restored-CI path and any proposed temporary
+  exception separately under DEC-009. Neither path is selected by this checkpoint.
+  Prepare the activation order for available free GitHub controls, private reporting
+  and main protection without requiring checks that cannot execute. Actual public
+  visibility and launch-time settings require subsequent explicit owner authority.
+  No release, tag or package publication follows implicitly from source visibility.
 
-The repository remains private during P2. The source is pre-alpha, with no general
+The repository remains private during P2/P3. The source is pre-alpha, with no general
 API-stability, production-readiness or expanded platform guarantee. The full 007
 milestone and CAP-CLI-006 remain planned under their complete contracts.
 

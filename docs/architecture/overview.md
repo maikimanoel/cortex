@@ -165,7 +165,7 @@ proposer, with external authorization where required.
 
 The repository remains private under the owner-selected [MIT License](../../LICENSE).
 DEC-009 permits preparation for an early pre-alpha source launch; actual visibility
-requires separate owner approval at 002-P3. The bounded CI workflow checks PR/main
+requires separate owner approval after 002-P3 preparation. The bounded CI workflow checks PR/main
 and manual requests using included standard Linux capacity under DEC-005. Its
 configuration is not evidence of a remote run. Completion of an engineering
 milestone does not authorize deployment, paid resources, package publication or
