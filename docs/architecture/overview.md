@@ -163,7 +163,8 @@ claims are scoped to observed tests/evaluations. Proposed harness changes are
 separate candidates; promotion requires gates and an approver distinct from the
 proposer, with external authorization where required.
 
-The repository remains private; license and public launch are undecided. CI is
+The repository remains private under the owner-selected [MIT License](../../LICENSE);
+public launch remains undecided. CI is
 manual-only and its configuration is not evidence of a remote run. Completion of
 an engineering milestone does not authorize deployment, paid resources, package
 publication, or public release.

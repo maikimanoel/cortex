@@ -201,8 +201,9 @@ claim follows from milestone numbering.
 
 ## 007: public readiness, separate launch authority
 
-Deliver [CAP-CLI-006](capability-catalog.md#cap-cli-006): resolve license, brand,
-contribution/IP and release-scope decisions; inspect repository/history/privacy;
+Deliver [CAP-CLI-006](capability-catalog.md#cap-cli-006): preserve the owner-selected
+MIT License (DEC-001), resolve brand, contribution/IP and release-scope decisions;
+inspect repository/history/privacy;
 demonstrate CAP-CLI-006's contributor walkthrough without private chat history;
 prepare distribution, versioning, operation/support documentation and an assessed
 release candidate. Complete applicable security/supply-chain and environment

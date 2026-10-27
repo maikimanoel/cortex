@@ -101,5 +101,7 @@ plans are not execution authorization or evidence of delivery.
 
 Cortex does not promise infallibility, universal compatibility, or objectively
 better outcomes without measurement. Built-in quality includes honest stops,
-blocked actions, explicit anomalies, and useful partial results. Public release,
-licensing, and contribution governance remain [open decisions](../decisions/open-decisions.md).
+blocked actions, explicit anomalies, and useful partial results. Public release
+and contribution governance remain [open decisions](../decisions/open-decisions.md).
+The owner has selected the [MIT License](../../LICENSE); publication requires
+separate authorization.

@@ -1,17 +1,20 @@
 # Open decisions
 
-These questions are unresolved. The proposed decision points below do not select
-defaults, grant authority, or authorize implementation. Capability requirements
-remain in [the catalog](../product/capability-catalog.md); execution order is in
+This register tracks unresolved questions and scoped resolutions. Proposed decision
+points do not select defaults, grant authority, or authorize implementation.
+Capability requirements remain in [the catalog](../product/capability-catalog.md); execution order is in
 [the roadmap](../product/roadmap.md). Preserve the accepted
 [foundation decision](../architecture/0001-foundation.md). Record a new ADR when
 an actual consequential choice is authorized and made.
 
 ## DEC-001
 
-**Open-source license.** No license or SPDX identifier has been selected. Review
-distribution intentions and actual dependency obligations with the owner before
-007/publication. Until then, keep packages unpublished and the repository private.
+**Open-source license — resolved by the owner.** CORTEX uses the standard
+[MIT License](../../LICENSE), SPDX identifier `MIT`, with copyright (c) 2026
+Maiki Manoel. All workspace packages inherit this sole project license and retain
+`publish = false`. Third-party license obligations remain independently applicable.
+License adoption does not authorize public access, releases or package publication;
+keep the repository private. Distribution readiness and approval remain DEC-009.
 Dependent capability: CAP-CLI-006.
 
 ## DEC-002

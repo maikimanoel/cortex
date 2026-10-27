@@ -543,6 +543,93 @@ fn clean_stat_refresh_and_linked_metadata_remain_read_only() {
 }
 
 #[test]
+fn split_indexes_are_rejected_before_git_can_freshen_shared_metadata() {
+    for linked in [false, true] {
+        let repo = Repo::new();
+        repo.commit_file("file", "initial");
+        let head = String::from_utf8(repo.git(&["rev-parse", "HEAD"]).stdout).unwrap();
+        let target = if linked {
+            let path = repo.path.join("linked");
+            repo.git(&["worktree", "add", "--detach", path.to_str().unwrap()]);
+            path
+        } else {
+            repo.path.clone()
+        };
+        // No core.splitIndex setting is needed to create a split index.
+        assert!(
+            repo.command()
+                .current_dir(&target)
+                .args(["update-index", "--split-index"])
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+        let git_dir = if linked {
+            repo.path.join(".git/worktrees/linked")
+        } else {
+            repo.path.join(".git")
+        };
+        let shared = fs::read_dir(&git_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.file_name()
+                    .unwrap()
+                    .as_encoded_bytes()
+                    .starts_with(b"sharedindex.")
+            })
+            .expect("fixture has a real shared index");
+        fs::File::options()
+            .write(true)
+            .open(shared)
+            .unwrap()
+            .set_modified(std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1))
+            .unwrap();
+        let before = snapshot(&repo.path);
+        for _ in 0..2 {
+            failure(inspect(&target), 5, "split index");
+            assert_eq!(snapshot(&repo.path), before);
+            let output = Command::new(env!("CARGO_BIN_EXE_cortex"))
+                .args([
+                    "check",
+                    "--json",
+                    "--task",
+                    "readonly",
+                    "--revision",
+                    "1",
+                    "--candidate",
+                    head.trim(),
+                    "--expect-head",
+                    head.trim(),
+                    "--repo",
+                ])
+                .arg(&target)
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(5));
+            let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(value["error"]["category"], "UNSUPPORTED");
+            assert!(value["assessment"].is_null());
+            assert_eq!(snapshot(&repo.path), before);
+        }
+    }
+}
+
+#[test]
+fn linked_inspection_rejects_leftover_shared_metadata_in_the_common_directory() {
+    let repo = Repo::new();
+    repo.commit_file("file", "initial");
+    let linked = repo.path.join("linked");
+    repo.git(&["worktree", "add", "--detach", linked.to_str().unwrap()]);
+    // A name alone is conservatively unsupported, even without an active split index.
+    fs::write(repo.path.join(".git/sharedindex.leftover"), "unused").unwrap();
+    let before = snapshot(&repo.path);
+    failure(inspect(&linked), 5, "split index");
+    assert_eq!(snapshot(&repo.path), before);
+}
+
+#[test]
 fn oversized_git_output_fails_without_exposing_configuration() {
     use std::io::Write;
     let repo = Repo::new();

@@ -1071,7 +1071,8 @@ tests. **Decisions:** DEC-005/006/007; no complete command tree selected now.
 **Functional contract:** Provide a shared Cargo workspace/lockfile, pinned Rust
 toolchain, unpublished packages, documented local verification commands, and a
 manual-only read-only CI definition with a bounded job and pinned checkout.
-No automatic job, package publication, license, or release is enabled.
+No automatic job, package publication, or release is enabled. Workspace packages
+inherit the owner-selected MIT License under DEC-001.
 
 **Advanced properties:** Controlled build inputs and least-privilege CI
 (INV-008/010/011). This is neither byte-identical artifact proof nor remote CI pass.

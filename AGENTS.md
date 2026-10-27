@@ -56,9 +56,9 @@ progressively without claiming unfinished milestones complete.
 - Add tests that can reject incorrect behavior: invalid inputs, boundaries,
   unsupported transitions, and actual CLI output/error behavior. Avoid tests that
   only prove a module or type exists. Keep local tests offline and deterministic.
-- Keep crates unpublished, the repository private, and the license undecided
-  until the owner makes an explicit decision. Do not enable telemetry, publish
-  packages or releases, add paid services, or upload private planning materials.
+- Keep crates unpublished, the repository private, and the owner-selected MIT
+  License intact. Preserve third-party license obligations. Do not enable telemetry,
+  publish packages or releases, add paid services, or upload private planning materials.
 - Minimize dependencies. Review origin, maintenance, license obligations, and
   concrete need before introducing one. Keep `Cargo.lock` tracked and use the
   pinned toolchain. Recheck the manual workflow when changing toolchain inputs.

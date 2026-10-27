@@ -248,6 +248,10 @@ impl Git {
         let root = self.location("--show-toplevel")?;
         let git_dir = self.location("--absolute-git-dir")?;
         let common_dir = self.location("--git-common-dir")?;
+        reject_shared_indexes(&git_dir, self.deadline)?;
+        if common_dir != git_dir {
+            reject_shared_indexes(&common_dir, self.deadline)?;
+        }
         let configuration =
             self.output(&["config", "--null", "--list"], "configuration inspection")?;
         parse::configuration(&configuration)?;
@@ -316,6 +320,35 @@ impl Git {
             entries,
         })
     }
+}
+
+fn reject_shared_indexes(directory: &Path, deadline: Instant) -> Result<(), InspectionError> {
+    // Git freshens shared-index timestamps even when optional locks are disabled.
+    // Inspect metadata names before any query that reads the index. Conservatively
+    // reject leftover shared indexes too; do not parse or rewrite Git's index format.
+    if Instant::now() >= deadline {
+        return Err(InspectionError::Limit("inspection time"));
+    }
+    for (n, entry) in std::fs::read_dir(directory)
+        .map_err(InspectionError::Io)?
+        .enumerate()
+    {
+        if Instant::now() >= deadline {
+            return Err(InspectionError::Limit("inspection time"));
+        }
+        if n >= MAX_ENTRIES {
+            return Err(InspectionError::Limit("Git metadata entries"));
+        }
+        if entry
+            .map_err(InspectionError::Io)?
+            .file_name()
+            .as_encoded_bytes()
+            .starts_with(b"sharedindex.")
+        {
+            return Err(InspectionError::Unsupported("split index metadata"));
+        }
+    }
+    Ok(())
 }
 
 fn null_device() -> &'static str {
@@ -585,6 +618,33 @@ mod tests {
         assert!(matches!(
             git.output(&["--version"], "version"),
             Err(InspectionError::Limit("Git time"))
+        ));
+    }
+
+    #[test]
+    fn metadata_preflight_has_entry_time_and_io_bounds() {
+        let repo = support::Repo::new();
+        let directory = repo.path.join("metadata");
+        std::fs::create_dir(&directory).unwrap();
+        reject_shared_indexes(&directory, Instant::now() + INSPECTION_TIMEOUT).unwrap();
+        std::fs::write(directory.join("file"), "").unwrap();
+        assert!(matches!(
+            reject_shared_indexes(&directory, Instant::now()),
+            Err(InspectionError::Limit("inspection time"))
+        ));
+        for n in 1..MAX_ENTRIES {
+            std::fs::write(directory.join(format!("file{n}")), "").unwrap();
+        }
+        let deadline = Instant::now() + INSPECTION_TIMEOUT;
+        reject_shared_indexes(&directory, deadline).unwrap();
+        std::fs::write(directory.join("overflow"), "").unwrap();
+        assert!(matches!(
+            reject_shared_indexes(&directory, deadline),
+            Err(InspectionError::Limit("Git metadata entries"))
+        ));
+        assert!(matches!(
+            reject_shared_indexes(&directory.join("absent"), deadline),
+            Err(InspectionError::Io(_))
         ));
     }
 }

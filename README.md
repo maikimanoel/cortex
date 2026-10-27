@@ -179,6 +179,7 @@ payloads, and reference materials outside this Git repository.
 ## Repository status and licensing
 
 The official destination is the private repository `maikimanoel/cortex`. Keep it
-private. License selection is deferred until before any public release; no
-license grant or license identifier is supplied by this milestone. Do not publish
-packages, create releases, or change visibility without separate authorization.
+private. CORTEX is licensed under the [MIT License](LICENSE), copyright (c) 2026
+Maiki Manoel. Third-party dependencies retain their own applicable license terms.
+All workspace packages remain unpublished. Do not publish packages, create releases,
+or change visibility without separate authorization.

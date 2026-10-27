@@ -103,9 +103,9 @@ must be useful when the application being built contains no AI.
 
 Report limitations and unperformed checks alongside successful results. Do not
 claim comprehensive readiness, security certification, human approval, or remote
-CI success without the corresponding authority and evidence. Repository privacy,
-unpublished packages, and an undecided license remain deliberate boundaries of
-this milestone.
+CI success without the corresponding authority and evidence. Repository privacy
+and unpublished packages remain deliberate boundaries. The owner-selected
+[MIT License](../LICENSE) does not authorize changing either boundary.
 
 ## Maintainability and contributor experience
 

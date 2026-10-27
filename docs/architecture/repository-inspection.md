@@ -81,6 +81,10 @@ The following return an unsupported result, never an empty clean report:
   unresolved merge entries, sparse checkouts and skip-worktree entries.
 - Assume-unchanged index entries, unknown file modes, configured content filters,
   and partial-clone/promisor configurations.
+- Split-index metadata: a `sharedindex.*` name in the per-worktree or common Git
+  directory, including leftover shared indexes. Git can update their timestamps
+  merely by reading the index, even with optional locks disabled. Inspection rejects
+  this form before any index-reading query; it does not remove or convert indexes.
 
 Unknown/malformed status records are indeterminate. Repository discovery and
 object failures, warnings indicating incomplete traversal, and denied access
@@ -104,16 +108,20 @@ interactive Git configuration; ignored files are never claimed to be observed.
 It disables optional locks/index refresh, filesystem monitoring, hooks,
 untracked-cache use, external diff, rename inference, submodule recursion and
 automatic maintenance. It disables lazy retrieval and denies all Git transports.
-Configuration and index preflight rejects content filters and unsupported index
-forms before status runs. Any captured stderr, including a warning, prevents a
-complete report; raw Git output/configuration is not copied into diagnostics.
+Metadata-name, configuration and index preflight rejects split indexes, content
+filters and unsupported index forms before status runs. Any captured stderr,
+including a warning, prevents a complete report; raw Git output/configuration is
+not copied into diagnostics.
 
 These are controls on an installed trusted Git, not an enforcement sandbox.
 An adversary replacing Git, repository configuration, attributes or filesystem
 mappings concurrently is outside this contract. In particular, configuration
 preflight and status are not atomic: hostile configuration replacement could
 introduce a new filter after preflight. The command does not claim to contain
-that adversary. Use a separate effective host sandbox before inspecting such
+that adversary. Metadata preflight is likewise not atomic with index reads:
+concurrent changes to the index representation can escape its split-index guard.
+The supported metadata/configuration forms must remain stable during inspection.
+Use a separate effective host sandbox before inspecting such
 actively hostile targets. Ordinary reads may update filesystem access times.
 
 ## Finite budgets
@@ -127,6 +135,7 @@ actively hostile targets. Ordinary reads may update filesystem access times.
 | Each process stderr | 16 KiB; never emitted raw |
 | Tracked index entries per sample | 10,000 |
 | Changed/untracked entries per sample | 10,000 total |
+| Metadata names examined per Git directory per sample | 10,000; common directory examined separately only when distinct |
 | Git process virtual address space | 512 MiB via Linux `RLIMIT_AS` |
 | Git core dump size | Zero |
 | Direct-child cleanup polling after interruption | Up to 1 additional second |
@@ -192,7 +201,10 @@ I/O causes remain available internally. Exit zero is not a passing assessment.
 [Real CLI fixtures](../../crates/cortex-cli/tests/inspection.rs) cover the state
 matrix, special paths, linked worktrees, SHA-256, object failures, denied traversal,
 unsupported forms, environment/helper traps, actual entry/output/time exhaustion,
-private diagnostics and repeated inspection. [Unit mechanisms](../../crates/cortex-cli/src/inspection/mod.rs)
+private diagnostics and repeated inspection. Split-index rejection is exercised
+through both `inspect` and `check`, including ordinary/linked worktrees, stale
+shared-index timestamps and leftover common-directory metadata; protected fixture
+contents and metadata must remain unchanged. [Unit mechanisms](../../crates/cortex-cli/src/inspection/mod.rs)
 cover controlled concurrent change and operation/deadline rejection;
 [parser tests](../../crates/cortex-cli/src/inspection/parse.rs) cover malformed
 records and exact entry boundaries; [capture tests](../../crates/cortex-cli/src/inspection/process.rs)
