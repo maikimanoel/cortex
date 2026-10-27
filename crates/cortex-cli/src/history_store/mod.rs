@@ -146,7 +146,7 @@ fn sql(e: rusqlite::Error) -> StoreError {
     error
 }
 
-/// Caller-owned raw key. No Debug/Clone/default or key persistence is provided.
+/// Caller-owned raw key. Debug is redacted; no Clone/default or key persistence.
 ///
 /// Supply 32 uniformly random bytes from an appropriate generator. Length/nonzero
 /// checks do not establish entropy. Zeroizing this copy does not erase caller/engine
