@@ -172,6 +172,12 @@ engine/provider/build/host changes, stronger privacy needs or changed concurrenc
 Public interchange, migrations, key rotation/recovery, graph/package/harness
 formats and broader compatibility remain open at their actual decision points.
 
+**003-B initial scoped resolution:** The [reference contract](../architecture/knowledge-references.md)
+selects an immutable Core source index and library query interface, with no public
+wire format, graph backend or knowledge persistence. The existing serde_json
+raw_value feature supplies exact borrowed spans; source/profile/candidate references
+remain explicit. Broader formats, graph history and compatibility stay open.
+
 ## DEC-008
 
 **Evaluation cases, baselines, and comparison-publication policy.** Select
@@ -268,6 +274,17 @@ snapshot mechanism and does not close DEC-011. Reload preserves dirty/unborn/
 detached/incomplete distinctions, opaque comparison material and byte-path/platform
 limits; it neither samples Git nor refreshes validity. A later extractor or immutable
 dirty snapshot still needs its separate coverage/correspondence decision.
+
+**003-B initial coverage resolution:** Select one explicitly requested regular JSON
+blob pinned by actual clean committed HEAD, with before/after inspection and Core
+binding. Lexical `$ref` occurrences/local JSON Pointer fragments are the supported
+case; other resources, missing targets and unsupported fragments stay unresolved.
+The [reference contract](../architecture/knowledge-references.md) defines bounds,
+version dependencies and context qualification. All new candidates invalidate
+current reuse conservatively; there is no non-impact proof or incremental mutation.
+No dirty snapshot is selected. Multi-language/code/schema-semantic/binary extraction,
+transitive invalidation and incremental/full recomputation still require their
+scheduled decisions and acceptance. This does not close DEC-011 overall.
 
 ## DEC-012
 

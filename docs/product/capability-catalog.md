@@ -262,7 +262,7 @@ query integration. **Decisions:** DEC-004/007/010.
 ### CAP-KNW-001
 
 **Name:** Deterministic multi-language extraction and incremental indexing.
-**Status:** PLANNED.
+**Status:** IN_PROGRESS; first bounded committed JSON reference adapter implemented.
 **Owner:** Knowledge/index. **Target:** 003-B.
 **Dependencies:** CAP-CORE-002, CAP-EVD-002, canonical sources from CAP-MEM-001.
 
@@ -292,8 +292,19 @@ Diagnose divergence instead of silently accepting it; declare limits where a ful
 baseline cannot be established. Source/configuration/parser/rule changes invalidate
 their consumers while justified unaffected entries retain validity. Validating an
 inferred edge never changes its origin to extracted.
-**Verification:** NOT_RUN; parser fixtures, deterministic rebuild comparisons,
-negative coverage and invalidation tests. **Decisions:** DEC-007/011.
+**Bounded implementation:** The [first reference contract](../architecture/knowledge-references.md)
+provides explicit committed JSON source extraction, exact byte spans/local-pointer
+relationships, borrowed incoming queries and contextual current/stale inspection.
+It reuses Core binding/provenance and Evidence validity, with extracted/unverified
+relations only. No Rust-only assumption, inference, validation, knowledge persistence
+or incremental mutation is implemented. Multi-language parsing and incremental/full
+recomputation correctness remain unfinished.
+**Verification mechanisms:** [Core invariants](../../crates/cortex-core/tests/knowledge.rs),
+[parser fixtures](../../crates/cortex-cli/src/knowledge/json.rs) and
+[real-Git queries](../../crates/cortex-cli/tests/knowledge.rs) cover actual references,
+spans, invalid/duplicate/limited inputs, candidate/profile changes, partial coverage,
+read-only behavior and deterministic rebuilds. Actual outcomes belong in the external
+handoff. **Decisions:** scoped DEC-007/011 resolution; full coverage remains open.
 
 ### CAP-KNW-002
 

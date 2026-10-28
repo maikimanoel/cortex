@@ -113,7 +113,7 @@ demo nor an append-only log alone satisfies the exit.
 | Increment | Scope/capabilities | Dependency and exit evidence |
 | --- | --- | --- |
 | 003-A (IN_PROGRESS) | Canonical history/layers [CAP-MEM-001](capability-catalog.md#cap-mem-001), privacy gate [CAP-SEC-002](capability-catalog.md#cap-sec-002), snapshot extension [CAP-CORE-002](capability-catalog.md#cap-core-002) | Core history and first encrypted local adapter implemented with restart/recovery/removal tests; full exit still needs remaining DEC-004/007/011, layer/privacy and snapshot contracts; stronger host/durability claims require further qualification |
-| 003-B | Unified derived index/extractors [CAP-KNW-001](capability-catalog.md#cap-knw-001) | 003-A, declared adapter coverage; multi-language/code/document/schema/artifact fixtures, spans/relations, declared source/configuration/parser/rule dependencies, incremental versus full semantic recomputation and diagnosed divergence, explicit unsupported/dependency coverage |
+| 003-B (IN_PROGRESS) | Unified derived index/extractors [CAP-KNW-001](capability-catalog.md#cap-knw-001) | 003-A, declared adapter coverage; multi-language/code/document/schema/artifact fixtures, spans/relations, declared source/configuration/parser/rule dependencies, incremental versus full semantic recomputation and diagnosed divergence, explicit unsupported/dependency coverage |
 | 003-C | Temporal queries/conflicts/impact [CAP-KNW-002](capability-catalog.md#cap-knw-002), invalidation [CAP-EVD-003](capability-catalog.md#cap-evd-003), historical recovery [CAP-MEM-002](capability-catalog.md#cap-mem-002) | 003-A/B; origin/disposition separation, historical and late-correction queries, conflict reconciliation, context-bound evidence/knowledge validity, transitive invalidation and justified non-impact, no CURRENT claim from insufficient dependency coverage |
 | 003-D | Local retrieval [CAP-KNW-003](capability-catalog.md#cap-knw-003), recovery integration CAP-MEM-002 | 003-C; declared relevance/negative cases, bounded results, no unauthorized/stale-as-current material, one shared index |
 | 003-E | Handoffs [CAP-MEM-003](capability-catalog.md#cap-mem-003), privacy behavior CAP-SEC-002, CLI surfaces [CAP-CLI-004](capability-catalog.md#cap-cli-004) | 003-C/D; portable round-trip, source map, integrity rejection, candidate mismatch -> STALE, redaction and authorized deletion propagation |
@@ -137,8 +137,15 @@ Damaged removal intent and failed final-sync completion remain explicit unresolv
 states; extending their reconciliation needs its own exact-identity contract.
 Further host/fault qualification is required before stronger durability claims. Targeted lifecycle views,
 transient/ephemeral retention, copies/sync and snapshots remain separate work.
-003-B through 003-F remain PLANNED; no knowledge extraction or broader memory
-behavior follows merely from storing a collection.
+The first [003-B JSON reference slice](../architecture/knowledge-references.md) now
+reads one explicit clean committed source, extracts typed local references/spans,
+answers incoming queries and reports candidate/profile staleness or unresolved
+coverage. Its programmatic interface needs no knowledge storage or new CLI command.
+The 003-A prerequisite still governs full 003-B integration; this authorized slice
+uses its delivered source-provenance types plus 002 binding/evidence, without new
+persistence, memory-layer or dirty-snapshot behavior. Full multi-language and
+incremental-index exits are incomplete; 003-C through 003-F
+remain PLANNED. Broader memory behavior does not follow from these bounded slices.
 
 003-B/003-C supply source facts and dependency validity; 003-F grounds material
 technical assumptions in those candidate/versioned sources under CAP-CTX-001.

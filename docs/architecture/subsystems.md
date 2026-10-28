@@ -45,6 +45,8 @@ and retrieval ([KNW](../product/capability-catalog.md#cap-knw-001), with initial
 inspection in [CAP-CLI-002](../product/capability-catalog.md#cap-cli-002)). Repository
 observation reports source identity/state; core binds it to a contract. Extraction
 produces typed spans/relations with separate origin and validation disposition.
+The [first reference slice](knowledge-references.md) implements one committed JSON
+source adapter and immutable Core model; full extraction/indexing remains incomplete.
 Canonical sources own their records; this subsystem owns only rebuildable
 projections and dependency indexes. It supplies shared context to memory,
 retrieval and prompting rather than proliferating independent indexes.

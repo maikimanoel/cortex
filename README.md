@@ -10,7 +10,8 @@ boundaries. Projects engineered with Cortex do not need to contain AI.
 
 **Pre-alpha.** The source implements the bounded capabilities below; it is not
 production-ready and makes no general API-stability or cross-platform guarantee.
-Milestone 003 has begun with canonical history and its first encrypted local store;
+Milestone 003 has begun with canonical history, encrypted storage and a first JSON
+reference knowledge slice;
 its remaining capabilities and Milestones 004–006 remain planned. Source preparation
 does not authorize a public launch, binary release or package publication.
 
@@ -168,6 +169,13 @@ or stored beside the database. Create/open, explicit recovery, admission,
 reconciliation and requested whole-collection removal are bounded operations.
 No default location, automatic capture, backup, sync, export or lost-key recovery
 exists. Restoring historical data does not refresh evidence or grant authority.
+
+The [first knowledge operation](docs/architecture/knowledge-references.md) is
+`cortex_cli::knowledge::extract_json_references`: select one explicit committed JSON
+file, inspect exact source spans/local `$ref` relationships and query incoming
+references through Core. `reinspect` reports contextual current/stale/unestablished
+validity; relationships remain extracted and unverified. This is a library interface,
+not a new command, full JSON Schema evaluator or multi-language incremental index.
 
 An execution report and a semantic judgment are different values. A newly
 constructed evidence record has no assessment, even when its exit code is zero.

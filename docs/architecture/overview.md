@@ -29,12 +29,16 @@ consumes those observations programmatically, preserving legacy semantics. It ad
 independent result/applicability/contextual-validity and caller-reported time;
 [002-D CLI integration](cli-check.md) now composes one committed-HEAD criterion.
 Policy enforcement, durable workflows,
-knowledge indexing and agent harnesses remain planned. The first
+full knowledge indexing and agent harnesses remain planned. The first
 [003-A slice](temporal-records.md) adds in-memory requirement/decision history
 without changing the binding or evidence models.
 The [first durable slice](0002-durable-history.md) adds a Linux operator-controlled
 SQLCipher adapter that reconstructs validated Core history; broader persistence,
 privacy lifecycle and recovery features remain planned.
+The [first 003-B reference adapter](knowledge-references.md) adds committed JSON
+source nodes/spans/local references, borrowed queries and contextual validity.
+Core owns the immutable model; CLI owns parsing/Git acquisition. It adds no
+knowledge database, inferred/validated relations or agent behavior.
 
 ## Logical areas and dependency direction
 

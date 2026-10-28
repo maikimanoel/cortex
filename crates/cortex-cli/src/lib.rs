@@ -5,6 +5,13 @@
 //! of infrastructure; library types have no serialization compatibility promise.
 
 mod inspection;
+#[cfg(test)]
+#[path = "../tests/support/mod.rs"]
+mod support;
+
+/// Explicit committed JSON reference extraction and candidate-scoped inspection.
+#[cfg(target_os = "linux")]
+pub mod knowledge;
 
 /// Explicit operator-controlled encrypted canonical-history persistence.
 #[cfg(target_os = "linux")]

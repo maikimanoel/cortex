@@ -8,6 +8,9 @@ pub mod binding;
 /// Bounded in-memory canonical requirement and decision history.
 pub mod temporal;
 
+/// Bounded candidate-scoped extracted knowledge; no parser, storage or authority.
+pub mod knowledge;
+
 use std::{error::Error, fmt};
 
 /// Maximum task identifier size in UTF-8 bytes (identifiers are ASCII).

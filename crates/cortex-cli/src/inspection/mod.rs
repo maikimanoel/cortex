@@ -4,8 +4,7 @@ mod parse;
 mod process;
 
 #[cfg(test)]
-#[path = "../../tests/support/mod.rs"]
-mod support;
+use crate::support;
 
 use cortex_core::binding::{
     BindingError, CandidateBindingContract, CandidateObservation, Change, ComparisonBasis, Entry,
@@ -367,6 +366,72 @@ fn os_string(bytes: &[u8]) -> Result<OsString, InspectionError> {
             .map(OsString::from)
             .map_err(|_| InspectionError::Unsupported("non-UTF-8 Git path on this host"))
     }
+}
+
+// Reuse the same process/configuration/read-only boundary for explicit committed
+// knowledge input. No working file, filter, textconv, pathspec expansion or shell.
+pub(crate) fn committed_blob(
+    repository: &RepositoryIdentity,
+    commit: &cortex_core::CandidateId,
+    path: &cortex_core::knowledge::SourcePath,
+) -> Result<Vec<u8>, InspectionError> {
+    let mut git = Git {
+        directory: repository.root().to_owned(),
+        deadline: Instant::now() + Duration::from_secs(15),
+        operations: 0,
+    };
+    let name = os_string(path.bytes())?;
+    let tree = git
+        .run(
+            &[
+                OsStr::new("--literal-pathspecs"),
+                OsStr::new("ls-tree"),
+                OsStr::new("-z"),
+                OsStr::new("--full-tree"),
+                OsStr::new(commit.as_str()),
+                OsStr::new("--"),
+                &name,
+            ],
+            "knowledge source discovery",
+            false,
+        )?
+        .stdout;
+    let row = tree
+        .strip_suffix(&[0])
+        .ok_or(InspectionError::Unsupported("missing committed source"))?;
+    let tab = row
+        .iter()
+        .position(|b| *b == b'\t')
+        .ok_or(InspectionError::Malformed)?;
+    if &row[tab + 1..] != path.bytes() {
+        return Err(InspectionError::Malformed);
+    }
+    let mut fields = row[..tab].split(|b| *b == b' ');
+    let mode = fields.next().ok_or(InspectionError::Malformed)?;
+    let kind = fields.next().ok_or(InspectionError::Malformed)?;
+    let oid = fields.next().ok_or(InspectionError::Malformed)?;
+    if fields.next().is_some() || kind != b"blob" || !matches!(mode, b"100644" | b"100755") {
+        return Err(InspectionError::Unsupported(
+            "knowledge source must be a regular committed blob",
+        ));
+    }
+    if oid.len() != commit.as_str().len() || !oid.iter().all(u8::is_ascii_hexdigit) {
+        return Err(InspectionError::Malformed);
+    }
+    let oid = std::str::from_utf8(oid).map_err(|_| InspectionError::Malformed)?;
+    let size = git.output(&["cat-file", "-s", oid], "knowledge source size")?;
+    let size = std::str::from_utf8(&size)
+        .ok()
+        .and_then(|s| s.trim_end_matches('\n').parse::<usize>().ok())
+        .ok_or(InspectionError::Malformed)?;
+    if size > cortex_core::knowledge::MAX_SOURCE_BYTES {
+        return Err(InspectionError::Limit("knowledge source bytes"));
+    }
+    let bytes = git.output(&["cat-file", "blob", oid], "committed knowledge source")?;
+    if bytes.len() != size {
+        return Err(InspectionError::Inconsistent);
+    }
+    Ok(bytes)
 }
 
 /// Inspect a local working tree using the documented 002-A limits and controls.
