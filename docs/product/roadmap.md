@@ -230,6 +230,17 @@ covered properties create no artificial implementation task. A high-value contex
 method may precede a broad but already covered objective; missing qualification or
 adoption prerequisites remain visible rather than being converted into low importance.
 
+For the first native workflow, prioritize the minimum trust/qualification boundary
+and usable read-only inspector (P0), followed by candidate-aware selection and
+protected contract composition (P1). The inspector increment includes a small useful
+initial method set with executed defective/legitimate-neighbor qualification cases,
+exact versions, exceptions and evidence limits; unused declarations or a supplied
+"qualified" flag do not satisfy it. Selection waits for that reviewed interface.
+Keep broader method effectiveness/learning in 005; specialized methods remain P2 or
+UNSCHEDULED until a real trigger, adequate oracle and justified consumer exist.
+Task-specific required assurance still cannot be omitted because its general method
+family is sequenced later. No initial method is qualified by this roadmap entry.
+
 | Slice | Existing placement/owners | Minimum useful outcome and prerequisite |
 | --- | --- | --- |
 | 1. Qualified method inspection and contract preview | 004-A baseline references, 004-B CAP-SKL-001/002, 004-C CAP-WFL-002 | Small explicit definition set, inspectable qualification/unknowns and contextual selection into a candidate-aware proposed engineering contract; minimum DEC-007/012 boundary first. A usable qualification inspector precedes selector implementation; no runner, adoption authority or full registry is implied |

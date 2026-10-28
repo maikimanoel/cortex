@@ -324,6 +324,13 @@ use, decide who can approve incorporation, revise exceptions or resolve material
 conflicts, and what qualification evidence that role requires. Unknown source support
 cannot be converted into mandatory policy by prioritizing it. No numerical trust
 threshold, reviewer count or universal method mandate is selected here.
+For the initial read-only inspector, settle only the minimum exact-reference/source
+trust and qualification-admission boundary: who may supply or adopt definitions,
+how unsupported/conflicting claims and exceptions remain inspectable, and who may
+revise or retire an adopted method. Mere listing never creates adoption or an
+acceptance assessment. The first useful method set needs actual discriminating
+qualification evidence; its contents and trusted-blocking authority are not selected
+by a source inventory or an implementation-priority label.
 
 **Proportional profiles and required reviewers.** Before 004-C, establish
 auditable classification rules for trivial/standard/critical work and the qualified

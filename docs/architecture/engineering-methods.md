@@ -141,6 +141,53 @@ Private source correspondence stays outside the repository; official contracts r
 the normalized rationale and obligations needed by contributors, not private inventories.
 No storage/wire format or new tracking subsystem is selected by these obligations.
 
+### Conceptual roles
+
+Keep these roles distinct when normalizing knowledge. References may connect them;
+one item or field must not silently stand for all of them. These are conceptual
+contracts, not new Rust types or a serialization model.
+
+| Role | Meaning and boundary |
+| --- | --- |
+| Engineering property | Objective or invariant with a meaningful violation condition, independent of the chosen technique |
+| Authorized requirement | Obligation adopted for a task/version by its applicable authority; advice alone is insufficient |
+| Acceptance criterion | Observable condition used to judge a requirement, with scope and legitimate exceptions |
+| Method or technique | Procedure intended to establish/preserve a property, with preconditions, costs and limitations |
+| Applicability condition | Target/task/environment fact that triggers an obligation or justifies its scoped absence |
+| Verification mechanism | Concrete procedure/tool/version that obtains relevant observations; its success is not automatically acceptance |
+| Test oracle | Independently justified interpretation of expected behavior that discriminates violation from compliance |
+| Diagnostic heuristic | Review lead with possible false positives/negatives; a match is not a demonstrated defect |
+| Reported defect | Source claim about a failure, retaining its source and unverified parts |
+| Demonstrated defect | Reproduced violation connected to its actual candidate, conditions, property and observations |
+| Evidence | Retained property-relevant observations/provenance, with their declared verification coverage and validity dependencies |
+| Assessment | Explicit judgment over supporting evidence; result, applicability and validity stay separate |
+| Qualification record | Exact-method scoped support, counterexamples, exclusions and unresolved claims; not adoption authority |
+| Engineering profile | Applicable shared and specialized obligations, preserving inheritance and explicit conflicts |
+| Policy or authority | Governing decision and approval boundary for adoption, exceptions or effects; retrieved knowledge cannot grant it |
+| Implementation capability | Actual supported behavior whose delivery status needs inspected code and matching verification |
+
+Identifier inventory, normalized specification coverage, method qualification,
+runtime implementation and runtime verification are independent claims. An inventory
+can be complete while titles, examples, evidence or exceptions remain unavailable.
+Preserve that distinction per source item; do not infer a missing problem statement
+from its chapter or promote an indexed title into a qualified mechanism.
+
+### Engineering intent and requirement quality
+
+The following obligations refine CORE-003/WFL-002 contract formation, with KNW/CTX
+source grounding, MEM decision history and Evidence/EVL observations. They are
+PLANNED. Apply them at the material boundary; do not require a modeling notation,
+prototype, extra reviewer or specialized tool on every task.
+
+| Boundary | Required contract and discriminating acceptance |
+| --- | --- |
+| Intended need and validation | Retain the problem, affected actor/operator, intended observable outcome and non-goals separately from a preferred solution. Distinguish conformance to the authorized specification from validation of its intended use: a green implementation of a mistaken requirement cannot establish that the need was met |
+| Vocabulary and actors | Resolve material domain terms, roles and decision rights using relevant sources, or expose uncertainty/conflict. Distinct meanings for the same identifier cannot silently produce one favorable contract; contextual stakeholder or user scenarios retain affected interests |
+| Requirement classes and allocation | Distinguish functional outcomes, quality attributes, constraints, interfaces and operating-environment obligations. Link each applicable requirement/revision to responsible components and acceptance/evidence coverage. An omitted, orphaned or contradictory clause remains unresolved even when selected tests pass; preserve abnormal/degraded paths and explicit exceptions |
+| Assumptions and trade-offs | Identify material assumptions, source/version, decision owner and review/expiry or change trigger. Where an assumption could reverse the choice, record that sensitivity and the alternative, not invented confidence or ROI. A contradicted assumption reopens affected conclusions; elapsed time alone does not establish validity |
+| Architecture views and scenarios | When multiple perspectives matter, distinguish the viewpoint/question, its concrete view and the represented model/version. Relate intended boundaries to observed source composition and diagnose disagreement. A quality-attribute scenario identifies stimulus, environment, required response and observation; thresholds come from the authorized requirement, not the method selector |
+| Fault, error and failure | Distinguish a fault/cause, erroneous internal state and observable service/contract failure where diagnosis requires them. Preserve degraded/partial effects and recovery limits. A successful retry does not erase the failed attempt, and process termination or injected call failure does not establish physical power-loss behavior |
+
 ## Qualified engineering knowledge
 
 A definition must identify, as applicable: stable identity/exact revision; property
@@ -182,6 +229,14 @@ Supersession and retirement preserve retained history and the reason for changed
 eligibility, subject to privacy-governed omission/deletion. Retirement must not
 silently erase an inherited mandatory requirement. Missing history remains a gap.
 No mutable replacement under an old exact reference is allowed.
+
+Retain qualification by claim as well as method revision: a disputed example or
+proposed repair can be excluded from supported coverage while the broader property
+remains useful. Establish the actual language/API laws or execution mechanism
+before accepting a counterexample or optimization; require representative measurements
+for claimed gains. A renamed operation, plausible example or source-reported
+demonstration cannot qualify itself. Record the correction, legitimate near-neighbor
+and requalification dependency without silently repairing or erasing the source claim.
 
 Qualification/adoption lifecycle, feature status, result, applicability and validity
 answer different questions. Reuse the existing Evidence dimensions for assessments.
@@ -322,6 +377,12 @@ All cases are **PLANNED; execution NOT_RUN** for this native mechanism. Existing
 | 18. Contradicted detector claim | Retain the scoped counterexample and unestablished coverage; no automatic rejection of the property or qualification from its reproduced defect | SKL-002, EVL-002 |
 | 19. Missing or conflicting source support | Record unassessed material and unresolved disagreement; no exhaustive-coverage, non-applicability or adoption claim from a summary | SKL-001/002, CTX-001 |
 | 20. Adequate coverage or deferred method | NO_CHANGE creates no artificial implementation work; DEFER preserves rationale/priority independently of applicability and qualification | WFL-002 |
+| 21. Correct implementation, mistaken requirement | Conformance evidence does not establish intended-use validation; unmet actor/outcome assumptions remain visible | CORE-003, WFL-002, EVL-001 |
+| 22. Ambiguous term or unallocated clause | Material meaning/owner conflict or omitted abnormal path stays unresolved despite unrelated green checks | CORE-003, WFL-002, KNW-001 |
+| 23. Contradicted assumption or architectural view | Reconcile affected source/version/decision dependencies; neither an old diagram nor a fresh label establishes current conformance | WFL-002, KNW-001/002, EVD-003 |
+| 24. Questionable example or optimization | Check actual laws/mechanism and a legitimate near-neighbor; retain unsupported gains and affected subclaims without rejecting the property | SKL-002, EVL-002 |
+| 25. Inspect-only method consumer | Listing definitions/qualification executes no processes, changes no files or active policy, grants no permission and creates no acceptance assessment | SKL-001/002 |
+| 26. Complete inventory, incomplete source | Separate inventory/specification/qualification/implementation/verification claims; missing source detail is not silently reconstructed | SKL-001/002, CTX-001 |
 
 ### Early concrete targets
 

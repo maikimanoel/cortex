@@ -136,6 +136,13 @@ The change contract also retains applicable pre/postconditions, error semantics,
 effect ordering, interface/data/schema invariants and authorized exceptions.
 Operation authority does not substitute for applicable data-use restrictions under
 CAP-SEC-002. Unknown required constraints cannot become permission by omission.
+Contract formation retains the intended problem/outcome, affected actors, material
+domain vocabulary, assumptions and their decision/review triggers. Allocate applicable
+functional, quality, constraint, interface and environment requirements to responsible
+components and observable acceptance. Conformance to a requirement does not alone
+validate its fitness for intended use; the
+[requirement-quality contract](../architecture/engineering-methods.md#engineering-intent-and-requirement-quality)
+keeps omitted clauses, conflicting meanings and unverified assumptions explicit.
 
 **Advanced properties:** Non-amplifying delegation, versioned policy, temporal
 decision provenance, and auditable consumption at invocation (INV-001/004/006/008).
@@ -595,6 +602,10 @@ Qualification findings must distinguish sufficient scoped support, partial suppo
 unmet qualification, unassessed material and contradicted claims through existing
 evidence and rationale, not redundant result states. A reproduced defect alone
 does not qualify a detector; an unqualified mechanism cannot become an adopted blocker.
+Scope qualification to supported claims: preserve a disputed example, legitimate
+exception and correction/requalification dependency without invalidating a useful
+property or accepting an unmeasured optimization. Inspect-only consumers change no
+active policy or acceptance state, launch no processes and mutate no files.
 
 ## F. Typed workflows and engineering methods
 
@@ -679,6 +690,11 @@ keep applicability, qualification, disposition and priority independent. Separat
 cross-cutting properties from contextual techniques; missing tooling/source access
 cannot establish non-applicability. Preserve adequate coverage and consolidate
 overlap before scheduling additional implementation.
+Apply the requirement-quality contract to task intake and contextual architecture
+evaluation: distinguish intended-use validation, requirement/component allocation,
+assumption sensitivity, viewpoints/views and quality-attribute scenarios. The
+method selects relevant observations; it cannot invent stakeholder agreement,
+performance targets, acceptable degraded behavior or proof of physical durability.
 
 **Advanced properties:** Proportionality with no bypass of contract-required review,
 explicit specialization boundaries, and evidence-backed method selection
