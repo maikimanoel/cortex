@@ -210,8 +210,13 @@ Inspection permission fixtures require a non-root Linux user; all fixtures are l
 Validate relative links and anchors in changed Markdown documentation as well.
 Core temporal tests additionally exercise immutable corrections, independent
 domain/recording times, historical cutoffs, atomic rejection, limits and redaction;
-real-Git consumer tests preserve capture state and unchanged evidence. History is
-not durable, live verification or operational permission.
+real-Git consumer tests preserve capture state and unchanged evidence. Core history
+alone is not durable, live verification or operational permission. The encrypted
+adapter's fault tests additionally require a dynamically linked Linux/glibc test
+binary, Bash and the existing C compiler/prlimit prerequisites. They compile a
+test-only process-local shim and exercise child-only file-size limits. Injected
+sync errors and process exits do not establish power-loss durability; see the
+[qualification boundary](docs/architecture/temporal-records.md#storage-failure-qualification).
 Passing tests support these scoped contracts, not comprehensive correctness or
 security certification.
 

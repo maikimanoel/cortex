@@ -122,6 +122,17 @@ reconciliation, malformed data, unsupported versions and plaintext refusal.
 Power interruption, failed physical flush injection and hostile-host assurance are
 NOT_RUN; process termination tests do not establish those properties.
 
+Subsequent [bounded fault qualification](temporal-records.md#storage-failure-qualification)
+adds real kernel short writes/EFBIG and test-only libc write/sync/unlink error
+injection in isolated children. Recovery I/O errors retain their typed cause rather
+than becoming key/header failures. SQLite's journal-creation directory sync can
+ignore an error; later sync success is observed, not a guarantee that every native
+sync error reaches the adapter. Final directory-sync failures remain uncertain.
+Damaged removal intents and absent intent after a failed final sync require explicit
+operator inspection; the adapter does not invent identity or silently repair them.
+These observations refine qualification, without changing the engine/key/profile
+decision or establishing physical power-loss behavior.
+
 Reopen this decision for an engine/provider/source/build change, new host, stronger
 confidentiality/erasure requirement, multi-user concurrency, rotation/recovery,
 targeted lifecycle or format evolution. Requalify affected properties; do not

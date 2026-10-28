@@ -1,4 +1,6 @@
 use super::*;
+#[path = "fault_tests.rs"]
+mod faults;
 use cortex_core::{CandidateId, TaskContract, TaskId, binding::*};
 use std::{
     ffi::OsString,

@@ -131,9 +131,11 @@ native build prerequisites, not a new crate or CLI command.
 This completes neither full 003-A nor CAP-MEM-001/CAP-SEC-002. DEC-004/007 remain open
 outside their scoped initial resolutions; DEC-011 is a separate snapshot gate.
 The [acceptance boundary](../architecture/temporal-records.md#persistence-acceptance-and-remaining-scope)
-records process-crash coverage versus unexecuted physical I/O/flush and power-loss
-qualification. The next bounded assurance step should qualify those host/fault
-assumptions before extending durability claims. Targeted lifecycle views,
+records process-crash, kernel short-write/EFBIG and injected libc write/sync/unlink
+coverage versus unexecuted physical device/flush and power-loss qualification.
+Damaged removal intent and failed final-sync completion remain explicit unresolved
+states; extending their reconciliation needs its own exact-identity contract.
+Further host/fault qualification is required before stronger durability claims. Targeted lifecycle views,
 transient/ephemeral retention, copies/sync and snapshots remain separate work.
 003-B through 003-F remain PLANNED; no knowledge extraction or broader memory
 behavior follows merely from storing a collection.

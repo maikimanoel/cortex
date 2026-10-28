@@ -430,8 +430,11 @@ retain candidate distinctions and unchanged evidence. Candidate-scoped execution
 results remain in the external handoff. [Storage tests](../../crates/cortex-cli/src/history_store/tests.rs)
 and [real-Git consumers](../../crates/cortex-cli/tests/history_store.rs) cover encrypted
 restart, temporal preservation, crash/reconciliation, contention, corruption,
-capacity and whole-store removal. Physical I/O/flush fault injection and power-loss
-qualification are NOT_RUN; selective lifecycle and layer retention are unimplemented.
+capacity and whole-store removal. [Fault qualification](../architecture/temporal-records.md#storage-failure-qualification)
+adds kernel short-write/EFBIG and process-local injected write/sync/unlink cases,
+including failed recovery and explicit unresolved removal states. Actual device/
+physical flush and power-loss qualification are NOT_RUN; selective lifecycle and
+layer retention are unimplemented.
 **Decisions:** DEC-004/007 have initial-profile scoped resolutions, remaining broader
 questions stay open; DEC-011 precedes snapshots. The full capability remains incomplete.
 
@@ -872,6 +875,8 @@ and [tests](../../crates/cortex-cli/src/history_store/tests.rs) cover caller-key
 SQLCipher, no plaintext fallback, confidential sentinels, diagnostics, explicit
 whole-collection removal and interrupted-removal resume. No automatic capture,
 copies or restoration. Completion covers managed live files, not forensic erasure.
+Fault qualification preserves incomplete-removal diagnostics for damaged intent
+and failed final synchronization; it does not certify erasure or invent safe resume.
 Selective redaction, copy propagation, layer expiry and broader privacy integration
 remain PLANNED/NOT_RUN. **Decisions:** scoped DEC-004/007 approval selects manual
 canonical retention without eviction; broader defaults remain open.

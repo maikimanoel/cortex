@@ -43,7 +43,7 @@ pub enum ErrorKind {
     KeyRequired,
     /// Key length/obvious empty key is invalid; entropy remains the caller's duty.
     InvalidKey,
-    /// Wrong key or unreadable encrypted header; these cannot always be distinguished.
+    /// Wrong key or invalid encrypted header; observable I/O errors remain separate.
     CannotUnlock,
     /// Local path, file kind, link or ownership does not meet the supported contract.
     InvalidLocation,
@@ -144,6 +144,19 @@ fn sql(e: rusqlite::Error) -> StoreError {
     });
     error.engine = e.sqlite_error().map(|e| e.extended_code);
     error
+}
+
+// Initial schema access may perform authorized hot-journal recovery. Preserve
+// I/O/busy failures instead of misreporting them as a wrong encryption key.
+fn unlock(e: rusqlite::Error) -> StoreError {
+    if matches!(
+        e.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt)
+    ) {
+        StoreError::new(ErrorKind::CannotUnlock)
+    } else {
+        sql(e)
+    }
 }
 
 /// Caller-owned raw key. Debug is redacted; no Clone/default or key persistence.
@@ -587,8 +600,7 @@ fn connect(location: &Location, key: &StoreKey, access: Access) -> Result<Connec
             .map_err(|_| StoreError::new(ErrorKind::InvalidKey))?;
     }
     statement.push_str("'\";");
-    c.execute_batch(&statement)
-        .map_err(|_| StoreError::new(ErrorKind::CannotUnlock))?;
+    c.execute_batch(&statement).map_err(unlock)?;
     c.busy_timeout(Duration::ZERO).map_err(sql)?;
     c.set_limit(Limit::SQLITE_LIMIT_LENGTH, MAX_BYTES as i32)
         .map_err(sql)?;
@@ -603,7 +615,7 @@ fn connect(location: &Location, key: &StoreKey, access: Access) -> Result<Connec
     c.query_row("SELECT count(*) FROM sqlite_schema", [], |r| {
         r.get::<_, i64>(0)
     })
-    .map_err(|_| StoreError::new(ErrorKind::CannotUnlock))?;
+    .map_err(unlock)?;
     let initial_mode: String = c
         .query_row("PRAGMA journal_mode", [], |r| r.get(0))
         .map_err(sql)?;

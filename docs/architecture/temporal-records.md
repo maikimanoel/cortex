@@ -423,8 +423,9 @@ these mechanisms alongside existing Core/002 regressions. Candidate-scoped outco
 and counts belong in the external handoff. The table specifies the oracle, not a
 claim of independent assurance. Actual separate processes cover restart/locking.
 Process-kill tests do not establish power-loss durability. Engine capacity, commit
-contention and permissions are exercised; physical short-write/flush fault injection
-and power interruption remain NOT_RUN. Later targeted lifecycle remains planned.
+contention, permissions and the [fault cases below](#storage-failure-qualification)
+are exercised. Actual device/physical flush failure and power interruption remain
+NOT_RUN. Later targeted lifecycle remains planned.
 
 | Case | Discriminating oracle |
 | --- | --- |
@@ -452,7 +453,51 @@ no plaintext fallback and confidential sentinels in covered at-rest files and pr
 output have focused tests. Temporary storage is configured to memory; inspected
 active store descriptors do not establish exhaustive RAM or host-file coverage.
 
-The next bounded assurance increment should qualify physical I/O/flush failures
-and the supported host assumptions before stronger durability claims. Targeted
-redaction/withdrawal, per-layer expiry, backup/export/sync, cross-candidate recovery,
-new snapshots, graph storage and workflow durability remain separate work.
+### Storage failure qualification
+
+[Fault tests](../../crates/cortex-cli/src/history_store/fault_tests.rs) qualify the
+existing adapter using isolated synthetic stores and fresh processes. No production
+fault API, new backend, dependency or unsafe Rust is introduced.
+
+- Child-only `RLIMIT_FSIZE` with ignored `SIGXFSZ` produces observed native short
+  writes followed by kernel EFBIG in journal creation and removal-intent recording.
+- A small [test-only C shim](../../crates/cortex-cli/tests/fixtures/storage_fault.c),
+  compiled with warnings denied, injects EIO before selected libc write, sync or
+  unlink calls for one exact fixture path. This is native-library return injection,
+  not a kernel/device failure. Parent tests require a positive fault-hit trace and
+  calibrate call order for the qualified stack; missing instrumentation fails tests.
+- Initial-file/schema/sync failures never recreate a partial existing location.
+  A lost creation reply may leave a complete valid store; explicit reopen validates
+  its entire context instead of inferring success or absence from the error alone.
+- Failed INSERT with confirmed rollback remains distinct from commit error.
+  Journal/database sync and final commit-directory sync failures withhold a receipt.
+  Exact reconciliation can find absence or an already committed version, preserving
+  prior records, ordinal order and both temporal axes; retry cannot duplicate it.
+- A larger interrupted transaction demonstrably changes main pages and leaves a
+  hot journal header before exit without destructors. Injected recovery write/sync
+  errors are `Io`, not `CannotUnlock`. Fault-free recovery reconstructs the exact
+  confirmed Core history; read-only access still refuses recovery without mutation.
+- Complete removal intent allows explicit matching-scope resume after intent-sync,
+  unlink or intermediate directory-sync failure. A short/empty intent is
+  `RemovalIncomplete` and is not silently repaired. If final sync fails after the
+  intent was unlinked, completion remains unconfirmed: absent files do not supply
+  the missing instance witness, and `resume_removal` rejects it. Those two cases
+  require operator inspection or a separately specified reconciliation extension.
+
+The locked SQLite Unix VFS intentionally ignores its journal-creation directory
+sync return. Tests observe create/admit success when later database and final
+directory syncs succeed. Conversely, failed final journal-deletion directory sync
+can report indeterminate completion after the record is already present. The
+adapter cannot promise that every underlying sync error is surfaced, nor infer
+power-loss atomicity from these observations. This qualification does not change
+SQLite/SQLCipher or create a competing transaction authority.
+
+Covered confidentiality sentinels remain absent from managed files and child
+diagnostics. Only operation/count/result/errno are traced, never data buffers,
+keys or raw paths. Scope is dynamically linked Linux/glibc, the pinned native
+stack and these representative failures. Simultaneous/persistent device faults,
+lying caches, destructive power interruption, exhaustive fault interleavings and
+other host configurations remain unverified. No privileged/global filesystem or
+kernel settings are changed. Targeted redaction/withdrawal, per-layer expiry,
+backup/export/sync, cross-candidate recovery, new snapshots, graph storage and
+workflow durability remain separate work.
