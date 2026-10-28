@@ -12,6 +12,12 @@ cross-cutting rules; the [roadmap](product/roadmap.md) owns sequence. This docum
 explains the engineering doctrine behind them, without claiming future mechanisms
 are implemented by the current foundation.
 
+The [native method contract](architecture/engineering-methods.md) specifies how
+future CORTEX methods make this doctrine inspectable: shared properties, qualified
+language/domain refinements, explicit applicability and candidate-bound evidence.
+Method selection must improve contract formation as well as verification; its
+planned native baseline is not a claim of current autonomous engineering support.
+
 ## Complete the authorized capability at the right layer
 
 For every capability, first describe inputs, the observable acceptance behavior,

@@ -65,6 +65,11 @@ crate references. Evaluation can observe the harness while the promotion control
 plane consumes evaluation evidence through contracts; it need not introduce a
 mutual implementation dependency.
 
+The [planned native engineering methods](engineering-methods.md) compose existing
+SKL/WFL/Core/Evidence/knowledge owners. Common properties, qualified specializations,
+candidate-aware contract proposals and governed method evolution require no second
+instruction registry, index or authority. They are not implemented by today's CLI.
+
 ## Intended control and data flow
 
 ```text

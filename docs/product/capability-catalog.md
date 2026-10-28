@@ -132,6 +132,11 @@ baseline and its evidence. Unapproved or indeterminate changes cannot obtain
 acceptance from a more favorable result. This does not make tests immutable or
 route every ordinary test change through harness-evolution governance.
 
+The change contract also retains applicable pre/postconditions, error semantics,
+effect ordering, interface/data/schema invariants and authorized exceptions.
+Operation authority does not substitute for applicable data-use restrictions under
+CAP-SEC-002. Unknown required constraints cannot become permission by omission.
+
 **Advanced properties:** Non-amplifying delegation, versioned policy, temporal
 decision provenance, and auditable consumption at invocation (INV-001/004/006/008).
 Model proposals, operator authorizations, results, evaluations, and transitions
@@ -524,6 +529,14 @@ inspect definitions without execution. Resolve exact semantic versions to
 immutable execution references with source/provenance. Reject missing versions,
 unverifiable contracts, or mutable substitution under an existing reference.
 
+Native engineering definitions use this same owner. Retain property/objective,
+applicability and supporting context, supported language/ecosystem/domain versions,
+legitimate exceptions, mechanism/observations, qualification references and limits.
+Distinguish mandatory requirements, executable properties, heuristics,
+recommendations, hypotheses, examples, reproduced defects and imported reports
+under the [native method contract](../architecture/engineering-methods.md#qualified-engineering-knowledge).
+No separate private instruction registry or knowledge index is introduced.
+
 **Advanced properties:** Shared authority and temporal version semantics across
 all invocations (INV-001/004/006). A registry entry is a declaration of requested
 capabilities, not an operator grant.
@@ -569,6 +582,13 @@ qualification and cannot become a trusted blocker; a missing required qualificat
 is not PASS. **Verification:** NOT_RUN; construction/runtime negative
 cases and real unauthorized-tool tests. **Decisions:** DEC-003/005/007.
 
+Qualification and adoption are distinct: retain actual case/mechanism/configuration
+evidence and the applicable adoption authority. Revision, supersession and retirement
+preserve exact references and affected validity, subject to privacy policy; retirement
+cannot silently remove an inherited mandatory requirement. The
+[qualification lifecycle](../architecture/engineering-methods.md#qualification-and-revision)
+does not grant operational permission or freeze registry persistence.
+
 ## F. Typed workflows and engineering methods
 
 ### CAP-WFL-001
@@ -595,6 +615,11 @@ outcome; retry is safe only under the actual operation's idempotency/retry contr
 Start with a bounded local-first contract before considering distributed coordination;
 CAP-HRN-001 supplies dispatch/outcome observations without duplicating authoritative
 effect state.
+
+Cancellation is not rollback. Preserve whether an effect is recoverable,
+compensatable or irreversible under its actual operation contract. Requests,
+attempts, observations and confirmed effects remain distinct; execution authority
+alone does not authorize unrestricted use of data.
 
 **Advanced properties:** Auditable state history, dependency-aware invalidation,
 and executor-independent workflow contracts (INV-004/005/006).
@@ -633,6 +658,16 @@ include cross-language/component contracts for serialization, nullability, units
 identifiers, errors, persistence and compatibility; no universal compatibility
 promise is inferred. Core owns acceptance-baseline identity/approval, not the method.
 
+Provide a native, inspectable local baseline of qualified methods through
+CAP-SKL-001/002, without requiring separate instructional packages or a model
+provider. Compose shared engineering properties with language/domain profiles at
+component and interface scope. Profiles may add obligations but cannot silently
+weaken inherited requirements; conflicting or uncertain applicability is explicit.
+Selection emits a candidate-aware contract proposal with required observations,
+limitations and rationale, not a passing assessment or execution grant. The
+[native engineering contract](../architecture/engineering-methods.md) defines the
+cross-subsystem obligations and conditional lifecycle coverage, not another engine.
+
 **Advanced properties:** Proportionality with no bypass of contract-required review,
 explicit specialization boundaries, and evidence-backed method selection
 (INV-001/004/006/011).
@@ -644,6 +679,10 @@ Equivalent tasks in different ecosystems select their applicable checks rather
 than an assumed universal verifier. A refactor that changes protected interface
 semantics fails its contracted checks even if unrelated tests pass; an authorized
 migration identifies the revised baseline and obtains fresh evidence.
+Multiple applicable profiles retain shared requirements and expose conflicts;
+unknown applicability or missing tools cannot remove an obligation. CORTEX and a
+contrasting mixed-language task exercise selection without assuming Rust-only
+verification or imposing specialized machinery on an unrelated trivial change.
 **Verification:** NOT_RUN; profile/guard cases and complete representative methods.
 **Decisions:** DEC-006/012; no risk thresholds or reviewer policy invented here.
 
@@ -747,6 +786,9 @@ the operation/resource/context; prior planning and skill declarations are not gr
 Report dispatch and outcome uncertainty to CAP-WFL-001 for effect reconciliation.
 Trace capture/omission and retention require CAP-SEC-002/DEC-004 scope; redacted
 export alone does not authorize unrestricted raw trace storage.
+Applicable resource/data-use constraints cover descendants, recursive tasks,
+retries and adapter changes; these cannot reset budgets or bypass revocation.
+Their accounting/enforcement must match the actual supported host and operation.
 
 **Advanced properties:** Pluggable isolation backends with demonstrable guarantees;
 appropriately constrained component-style runtimes may be used when justified by

@@ -210,6 +210,42 @@ a distinct candidate and reconciles dependencies/conflicts before affected new
 verification; neither a clean Git merge nor branch-local evidence substitutes for
 integrated acceptance under CAP-WFL-004.
 
+### Native engineering delivery sequence
+
+The [native method contract](../architecture/engineering-methods.md) reconciles
+qualified engineering knowledge, common properties and specialization within the
+existing owners. The sequence below is **PLANNED / NOT_RUN**: delivery slices, not
+new capability IDs, milestone renumbering or permission to implement 004 early.
+The full 003 and 004 dependencies above remain intact. A separately authorized
+non-executing preview may use delivered 002/003 identities and evidence without
+claiming the full workflow/harness or weakening their gates; scheduling it before
+the full prerequisites requires an explicit scoped owner decision.
+
+| Slice | Existing placement/owners | Minimum useful outcome and prerequisite |
+| --- | --- | --- |
+| 1. Qualified method inspection and contract preview | 004-A baseline references, 004-B CAP-SKL-001/002, 004-C CAP-WFL-002 | Small explicit definition set, inspectable qualification/unknowns and contextual selection into a candidate-aware proposed engineering contract; minimum DEC-007/012 boundary first. A usable qualification inspector precedes selector implementation; no runner, adoption authority or full registry is implied |
+| 2. Returned-report reconciliation | 004-C/004-E CAP-WFL-003, with 003-C CAP-EVD-003 and CAP-CTX-002 | Match returned contract/revision/candidate/coverage, preserve imported claims separately from actual captured observations, retain missing/stale/conflicting evidence and approval requirements; slice 1 contract and scoped import/privacy semantics first |
+| 3. Governed method execution | Existing 004-A/B/C/D and adapters in 004-E | Compose methods with qualified skills, Core authority, real harness limits and durable unknown-effect reconciliation; execute only when those actual prerequisites and approved budgets/hosts exist |
+| 4. Language/domain coverage | 003-B/F source grounding and 004-B/C methods, integrated in 006 | Add qualified component/interface methods for demonstrated targets; can extend pure descriptions during earlier slices, but native analysis/execution claims require their own mechanisms and observations |
+| 5. Measured evolution and self-development | 005-A/B/C CAP-EVL-001/002, CAP-EVO-001/002 | Retained defect/repair/regression chain, protected evaluations and authorized proposal disposition under applicable prior policy; no automatic rule promotion or presumed productivity gain |
+
+Slice 1 must include CORTEX as the target of a bounded engineering proposal and a
+contrasting non-Rust/mixed-language scenario. Selection must expose unsupported
+verification rather than implying that describing a method implements an analyzer.
+Human-readable inspection/export may precede a portable package protocol; neither
+freezes interchange nor supplies execution authority. The existing essential local
+baseline must not depend on a paid service or a separately installed instruction suite.
+
+The proposed first parallel wave has two independent roles: a bounded non-executing
+definition/qualification inspector, and candidate/source grounding full-rebuild
+fixtures against the delivered source-set API. Both require explicit future
+authorization; the inspector also needs its minimum admission contract. Grounding
+fixtures use only the frozen existing API. A selector/contract composer consumes the new
+inspector interface and therefore waits until that interface and its evidence are
+reviewed; it is not independent merely because its files differ. Coordinator-owned
+integration and fresh combined-candidate checks remain mandatory. Full execution,
+persistence, risk thresholds and rule adoption cannot be smuggled into this preview.
+
 ## 005: governed evolution and evaluation
 
 CAP-EVL-002 evaluates defect-learning and rule changes against missed defects,

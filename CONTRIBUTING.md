@@ -48,6 +48,10 @@ Start with the [architecture overview](docs/architecture/overview.md),
 the [roadmap](docs/product/roadmap.md) owns sequence. Relevant inspection, binding,
 evidence and check contracts are linked from the README. Consult
 [open decisions](docs/decisions/open-decisions.md) before changing a policy boundary.
+The [planned native engineering methods](docs/architecture/engineering-methods.md)
+map method ownership, qualification and future acceptance cases. Keep changes to
+method definitions inspectable and scoped; topic descriptions are not verified
+native language/domain support. This does not change contribution or review policy.
 
 ## Propose and submit a focused change
 

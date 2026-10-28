@@ -182,6 +182,15 @@ collection observation/profile retains per-source dependencies. No persistent or
 public interchange format is selected. Broader formats, graph history and
 compatibility stay open.
 
+**Native engineering decision point:** Before the first non-executing method
+consumer, choose the minimum internal definition/revision and qualification-reference
+boundary under CAP-SKL-001/002, preserving Core/Evidence dependency direction.
+Define how imported claims differ from supported mechanism capture; no constructor
+or format label alone authenticates provenance. Before human export/report import,
+settle omission, size and version/applicability validation. The
+[method contract](../architecture/engineering-methods.md) selects obligations only,
+not a Rust trait, corpus format, persistence schema or Portable Context Package.
+
 ## DEC-008
 
 **Evaluation cases, baselines, and comparison-publication policy.** Select
@@ -300,6 +309,14 @@ Before 004-A/004-B, decide the initial acceptance-baseline amendment authority a
 rule-qualification/trusted-blocking policy under CAP-CORE-003/CAP-SKL-002. Protected
 baselines must allow authorized evolution; an unqualified engineering rule cannot
 become an authority decision. This does not select reviewer counts or risk thresholds.
+
+For native methods, distinguish evidence supporting scoped qualification from the
+authority adopting a rule, making it mandatory, revising an exception or retiring
+it. Decide applicable trust/admission and inherited-profile conflict rules before
+their authoritative consumer; unsupported or uncertain inputs remain unresolved.
+A non-executing preview may describe these missing decisions but cannot invent
+approval, mandatory policy or an effect grant. Any proposal to schedule that preview
+before full roadmap prerequisites needs explicit scoped implementation authorization.
 
 **Proportional profiles and required reviewers.** Before 004-C, establish
 auditable classification rules for trivial/standard/critical work and the qualified
