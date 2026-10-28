@@ -141,6 +141,10 @@ The first [003-B JSON reference slice](../architecture/knowledge-references.md) 
 reads one explicit clean committed source, extracts typed local references/spans,
 answers incoming queries and reports candidate/profile staleness or unresolved
 coverage. Its programmatic interface needs no knowledge storage or new CLI command.
+The [source-set extension](../architecture/knowledge-references.md#additive-source-set-contract)
+binds 1–8 explicitly selected committed JSON files together and answers typed
+cross-document incoming queries. Original single-source behavior remains intact;
+separate conformance tests exercise its exact limits and unresolved semantics.
 The 003-A prerequisite still governs full 003-B integration; this authorized slice
 uses its delivered source-provenance types plus 002 binding/evidence, without new
 persistence, memory-layer or dirty-snapshot behavior. Full multi-language and

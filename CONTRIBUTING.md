@@ -1,8 +1,8 @@
 # Contributing to CORTEX
 
 CORTEX is pre-alpha. Milestones 001 and 002 are delivered. Milestone 003 has begun
-with canonical history and a bounded encrypted local store; remaining 003 increments
-and 004–006 remain planned.
+with canonical history, bounded encrypted storage and JSON reference knowledge;
+003-A/003-B remain incomplete, and 003-C–003-F and 004–006 remain planned.
 Maiki Manoel maintains the project and reviews external contributions through
 GitHub pull requests. Automated checks support that review. There is no CLA or
 DCO sign-off requirement. Submit only material you have the right to contribute

@@ -262,7 +262,7 @@ query integration. **Decisions:** DEC-004/007/010.
 ### CAP-KNW-001
 
 **Name:** Deterministic multi-language extraction and incremental indexing.
-**Status:** IN_PROGRESS; first bounded committed JSON reference adapter implemented.
+**Status:** IN_PROGRESS; bounded committed JSON single-source and source-set adapters implemented.
 **Owner:** Knowledge/index. **Target:** 003-B.
 **Dependencies:** CAP-CORE-002, CAP-EVD-002, canonical sources from CAP-MEM-001.
 
@@ -295,6 +295,9 @@ inferred edge never changes its origin to extracted.
 **Bounded implementation:** The [first reference contract](../architecture/knowledge-references.md)
 provides explicit committed JSON source extraction, exact byte spans/local-pointer
 relationships, borrowed incoming queries and contextual current/stale inspection.
+The additive source-set interface binds 1–8 explicitly selected files as one batch
+and resolves supported relative document references only within that set. Original
+single-source targets/completeness remain unchanged; no automatic discovery occurs.
 It reuses Core binding/provenance and Evidence validity, with extracted/unverified
 relations only. No Rust-only assumption, inference, validation, knowledge persistence
 or incremental mutation is implemented. Multi-language parsing and incremental/full
@@ -304,7 +307,11 @@ recomputation correctness remain unfinished.
 [real-Git queries](../../crates/cortex-cli/tests/knowledge.rs) cover actual references,
 spans, invalid/duplicate/limited inputs, candidate/profile changes, partial coverage,
 read-only behavior and deterministic rebuilds. Actual outcomes belong in the external
-handoff. **Decisions:** scoped DEC-007/011 resolution; full coverage remains open.
+handoff. [Core source-set tests](../../crates/cortex-core/tests/knowledge_set.rs),
+[real-Git source-set tests](../../crates/cortex-cli/tests/knowledge_set.rs) and
+[single-source conformance](../../crates/cortex-cli/tests/knowledge_conformance.rs)
+add endpoint/context/projection and exact-boundary acceptance mechanisms.
+**Decisions:** scoped DEC-007/011 resolution; full coverage remains open.
 
 ### CAP-KNW-002
 

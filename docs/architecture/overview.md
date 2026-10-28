@@ -13,9 +13,9 @@ The Cortex foundation contains these actual crates:
 
 | Crate | Current responsibility | Dependency |
 | --- | --- | --- |
-| `cortex-core` | Foundation contracts, candidate/task binding and bounded in-memory canonical temporal records | Standard library only |
+| `cortex-core` | Foundation contracts, candidate/task binding, canonical temporal records and immutable knowledge projections | Standard library only |
 | `cortex-evidence` | Legacy evidence plus unified result/applicability/validity, versioned context and redacted inspection | `cortex-core` |
-| `cortex-cli` | Existing command interface, Git observation and explicit encrypted-history library adapter | Core/Evidence, JSON/codec and SQLCipher binding; local Git/util-linux and OpenSSL 3 build prerequisites |
+| `cortex-cli` | Existing commands, Git/JSON knowledge acquisition and explicit encrypted-history library adapter | Core/Evidence, JSON/codec and SQLCipher binding; local Git/util-linux and OpenSSL 3 build prerequisites |
 
 The accepted [0001 foundation decision](0001-foundation.md) is authoritative for
 those bounded design choices. Rust 1.99.1, edition 2024,
@@ -39,6 +39,10 @@ The [first 003-B reference adapter](knowledge-references.md) adds committed JSON
 source nodes/spans/local references, borrowed queries and contextual validity.
 Core owns the immutable model; CLI owns parsing/Git acquisition. It adds no
 knowledge database, inferred/validated relations or agent behavior.
+Its [additive source-set interface](knowledge-references.md#additive-source-set-contract)
+captures explicitly selected files as one bound batch and projects cross-document
+references without changing original per-source targets. Single-source APIs and
+all authority/evidence boundaries retain their meanings.
 
 ## Logical areas and dependency direction
 

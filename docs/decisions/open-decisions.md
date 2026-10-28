@@ -176,7 +176,11 @@ formats and broader compatibility remain open at their actual decision points.
 selects an immutable Core source index and library query interface, with no public
 wire format, graph backend or knowledge persistence. The existing serde_json
 raw_value feature supplies exact borrowed spans; source/profile/candidate references
-remain explicit. Broader formats, graph history and compatibility stay open.
+remain explicit. The additive source-set interface owns those same immutable indexes
+and a borrowed endpoint projection, not another source/node index. Its separate
+collection observation/profile retains per-source dependencies. No persistent or
+public interchange format is selected. Broader formats, graph history and
+compatibility stay open.
 
 ## DEC-008
 
@@ -280,7 +284,11 @@ blob pinned by actual clean committed HEAD, with before/after inspection and Cor
 binding. Lexical `$ref` occurrences/local JSON Pointer fragments are the supported
 case; other resources, missing targets and unsupported fragments stay unresolved.
 The [reference contract](../architecture/knowledge-references.md) defines bounds,
-version dependencies and context qualification. All new candidates invalidate
+version dependencies and context qualification. Its additive source-set resolution
+selects 1–8 explicit regular blobs at one observed commit, with before/after binding
+for the whole batch. Only the documented relative-path/local-pointer subset resolves
+within that selection; there is no discovery, general URI or schema evaluation.
+The original single-source coverage remains unchanged. All new candidates invalidate
 current reuse conservatively; there is no non-impact proof or incremental mutation.
 No dirty snapshot is selected. Multi-language/code/schema-semantic/binary extraction,
 transitive invalidation and incremental/full recomputation still require their

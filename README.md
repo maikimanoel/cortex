@@ -10,9 +10,9 @@ boundaries. Projects engineered with Cortex do not need to contain AI.
 
 **Pre-alpha.** The source implements the bounded capabilities below; it is not
 production-ready and makes no general API-stability or cross-platform guarantee.
-Milestone 003 has begun with canonical history, encrypted storage and a first JSON
-reference knowledge slice;
-its remaining capabilities and Milestones 004–006 remain planned. Source preparation
+Milestone 003 has begun with canonical history, encrypted storage and bounded JSON
+reference knowledge, including selected source sets. Its remaining capabilities
+and Milestones 004–006 remain planned. Source preparation
 does not authorize a public launch, binary release or package publication.
 
 **Milestone 002 delivers a bounded task-to-evidence CLI slice.**
@@ -145,9 +145,9 @@ these are not sandbox or hard real-time guarantees.
 
 | Crate | Current responsibility |
 | --- | --- |
-| `cortex-core` | Foundation contracts, contract revisions, typed candidate/task binding and bounded in-memory canonical temporal records |
+| `cortex-core` | Foundation contracts, typed candidate/task binding, canonical temporal records and immutable knowledge projections |
 | `cortex-evidence` | Legacy reports plus unified candidate-bound result, applicability, validity and redacted library inspection |
-| `cortex-cli` | Help/version, bounded Git inspection, typed adapter, human/JSON task-to-evidence check and encrypted history infrastructure |
+| `cortex-cli` | Existing commands, bounded Git inspection, knowledge acquisition and encrypted history infrastructure |
 
 The production direction is CLI -> Evidence -> Core, with CLI also using Core.
 The inspection
@@ -176,6 +176,15 @@ file, inspect exact source spans/local `$ref` relationships and query incoming
 references through Core. `reinspect` reports contextual current/stale/unestablished
 validity; relationships remain extracted and unverified. This is a library interface,
 not a new command, full JSON Schema evaluator or multi-language incremental index.
+
+The additive `cortex_cli::knowledge::source_set::extract_json_source_set` selects
+1–8 committed JSON files under one before/after candidate binding. Its Core
+`ReferenceSet::incoming(&target_path, "/Id")` query identifies both the target file
+and locator, retaining original spans and provenance. Only supported relative
+references within the explicitly selected set resolve; no other file is discovered.
+The single-source API still leaves external-document references unresolved. See the
+[source-set contract](docs/architecture/knowledge-references.md#additive-source-set-contract)
+for lexical coverage, aggregate bounds and contextual validity limitations.
 
 An execution report and a semantic judgment are different values. A newly
 constructed evidence record has no assessment, even when its exit code is zero.
