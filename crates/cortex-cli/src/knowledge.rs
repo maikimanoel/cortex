@@ -19,6 +19,8 @@
 //! ```
 
 mod json;
+/// Bounded committed JSON source-set acquisition and contextual qualification.
+pub mod source_set;
 #[cfg(test)]
 use crate::support;
 use cortex_core::{binding::*, knowledge::*};
