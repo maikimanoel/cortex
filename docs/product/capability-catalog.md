@@ -536,6 +536,9 @@ Distinguish mandatory requirements, executable properties, heuristics,
 recommendations, hypotheses, examples, reproduced defects and imported reports
 under the [native method contract](../architecture/engineering-methods.md#qualified-engineering-knowledge).
 No separate private instruction registry or knowledge index is introduced.
+Normalize source claims into properties and proposed methods with many-to-many
+provenance; retain material disagreements and unavailable-source limits rather
+than manufacturing exhaustive coverage.
 
 **Advanced properties:** Shared authority and temporal version semantics across
 all invocations (INV-001/004/006). A registry entry is a declaration of requested
@@ -588,6 +591,10 @@ preserve exact references and affected validity, subject to privacy policy; reti
 cannot silently remove an inherited mandatory requirement. The
 [qualification lifecycle](../architecture/engineering-methods.md#qualification-and-revision)
 does not grant operational permission or freeze registry persistence.
+Qualification findings must distinguish sufficient scoped support, partial support,
+unmet qualification, unassessed material and contradicted claims through existing
+evidence and rationale, not redundant result states. A reproduced defect alone
+does not qualify a detector; an unqualified mechanism cannot become an adopted blocker.
 
 ## F. Typed workflows and engineering methods
 
@@ -667,6 +674,11 @@ Selection emits a candidate-aware contract proposal with required observations,
 limitations and rationale, not a passing assessment or execution grant. The
 [native engineering contract](../architecture/engineering-methods.md) defines the
 cross-subsystem obligations and conditional lifecycle coverage, not another engine.
+Its [reconciliation decisions](../architecture/engineering-methods.md#independent-reconciliation-decisions)
+keep applicability, qualification, disposition and priority independent. Separate
+cross-cutting properties from contextual techniques; missing tooling/source access
+cannot establish non-applicability. Preserve adequate coverage and consolidate
+overlap before scheduling additional implementation.
 
 **Advanced properties:** Proportionality with no bypass of contract-required review,
 explicit specialization boundaries, and evidence-backed method selection

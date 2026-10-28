@@ -31,26 +31,115 @@ index, evidence vocabulary, permission authority or workflow backend.
 | Optional planning/reconciliation and parallel integration | [CAP-WFL-003](../product/capability-catalog.md#cap-wfl-003)/[004](../product/capability-catalog.md#cap-wfl-004), 004/006 |
 | Evaluation, accounting and promotion | [CAP-EVL-001](../product/capability-catalog.md#cap-evl-001)/[002](../product/capability-catalog.md#cap-evl-002), 005-A/C; [CAP-EVO-001](../product/capability-catalog.md#cap-evo-001)/[002](../product/capability-catalog.md#cap-evo-002), 005-B/C |
 
-The following classifications concern specification coverage, not runtime enums or
-implementation status. No new capability family is needed.
+The table records existing coverage and remaining obligations. Coverage is an input
+to the independent decisions below, not a classification of applicability,
+qualification, disposition or implementation priority. No new capability family is needed.
 
-| Obligation | Reconciliation against existing contracts | Necessary refinement |
+| Obligation | Reconciliation against existing contracts | Retained obligation |
 | --- | --- | --- |
-| Qualified knowledge | REFINEMENT_REQUIRED: SKL-001/002 already own immutable definitions and positive/near-neighbor qualification | Inspectable knowledge categories, full qualification dependencies and retirement lifecycle |
-| Common properties and specialization | REFINEMENT_REQUIRED: WFL-002 already selects target-language/ecosystem methods | Native baseline, component/interface applicability, inheritance without weakening and explicit profile conflicts |
-| Protected change contracts | REFINEMENT_REQUIRED: CORE-003/WFL-002 already protect behavior and test baselines | Explicit pre/postconditions, error/effect ordering, data/schema obligations and versioned exceptions |
-| Verification of verifiers | ALREADY_SPECIFIED: SKL-002 qualification, EVL-001 protected cases and EVL-002 false-positive/regression evaluation | Apply their existing gates; examples alone are not execution evidence |
-| Technical grounding | ALREADY_SPECIFIED: KNW-001/002 and CTX-001 own source/version correspondence | No additional technical index or authority from retrieved documentation |
-| Effects and recovery | REFINEMENT_REQUIRED: WFL-001/HRN-001/CORE-003 already own unknown effects and guarded retry | Cancellation is not rollback; data-use constraints and descendant/retry budget accounting remain explicit |
-| Broader lifecycle domains | CONDITIONAL: WFL-002 owns applicable methods, with domain owners below | Maintain an honest operational-versus-research coverage inventory; no automatic subsystem proliferation |
-| Defect learning and evaluation | ALREADY_SPECIFIED: MEM-001/002, EVL-001/002 and EVO-002 | Preserve the complete confirmation/qualification/promotion chain below |
-| Optional Plan–Execute–Reconcile and parallel work | ALREADY_SPECIFIED: WFL-003/004 and INV-003/009 | Retain challenge/reconciliation and combined-candidate gates; no mandatory topology |
-| Governed self-development | ALREADY_SPECIFIED: EVO-001/002, EVL-001/002 and engineering principles | Evaluate under applicable prior policy; no self-approval or independent-review claim from version comparison |
-| Separate prompt/rule stores, quality evidence enums, permission engines or universal compiler/IR | REJECTED_OR_DUPLICATE | Existing owners suffice; these alternatives add competing state or unsupported scope |
-| Unqualified specialized techniques | RESEARCH_PENDING until their applicability and oracle are established | Record the question and limits; do not turn a topic label into an operational method |
+| Qualified knowledge | SKL-001/002 own immutable definitions and positive/near-neighbor qualification | Inspectable knowledge categories, full qualification dependencies and retirement lifecycle |
+| Common properties and specialization | WFL-002 selects target-language/ecosystem methods | Native baseline, component/interface applicability, inheritance without weakening and explicit profile conflicts |
+| Protected change contracts | CORE-003/WFL-002 protect behavior and test baselines | Explicit pre/postconditions, error/effect ordering, data/schema obligations and versioned exceptions |
+| Verification of verifiers | SKL-002 qualification, EVL-001 protected cases and EVL-002 false-positive/regression evaluation | Apply existing gates; examples alone are not execution evidence |
+| Technical grounding | KNW-001/002 and CTX-001 own source/version correspondence | No additional technical index or authority from retrieved documentation |
+| Effects and recovery | WFL-001/HRN-001/CORE-003 own unknown effects and guarded retry | Cancellation is not rollback; data-use constraints and descendant/retry budget accounting remain explicit |
+| Broader lifecycle domains | WFL-002 owns applicable methods, with domain owners below | Maintain an honest operational-versus-research coverage inventory; no automatic subsystem proliferation |
+| Defect learning and evaluation | MEM-001/002, EVL-001/002 and EVO-002 | Preserve the complete confirmation/qualification/promotion chain below |
+| Optional Plan–Execute–Reconcile and parallel work | WFL-003/004 and INV-003/009 | Retain challenge/reconciliation and combined-candidate gates; no mandatory topology |
+| Governed self-development | EVO-001/002, EVL-001/002 and engineering principles | Evaluate under applicable prior policy; no self-approval or independent-review claim from version comparison |
+| Overlapping prompt/rule/index or evidence/policy proposals | Existing SKL/KNW/Evidence/Core owners | Consolidate overlapping obligations without retaining a competing authority or erasing material distinctions |
+| Universal compiler/IR proposal | No required consumer established | Reject this additional mechanism on scope and maintenance grounds; retain applicable language-independent objectives |
+| Unqualified specialized techniques | Owners depend on the actual property and use case | Retain unresolved proposals for research until applicability and an adequate oracle are established |
 
-GENUINELY_NEW independent subsystem responsibilities: none. New normative details
+No new independently owned subsystem responsibility is introduced. Normative details
 refine the existing owners above; no IMPLEMENTED contract is enlarged by this document.
+
+## Independent reconciliation decisions
+
+First distinguish the engineering property from each proposed method. A property
+states an objective and a meaningful violation condition; a method attempts to
+establish or preserve it. For example, trustworthy failure reporting is broadly
+relevant; process termination, fault injection and formal modeling verify different
+parts of that property under different assumptions. None is a universal procedure.
+Normalize compound source claims into distinct obligations before deciding what to adopt.
+
+Record four decisions independently, with scope, rationale and supporting references.
+These are specification labels, not new Rust enums or replacements for Evidence.
+
+| Decision | Required distinctions |
+| --- | --- |
+| Applicability | **CROSS_CUTTING:** relevance broadly independent of language/architecture/domain, with an objective and violation condition. **CONTEXTUAL:** identify the trigger, resulting obligations and legitimate absence conditions. **UNDETERMINED:** available facts do not establish applicability. **NOT_APPLICABLE:** inspected evidence establishes the required trigger's absence within the assessed scope |
+| Qualification | Explain what evidence supports the exact method, what remains unestablished and any material contradiction, as specified below. Applicability or source reputation cannot supply missing qualification |
+| Disposition | **INCORPORATE:** adopt an objective into its existing applicable contract, subject to authority and qualification. **DEFER:** retain justified work for dependencies, cost, scope or sequence. **RESEARCH:** retain an unresolved proposal without normative/operational authority. **CONSOLIDATE:** normalize overlap, preserving distinctions/provenance. **REJECT:** exclude with a substantive technical or product-scope reason. **NO_CHANGE:** existing coverage has no demonstrated material deficiency |
+| Implementation priority | If implementation remains necessary, justify **P0** (essential guarantees or first useful native workflow), **P1** (strong near-term value), **P2** (justified later/use-case-dependent work), or **UNSCHEDULED** (insufficient evidence, unresolved applicability or adoption prerequisites). A priority is not implementation authorization |
+
+Scope matters: retain a property's general relevance separately from the finding
+about a particular task. Neither CROSS_CUTTING nor CONTEXTUAL automatically maps to
+Evidence's `Applicable`; a concrete assessment needs its own inspected context.
+Missing tools, source access, inspection or expertise cannot establish
+NOT_APPLICABLE. Uncertainty must not silently remove an inherited obligation.
+
+A cross-cutting objective may be adequately covered and require NO_CHANGE with no
+additional implementation to prioritize. A contextual method may be P0 when it
+is necessary for an essential workflow. Deferral does not diminish importance;
+incorporating an objective does not qualify every proposed detector for it.
+Research can address a relevant property without authorizing an unqualified method.
+
+### Qualification findings and evidence
+
+For the exact method/version, assess property, environments/versions, preconditions,
+mechanism, required observations/oracle, supporting evidence, legitimate exceptions,
+counterexamples, false-positive/false-negative limits, validity dependencies and
+the scope of any justified conclusion. Correctness and practical effectiveness
+require their respective evidence; unmeasured outcome benefits remain unestablished.
+Distinguish in the reasoned finding:
+
+- Sufficiently qualified within the declared scope, with adequate current evidence.
+- Partially qualified: supported subclaims and unestablished parts are explicit.
+- Unqualified proposal: qualification requirements are known but not met.
+- Unassessed proposal: the relevant assessment has not occurred or sources are unavailable.
+- Materially contradicted claim: retain the counterexample, affected claim and scope;
+  do not infer that the broader engineering objective is invalid.
+
+These descriptions summarize evidence, not a second evidence-state machine. Reuse
+existing result/applicability/validity dimensions on each supporting assessment.
+An absent assessment stays unassessed; a selected unexecuted mechanism remains
+NOT_RUN, an unavailable prerequisite BLOCKED, insufficient interpretation UNKNOWN,
+and changed relevant dependencies STALE or validity unestablished as contracted.
+Do not infer a conclusive assessment from these prose descriptions or synthesize
+missing observations. A reproduced defect does not itself qualify its detector;
+evaluate defective and legitimate near-neighbor cases and the actual oracle.
+Documentation, a scanner match or source endorsement alone is insufficient.
+
+### Decision procedure and traceability
+
+For each normalized candidate obligation:
+
+1. State the engineering objective, separately from the proposed technique.
+2. Identify the relevant failure mode/property and a discriminating violation case.
+3. Inspect available source/version support, evidence and material limitations;
+   identify unavailable material explicitly instead of treating a summary as exhaustive.
+4. Assess applicability in the declared scope independently of verifier availability.
+5. Locate the existing capability owner, coverage and dependencies; preserve adequate contracts.
+6. Assess the mechanism and qualification requirements using the scoped evidence above.
+7. Normalize overlap and reconcile contradictions/exceptions; preserve unresolved
+   disagreement until facts or governing authority settle it.
+8. Record disposition and technical/product rationale, including any required approval.
+9. Prioritize remaining implementation from relevance/severity, practical utility,
+   trigger frequency/significance, existing coverage, verification feasibility/evidence,
+   implementation/maintenance cost, dependencies, mechanism risk, false-positive/process
+   burden and reuse. Do not invent numerical weights, ROI or universal rankings.
+10. State observable acceptance, unresolved decisions/owners and their dependency points.
+
+Retain explainable source-to-obligation correspondence, scope/candidate/version,
+the four separate decisions, rationale, acceptance and reopening dependencies.
+Many source items may support one obligation; one source item may split into several.
+Do not decide by terminology, repetition, apparent similarity or reputation alone.
+Consolidation preserves material differences and provenance; it is not rejection.
+An unresolved disagreement or missing source remains visible, without invented consent.
+Private source correspondence stays outside the repository; official contracts retain
+the normalized rationale and obligations needed by contributors, not private inventories.
+No storage/wire format or new tracking subsystem is selected by these obligations.
 
 ## Qualified engineering knowledge
 
@@ -228,6 +317,11 @@ All cases are **PLANNED; execution NOT_RUN** for this native mechanism. Existing
 | 13. Proposed weaker self-policy | Applicable prior protected gates and separate approval cannot be replaced by the candidate's policy | EVO-002, CORE-003 |
 | 14. High-risk trigger | Required qualified review remains a gate despite inconvenient cost | WFL-002, DEC-012 |
 | 15. Trivial low-risk change | Select only relevant obligations; no mandatory agents, consensus or formal machinery | WFL-002 |
+| 16. Broad property, contextual techniques | Preserve the shared objective without mandating every verifier; an essential contextual mechanism can still receive P0 | WFL-002, SKL-002 |
+| 17. Overlapping or compound claims | Consolidate normalized obligations, split distinct properties and preserve exceptions/provenance; duplication alone is not rejection | SKL-001/002 |
+| 18. Contradicted detector claim | Retain the scoped counterexample and unestablished coverage; no automatic rejection of the property or qualification from its reproduced defect | SKL-002, EVL-002 |
+| 19. Missing or conflicting source support | Record unassessed material and unresolved disagreement; no exhaustive-coverage, non-applicability or adoption claim from a summary | SKL-001/002, CTX-001 |
+| 20. Adequate coverage or deferred method | NO_CHANGE creates no artificial implementation work; DEFER preserves rationale/priority independently of applicability and qualification | WFL-002 |
 
 ### Early concrete targets
 
@@ -269,6 +363,11 @@ starts with bounded inspectable records and a candidate-aware contract proposal,
 then returned-report reconciliation, actual governed execution, coverage extensions
 and measured evolution. Human-readable inspection may precede portable interchange;
 no storage schema, public trait, wire protocol, backend, engine or new crate is chosen.
+External instructional aids are progressively unnecessary only for methods whose
+native applicability, qualification, inspection and required workflow behavior have
+actually been implemented and verified. Reassess affected coverage on revision;
+unsupported obligations and human review remain explicit. This specification alone
+does not replace those aids or establish autonomous engineering ability.
 
 Logical SKL/WFL ownership does not imply new crates. Core retains deterministic
 identities/constraints; Evidence owns qualification observation/assessment semantics;

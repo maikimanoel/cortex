@@ -221,6 +221,15 @@ non-executing preview may use delivered 002/003 identities and evidence without
 claiming the full workflow/harness or weakening their gates; scheduling it before
 the full prerequisites requires an explicit scoped owner decision.
 
+Before scheduling a method, use the
+[independent reconciliation decisions](../architecture/engineering-methods.md#independent-reconciliation-decisions):
+normalize its objective, inspect coverage and support, then justify disposition
+and any remaining implementation priority. P0/P1/P2/UNSCHEDULED order justified work;
+they do not override milestone dependencies or authorize execution. Adequately
+covered properties create no artificial implementation task. A high-value contextual
+method may precede a broad but already covered objective; missing qualification or
+adoption prerequisites remain visible rather than being converted into low importance.
+
 | Slice | Existing placement/owners | Minimum useful outcome and prerequisite |
 | --- | --- | --- |
 | 1. Qualified method inspection and contract preview | 004-A baseline references, 004-B CAP-SKL-001/002, 004-C CAP-WFL-002 | Small explicit definition set, inspectable qualification/unknowns and contextual selection into a candidate-aware proposed engineering contract; minimum DEC-007/012 boundary first. A usable qualification inspector precedes selector implementation; no runner, adoption authority or full registry is implied |

@@ -317,6 +317,13 @@ their authoritative consumer; unsupported or uncertain inputs remain unresolved.
 A non-executing preview may describe these missing decisions but cannot invent
 approval, mandatory policy or an effect grant. Any proposal to schedule that preview
 before full roadmap prerequisites needs explicit scoped implementation authorization.
+The [reconciliation procedure](../architecture/engineering-methods.md#decision-procedure-and-traceability)
+separates applicability, scoped qualification, incorporation disposition and delivery
+priority; none substitutes for this adoption authority. Before authoritative method
+use, decide who can approve incorporation, revise exceptions or resolve material
+conflicts, and what qualification evidence that role requires. Unknown source support
+cannot be converted into mandatory policy by prioritizing it. No numerical trust
+threshold, reviewer count or universal method mandate is selected here.
 
 **Proportional profiles and required reviewers.** Before 004-C, establish
 auditable classification rules for trivial/standard/critical work and the qualified
