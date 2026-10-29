@@ -19,6 +19,8 @@
 //! ```
 
 mod json;
+/// Producer-owned bounded JSON refresh with fresh acquisition and explicit parse reuse.
+pub mod refresh;
 /// Bounded committed JSON source-set acquisition and contextual qualification.
 pub mod source_set;
 #[cfg(test)]
