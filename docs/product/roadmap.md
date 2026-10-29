@@ -145,10 +145,17 @@ The [source-set extension](../architecture/knowledge-references.md#additive-sour
 binds 1–8 explicitly selected committed JSON files together and answers typed
 cross-document incoming queries. Original single-source behavior remains intact;
 separate conformance tests exercise its exact limits and unresolved semantics.
+Producer-owned JSON refresh now reuses parsing for exact supported path/byte
+dependencies while reacquiring sources and rebuilding a fresh bound set; literal
+full-rebuild transitions and failure-preservation cases provide its acceptance
+mechanisms. A typed snapshot delta compares covered structure under exact profiles,
+without semantic non-impact or cross-profile normalization. The additive 003-A
+interval timeline preserves point-query/cutoff semantics over finite windows, and
+stateful encrypted replay conformance protects interleaved admission/order/reload behavior.
 The 003-A prerequisite still governs full 003-B integration; this authorized slice
 uses its delivered source-provenance types plus 002 binding/evidence, without new
 persistence, memory-layer or dirty-snapshot behavior. Full multi-language and
-incremental-index exits are incomplete; 003-C through 003-F
+dependency-sensitive incremental-index exits are incomplete; 003-C through 003-F
 remain PLANNED. Broader memory behavior does not follow from these bounded slices.
 
 003-B/003-C supply source facts and dependency validity; 003-F grounds material

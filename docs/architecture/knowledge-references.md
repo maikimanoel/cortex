@@ -2,8 +2,9 @@
 
 [CAP-KNW-001](../product/capability-catalog.md#cap-knw-001) owns extraction/indexing;
 the [roadmap](../product/roadmap.md#003-temporal-knowledge-and-memory) owns sequencing.
-This implements one useful structured-source adapter, not the complete multi-language
-index, incremental invalidation or CAP-KNW-002 temporal graph queries.
+This implements one useful structured-source adapter, bounded parsing refresh and
+snapshot comparison, not the complete multi-language index, dependency invalidation
+or CAP-KNW-002 temporal graph queries.
 
 ## Contract and ownership
 
@@ -89,8 +90,9 @@ The view exposes correspondence and profile-match information. CURRENT neither
 validates a relationship nor proves semantic completeness, source-code correctness
 or consent. Matching HEAD with dirty status cannot establish CURRENT. A supplied
 ID increment alone is not reinspection, and caller-built reports are unauthenticated.
-Full bitemporal graph history, scoped dependency invalidation and incremental versus
-full recomputation remain later CAP-KNW-001/002 and CAP-EVD-003 work.
+Full bitemporal graph history, scoped dependency invalidation and broader incremental
+analysis remain later CAP-KNW-001/002 and CAP-EVD-003 work. The refresh operation
+below creates a new bound generation; it does not relabel an old index as current.
 
 ## Additive source-set contract
 
@@ -174,6 +176,67 @@ process, 15-second blob and 30-second capture budgets and read-only controls are
 unchanged. These composed bounds are not a new hard whole-operation latency guarantee.
 No new crate, dependency, command, storage, runner or source collection is implicit.
 
+## Producer-owned JSON refresh
+
+`cortex_cli::knowledge::refresh::RefreshCache` starts empty and retains at most one
+producer-created `RefreshGeneration`. `refresh_json_source_set` takes the explicit
+repository, binding contract, first observation ID, selected paths, recording instant
+and mutable cache. It obtains fresh before/after captures and reads every selected
+regular committed blob, including cache hits. Exact path bytes, source bytes and
+supported parser/rule/configuration dependencies permit reuse of parsed nodes and
+lexical references. Otherwise the existing JSON extractor runs. Collection resolution
+is rebuilt across the entire new selection; an unchanged source can gain or lose
+resolved targets when another source changes. Removing a selection is not deletion.
+
+Each generation exposes its immutable `ReferenceSet` and typed `ParseObservation`
+values: original parse observation/commit/time, parser dependencies and optional
+immediate copied-source identity. Fresh capture/source/collection IDs use the same
+checked n through n+M+2 allocation as source-set acquisition. Known collisions with
+retained collection, parse-origin or reuse references are rejected before I/O;
+uniqueness outside retained context remains the caller's responsibility. No public
+constructor/setter imports arbitrary parsed indexes into the cache. Acquisition,
+parsing, bounds, binding and Core construction must all succeed before replacement;
+returned errors leave the previous generation unchanged. Ordinary allocation failure
+is not a recoverable-memory guarantee.
+
+Refresh collection/source mechanisms and profiles are distinct from legacy profiles.
+They declare the resolver dependency and actual parsed/reused provenance. Refresh
+`qualify`/`reinspect` use existing correspondence and Evidence validity: matching
+supported complete coverage can be CURRENT, known mismatch is STALE, and missing or
+uncertain coverage is unestablished. Legacy source-set qualification deliberately
+rejects the new profile. Parse reuse does not re-execute parsing, authenticate an
+origin, establish semantic truth or grant authority. Historical snapshots stay intact.
+
+All existing source/set bounds and Git budgets apply. A previous generation and
+bounded staged construction coexist. Caller-held clones are outside the cache's
+retention count. This avoids parser work, not blob I/O; it claims no measured speedup,
+hard RSS/latency bound, automatic discovery, dirty snapshot, knowledge persistence
+or complete incremental/dependency invalidation.
+
+## Reference-snapshot deltas
+
+Core `knowledge::delta::compare(before, after)` borrows two `ReferenceSet` snapshots
+from the same exact declared repository/worktree. It rejects mismatched capture,
+collection or common-source mechanisms/profiles with typed `DeltaError` values.
+Matching opaque declarations allow comparison of reported structure only, without
+producer qualification, ancestry, chronological ordering or live reinspection.
+Both original contexts, identities, bytes, provenance and unresolved coverage remain
+accessible. No graph copy, allocation, mutation or new evidence state is introduced.
+
+Deterministic iterators report selected-source additions/removals and exact byte
+changes, node additions/removals/span changes, and reference occurrence changes.
+Occurrences match by raw source path plus locator; modified spelling, span, original
+target, origin/disposition and resolved endpoint/unresolved reason remain distinct.
+Ordering is by source-path bytes then locator. Empty reference changes do not prove
+unchanged scalar bytes, behavioral equivalence, non-impact, CURRENT or PASS.
+
+Exact profile comparison is intentionally conservative. Legacy extraction and refresh
+have different mechanisms; two refresh generations can also have different source
+profiles because parse/reuse provenance participates in those versions. Those
+comparisons return typed incompatibility rather than normalizing declarations.
+Cross-profile interoperability is not implemented or required by this bounded query;
+a future consumer must define and review any justified compatibility rule first.
+
 ## Bounds, failures and privacy
 
 Per source: 256 KiB captured input, 4096 nodes, 1024 references, depth
@@ -215,13 +278,22 @@ paths, aggregate and per-source limits, contextual validity and repository invar
 [Single-source conformance tests](../../crates/cortex-cli/tests/knowledge_conformance.rs)
 separately exercise exact limits, pointer near-neighbors, byte spans and uncertainty
 through the unchanged public API. Test sources are mechanisms, not executed results.
+[Full-rebuild transition tests](../../crates/cortex-cli/tests/knowledge_rebuild.rs)
+retain literal endpoint/span expectations independent of refresh or delta.
+[Refresh tests](../../crates/cortex-cli/tests/knowledge_refresh.rs) compare explicit
+fields against full reconstruction and literal cases, preserve old cache state on
+failure and inspect the actual profile boundary with delta. Private module tests
+observe parser calls and controlled capture races. [Delta tests](../../crates/cortex-core/tests/knowledge_delta.rs)
+cover deterministic borrowed changes, exact bounds, byte identity and profile rejection.
 
 Permanent authority/evidence/temporal principles remain unchanged. Initial 003-B
 choices are approved and implemented within this slice: one clean committed JSON
 source, lexical local-reference rules, immutable Core index and library consumer.
 The source-set extension adds only a bounded explicit-selection projection over
 those same indexes, with its own collection identity/profile and aggregate limits.
-DEC-007 resolves only this internal API/representation; DEC-011 resolves only this
-declared extraction/clean-commit boundary. Reopen for parser/rule/feature/host changes
-or broader coverage. Dirty snapshots, incremental updates, additional languages,
-validation, graph persistence, interchange and privacy lifecycle remain open/planned.
+Refresh and delta extend those same immutable values without changing legacy APIs.
+DEC-007 resolves only these internal APIs/representations; DEC-011 resolves only this
+declared extraction/clean-commit boundary. Reopen for parser/rule/feature/host changes,
+profile interoperability or broader coverage. Dirty snapshots, broader incremental
+updates, additional languages, validation, graph persistence, interchange and privacy
+lifecycle remain open/planned.

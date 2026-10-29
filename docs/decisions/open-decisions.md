@@ -151,7 +151,9 @@ caller-reported source references, nonempty half-open domain intervals, inclusiv
 recording cutoffs and atomic linear corrections. Equal recording times use
 predecessor order; no wall clock, persistent schema or public compatibility promise
 is selected. The durable scoped resolution below extends this model without changing its
-query or correction semantics. No public compatibility promise follows.
+query or correction semantics. The additive finite interval timeline delegates to
+the same point query and introduces no new persisted time representation or lifecycle
+policy. No public compatibility promise follows.
 
 **Durable-history scoped resolution; DEC-007 remains OPEN overall.** The
 [admission contract](../architecture/temporal-records.md#durable-admission) requires
@@ -179,8 +181,10 @@ raw_value feature supplies exact borrowed spans; source/profile/candidate refere
 remain explicit. The additive source-set interface owns those same immutable indexes
 and a borrowed endpoint projection, not another source/node index. Its separate
 collection observation/profile retains per-source dependencies. No persistent or
-public interchange format is selected. Broader formats, graph history and
-compatibility stay open.
+public interchange format is selected. Producer-owned in-memory parsing refresh
+and borrowed snapshot deltas extend these internal interfaces while preserving
+fresh candidate acquisition, exact profile distinctions and legacy behavior.
+Cross-profile normalization, broader formats, graph history and compatibility stay open.
 
 **Native engineering decision point:** Before the first non-executing method
 consumer, choose the minimum internal definition/revision and qualification-reference

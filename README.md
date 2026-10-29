@@ -186,6 +186,15 @@ The single-source API still leaves external-document references unresolved. See 
 [source-set contract](docs/architecture/knowledge-references.md#additive-source-set-contract)
 for lexical coverage, aggregate bounds and contextual validity limitations.
 
+The library also supports [producer-owned JSON refresh and snapshot deltas](docs/architecture/knowledge-references.md#producer-owned-json-refresh).
+Refresh reacquires every selected blob and binds a new generation, reusing parsing
+only for exact supported path/byte dependencies. The Core delta query compares
+retained snapshots with matching declared profiles; it does not establish semantic
+equivalence or freshness. [Interval timelines](docs/architecture/temporal-records.md#interval-timelines)
+inspect one canonical entity across a finite domain window and recording cutoff.
+These are bounded library extensions; full incremental invalidation, knowledge
+persistence, broader memory layers and Milestone 003 remain incomplete.
+
 An execution report and a semantic judgment are different values. A newly
 constructed evidence record has no assessment, even when its exit code is zero.
 The legacy API retains its original zero-exit/rationale preconditions and terminal

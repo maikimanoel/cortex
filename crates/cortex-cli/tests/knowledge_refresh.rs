@@ -793,3 +793,43 @@ fn identical_bytes_at_a_different_path_require_a_new_parse_and_maximum_selection
     );
     assert_full_reconstruction(&r, g);
 }
+
+#[test]
+fn delta_preserves_declared_profile_boundaries_for_actual_refresh_generations() {
+    use cortex_core::knowledge::delta::{DeltaError, compare};
+
+    let r = repo();
+    let c = contract(&r);
+    let mut cache = RefreshCache::new();
+    let original = both(&r, 1, &mut cache).clone();
+    let legacy = source_set::extract_json_source_set(
+        &r.path,
+        &c,
+        ObservationId::new("legacy-comparison", 1).unwrap(),
+        vec![path(b"a.json"), path(b"b.json")],
+        UNIX_EPOCH,
+    )
+    .unwrap();
+    assert_eq!(
+        compare(&legacy, original.set()).unwrap_err(),
+        DeltaError::CollectionMechanismMismatch
+    );
+
+    let reused = both(&r, 10, &mut cache);
+    assert_eq!(
+        original.set().sources()[0].bytes(),
+        reused.set().sources()[0].bytes()
+    );
+    assert!(reused.parsing()[0].reused_from().is_some());
+    // Parse/reuse provenance is part of the exact source profile. The comparator
+    // must not normalize it or infer equivalence from the unchanged bytes.
+    assert_eq!(
+        compare(original.set(), reused.set()).unwrap_err(),
+        DeltaError::SourceProfileMismatch
+    );
+    let same = compare(reused.set(), reused.set()).unwrap();
+    assert_eq!(same.source_changes().count(), 0);
+    assert_eq!(same.node_changes().count(), 0);
+    assert_eq!(same.reference_changes().count(), 0);
+    assert_full_reconstruction(&r, reused);
+}

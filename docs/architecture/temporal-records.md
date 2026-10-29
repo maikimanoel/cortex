@@ -106,6 +106,7 @@ adapter's native dependencies are isolated in CLI infrastructure.
 | `CanonicalHistory::new` / `append` | Own one exact `CandidateObservation`; validate all relationships and budgets before accepting a version |
 | `records` / `version` / `history` | Immutable inspection of all append-ordered versions, a named version, or one entity's predecessor-ordered chain |
 | `TemporalQuery` / `query` / `TemporalView` | Exact capture ID, domain instant, inclusive recording cutoff; return original candidate/coverage context and an optional selected version |
+| `timeline::TimelineQuery` / `query_timeline` | One finite domain window and recording cutoff; borrowed selections in a bounded coalesced partition |
 
 Missing named entities/versions/predecessors have distinct errors. A known entity
 with no eligible version returns `TemporalView::record() == None`; an unknown entity
@@ -119,10 +120,36 @@ remains deferred.
 `append` preserves accepted context, versions, order and byte accounting on every
 returned error. Space reservation failure has a typed error; ordinary Rust
 allocation failure while constructing/cloning caller-owned values is not a
-recoverable-memory guarantee. Queries borrow retained data without allocating or
-mutating it; traversal is bounded by the retained-version limit. The caller must
-reconstruct the same accepted sequence to obtain equivalent in-memory history;
+recoverable-memory guarantee. Point/history queries borrow retained data without
+allocating or mutating it; traversal is bounded by the retained-version limit.
+The caller must reconstruct the same accepted sequence to obtain equivalent in-memory history;
 the API does not supply persistence or revalidate the observation.
+
+## Interval timelines
+
+`cortex_core::temporal::timeline::query_timeline` consumes a validated
+`TimelineQuery::new(context, from, until, recorded_by)` and borrows one known entity's
+history. The finite nonempty half-open window is partitioned into ordered, disjoint
+nonempty segments covering exactly that window. Each segment exposes its original
+record or explicit absence; adjacent segments with the same selected version or
+absence are coalesced. Distinct versions with equal bodies remain distinct.
+
+Selection delegates to the unchanged point query at retained validity boundaries.
+The recording cutoff is inclusive; equal recording times follow predecessor order.
+A correction overrides only within its own interval, with earlier-version fallback
+elsewhere. Later recordings cannot affect an earlier cutoff. Wrong capture and
+unknown entity retain typed errors, distinct from no eligible retained version.
+All times remain exact, with no clock reads, successor arithmetic or truncation.
+
+Fallible vector reservations bound output construction: the existing 1024-version
+limit permits at most 2050 endpoints and 2049 segments before coalescing. Selection
+has bounded O(V²) traversal, not a measured latency or total-memory guarantee.
+Returned errors do not mutate history. No backend, persisted field or storage format
+changes. Absence does not represent privacy gaps, real-world absence or N/A, and
+historical selection establishes no freshness, PASS or operational authority.
+[Timeline tests](../../crates/cortex-core/tests/temporal_timeline.rs) include literal
+partitions, cutoffs, nanosecond/upper host-time boundaries, fallback, limits and
+immutable borrowing. Their execution evidence belongs in the external handoff.
 
 ## Bounds and privacy
 
@@ -131,8 +158,9 @@ Initial internal limits: 128-byte ASCII IDs, 4096-byte bodies/source description
 record text/reference bytes. Distinct record-ID types use the existing TaskId
 character syntax; bodies/source descriptions use the existing nonblank/control-character
 rules (line feed permitted). Validate before copying into accepted state. Count
-superseded versions; do not evict history to fit. Bound query output/traversal by the
-version limit. Existing observation bounds apply separately; retain context once
+superseded versions; do not evict history to fit. Bound point/history traversal by
+the version limit and interval output by the derived endpoint limits above.
+Existing observation bounds apply separately; retain context once
 rather than cloning it per version. These are input bounds, not retention durations,
 a wire format, performance targets or total-RSS guarantees.
 

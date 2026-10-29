@@ -312,8 +312,12 @@ and resolves supported relative document references only within that set. Origin
 single-source targets/completeness remain unchanged; no automatic discovery occurs.
 It reuses Core binding/provenance and Evidence validity, with extracted/unverified
 relations only. No Rust-only assumption, inference, validation, knowledge persistence
-or incremental mutation is implemented. Multi-language parsing and incremental/full
-recomputation correctness remain unfinished.
+or graph mutation is implemented. Producer-owned refresh reacquires every selected
+blob, reuses parsing only for exact supported path/bytes/dependencies and publishes
+a freshly bound set with rebuilt resolution. Returned errors retain the old cache.
+The borrowed snapshot-delta query reports byte/node/reference changes under exact
+declared profile compatibility, not semantic non-impact or freshness. Multi-language
+parsing and broader dependency-sensitive incremental indexing remain unfinished.
 **Verification mechanisms:** [Core invariants](../../crates/cortex-core/tests/knowledge.rs),
 [parser fixtures](../../crates/cortex-cli/src/knowledge/json.rs) and
 [real-Git queries](../../crates/cortex-cli/tests/knowledge.rs) cover actual references,
@@ -323,6 +327,10 @@ handoff. [Core source-set tests](../../crates/cortex-core/tests/knowledge_set.rs
 [real-Git source-set tests](../../crates/cortex-cli/tests/knowledge_set.rs) and
 [single-source conformance](../../crates/cortex-cli/tests/knowledge_conformance.rs)
 add endpoint/context/projection and exact-boundary acceptance mechanisms.
+[Full-rebuild transitions](../../crates/cortex-cli/tests/knowledge_rebuild.rs),
+[refresh](../../crates/cortex-cli/tests/knowledge_refresh.rs) and
+[delta](../../crates/cortex-core/tests/knowledge_delta.rs) add literal transition,
+parse-reuse/failure-preservation and structural/profile-compatibility cases.
 **Decisions:** scoped DEC-007/011 resolution; full coverage remains open.
 
 ### CAP-KNW-002
@@ -449,7 +457,9 @@ remembered; a claimed repair without its verification remains unverified.
 canonical requirements/decisions against one retained candidate observation.
 Validated linear chains support independent domain-time and recording-cutoff
 queries, immutable originals, atomic rejection, finite retained history and
-redacted diagnostics. `cortex_cli::history_store` persists one exact collection
+redacted diagnostics. The additive interval timeline borrows a finite coalesced
+partition under those same point-selection semantics and recording cutoff.
+`cortex_cli::history_store` persists one exact collection
 through SQLCipher, with explicit create/recover/load, durable ordinal admission,
 exact reconciliation and whole-collection removal. There is no general layer
 retention, targeted redaction, learning/recovery consumer or snapshot implementation.
@@ -457,7 +467,12 @@ retention, targeted redaction, learning/recovery consumer or snapshot implementa
 cover corrections, temporal boundaries, invalid transitions, deterministic
 reconstruction, exact limits and privacy; [real-Git tests](../../crates/cortex-cli/tests/temporal.rs)
 retain candidate distinctions and unchanged evidence. Candidate-scoped execution
-results remain in the external handoff. [Storage tests](../../crates/cortex-cli/src/history_store/tests.rs)
+results remain in the external handoff. [Timeline tests](../../crates/cortex-core/tests/temporal_timeline.rs)
+exercise partitions, exact boundaries, fallback, cutoffs and bounded output.
+[Stateful replay conformance](../../crates/cortex-cli/tests/history_replay_conformance.rs)
+compares interleaved encrypted admissions/rejections and reloads with Core and literal
+order/query expectations; discarded confirmed receipts model lost application acknowledgement.
+[Storage tests](../../crates/cortex-cli/src/history_store/tests.rs)
 and [real-Git consumers](../../crates/cortex-cli/tests/history_store.rs) cover encrypted
 restart, temporal preservation, crash/reconciliation, contention, corruption,
 capacity and whole-store removal. [Fault qualification](../architecture/temporal-records.md#storage-failure-qualification)
