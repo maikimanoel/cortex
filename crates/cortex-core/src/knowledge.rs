@@ -2,6 +2,8 @@
 //! Construction validates structure, not the authenticity/truth of producer reports.
 //! Queries retain the original candidate; no value grants permission or assessment.
 
+/// Borrowed structural comparison of two immutable reference-set snapshots.
+pub mod delta;
 /// Additive, candidate-bound projection over an explicit collection of source indexes.
 pub mod source_set;
 
