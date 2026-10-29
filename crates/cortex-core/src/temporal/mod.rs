@@ -18,6 +18,9 @@
 
 mod record;
 
+/// Bounded interval timelines over retained canonical history (CAP-MEM-001).
+pub mod timeline;
+
 pub use record::{
     CanonicalRecord, DomainInterval, RecordContent, RecordId, RecordKind, RecordTime,
     RecordVersionId, SourceOrigin, SourceReference,
