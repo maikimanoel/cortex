@@ -9,13 +9,11 @@ not an execution sandbox or a general software-correctness verifier.
 
 ## Private vulnerability reporting
 
-The approved public-launch route is **GitHub Private Vulnerability Reporting**
-for `maikimanoel/cortex`. The repository is currently private, and this policy
-does not claim that reporting is active. During the separately authorized launch,
-once visibility permits, the maintainer must enable the feature and verify that
-**Security → Report a vulnerability** is available on the repository before
-directing public reporters to it. This is a launch requirement, not a route that
-this preparation has already activated.
+The approved route for CORTEX's source preview is **GitHub Private Vulnerability
+Reporting** for `maikimanoel/cortex`. Before directing public reporters to it,
+the maintainer must enable the feature and verify that **Security → Report a
+vulnerability** is available on the repository. This policy defines the required
+route; the effective GitHub setting and reporting interface establish availability.
 
 When that private reporting route is available, use it for suspected
 vulnerabilities. Include the affected commit, relevant tool/environment versions,

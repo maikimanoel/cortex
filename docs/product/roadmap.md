@@ -330,7 +330,8 @@ This roadmap grants none of them.
 ## Pre-alpha source preparation and launch checkpoints
 
 The owner-approved DEC-009 exception allows early source access to delivered
-001/002 without claiming 003–006 or the full-platform 007 exit. These checkpoints
+001/002 and the actual bounded incomplete 003 source without claiming 003–006 or
+the full-platform 007 exit. These checkpoints
 use the existing CAP-CLI-005/006 owners; they introduce no runtime capability.
 
 - **002-P1:** Read-only repository, history, security and contributor-readiness
@@ -349,9 +350,14 @@ use the existing CAP-CLI-005/006 owners; they introduce no runtime capability.
   visibility and launch-time settings require subsequent explicit owner authority.
   No release, tag or package publication follows implicitly from source visibility.
 
-The repository remains private during P2/P3. The source is pre-alpha, with no general
-API-stability, production-readiness or expanded platform guarantee. The full 007
-milestone and CAP-CLI-006 remain planned under their complete contracts.
+P2/P3 were private preparation checkpoints. The owner has since approved the
+controlled public source transition under DEC-009, with main protection, qualified
+CI, external-workflow approval and private vulnerability reporting as required
+launch controls whose activation must be verified. Record actual publication evidence separately;
+authorization alone does not establish provider state. The historical repository
+remains private. The source is pre-alpha, with no general API-stability,
+production-readiness or expanded platform guarantee. The full 007 milestone and
+CAP-CLI-006 remain planned under their complete contracts.
 
 ## Explicit future backlog
 

@@ -7,7 +7,24 @@ Maiki Manoel maintains the project and reviews external contributions through
 GitHub pull requests. Automated checks support that review. There is no CLA or
 DCO sign-off requirement. Submit only material you have the right to contribute
 under the project's [MIT License](LICENSE), preserving applicable third-party
-notices. Repository access remains private until separately authorized launch.
+notices. The approved publication scope is an MIT source-only pre-alpha preview;
+it does not establish a stable release or complete the remaining milestones.
+
+## Integration policy
+
+The owner-approved `main` policy requires pull requests and the successful
+`Rust workspace` check from the GitHub Actions application (ID 15368), with the
+branch up to date. It applies to administrators without routine bypass; force
+pushes and branch deletion are prohibited. Zero formal approval reviews are
+required initially because there is one maintainer; external contributions still
+receive maintainer review. Workflows from all external contributors require
+maintainer approval before execution. Approval to run a workflow is distinct
+from code review or permission to merge.
+
+These are required provider controls. Verify their effective GitHub configuration
+rather than inferring enforcement from this document. Keep workflow tokens
+read-only, automatic workflow PR creation/approval disabled and untrusted fork
+pull requests away from secrets and privileged execution.
 
 ## Set up and verify
 
@@ -75,5 +92,5 @@ consequential boundaries. Documentation-only changes need accurate links and
 examples rather than artificial runtime tests. Keep tests local and deterministic.
 Avoid speculative abstractions and dependencies; justify any necessary dependency.
 Use English for code, comments and technical documentation. Keep packages
-unpublished and leave releases and public visibility to explicit owner decisions.
+unpublished and leave releases and visibility changes to explicit owner decisions.
 Maintainer review and automated checks do not guarantee acceptance or response time.

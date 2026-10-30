@@ -13,15 +13,20 @@ an actual consequential choice is authorized and made.
 [MIT License](../../LICENSE), SPDX identifier `MIT`, with copyright (c) 2026
 Maiki Manoel. All workspace packages inherit this sole project license and retain
 `publish = false`. Third-party license obligations remain independently applicable.
-License adoption does not authorize public access, releases or package publication;
-keep the repository private. Distribution readiness and approval remain DEC-009.
+License adoption alone does not authorize public access, releases or package
+publication. The scoped source-publication authority is recorded in DEC-009;
+further distribution still requires its own readiness and approval.
 Dependent capability: CAP-CLI-006.
 
 ## DEC-002
 
-**Public brand and trademark review.** Determine appropriate name/brand checks
-and any resulting changes before public launch. Current product identity does
-not imply legal clearance. Decision point: 007. Dependency: CAP-CLI-006.
+**Project name — owner disposition resolved for the source preview.** The owner
+has definitively selected CORTEX. The publication audit established no infringement
+or mandatory renaming. This decision is neither a legal opinion nor an independently
+verified trademark-clearance claim. Any distinct legal clearance remains unverified;
+material new evidence requires separate assessment rather than speculative reopening
+of the selected name. Broader distribution review retains its actual 007 decision
+point and CAP-CLI-006 ownership.
 
 ## DEC-003
 
@@ -211,28 +216,42 @@ and CAP-EVO-002. No benchmark score or superiority claim is approved here.
 
 ## DEC-009
 
-**Public release scope and approval — pre-alpha source scope resolved for
-002-P2; launch approval remains open.** The owner approves preparation for an early
-MIT source-only pre-alpha launch of the delivered 001/002 capabilities, before
-003–006. This is a scoped exception to the full-platform 007 sequence, not 006/007
-completion or permission to change visibility. No binary release, version tag,
-package publication, production-readiness or general API-stability claim is needed
-or authorized. [002-P1/P2/P3](../product/roadmap.md#pre-alpha-source-preparation-and-launch-checkpoints)
-separates audit, remediation and final readiness preparation. Public visibility
-still requires a subsequent explicit owner decision.
+**Public source scope and controlled transition — owner approved.** Following
+002-P2 preparation and the final publication audit, the owner authorizes the
+independent replacement repository's controlled public transition as CORTEX, an MIT
+source-only pre-alpha project. Scope includes the corrected development history,
+delivered 001/002 and actual bounded but incomplete 003 source. This is a scoped
+exception to the full-platform 007 sequence; neither 003 nor later milestones,
+CAP-CLI-006, stable APIs or production support become complete. Binary releases,
+tags and package publication remain separately unauthorized.
 
-Before any public access, retain history/privacy disposition, DEC-002 brand
-review, provider-managed metadata review and explicit owner approval as gates.
-[SECURITY.md](../../SECURITY.md) records the approved private-reporting route and
-its required launch-time activation/verification. No alternate contact or support
-SLA is selected. Technical preparation never grants publication authority. The
-full-platform 007 contract still depends on 006 and applicable DEC-001/002/003 exits.
+The approved main policy requires pull requests, an up-to-date branch and successful
+`Rust workspace` CI from GitHub Actions app 15368, zero formal approval reviews for
+the single maintainer, administrator enforcement with no routine bypass, and no
+force pushes or branch deletion. Require maintainer approval for workflows from
+all external contributors. Preserve read-only workflow tokens, disabled automatic
+workflow PR creation/approval and secret-free unprivileged fork execution. The
+practical contribution contract is in [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
-**002-P3 readiness boundary:** Successful local checks do not satisfy an unexecuted
+History/privacy and provider-record checks remain transition gates.
+[SECURITY.md](../../SECURITY.md) owns the required Private Vulnerability Reporting
+route. The owner accepts the non-atomic window needed to activate public-only
+controls immediately after visibility and authorizes returning only the replacement
+to private if an essential control fails or a material unexpected exposure is
+confirmed. A reversal cannot recall public copies. Keep the historical repository
+private indefinitely and preserve its archived flag, resources and evidence.
+No alternate reporting contact, support SLA, paid service or cleanup is selected.
+
+These are approved decisions, not observations that visibility or protections have
+already changed. Verify the actual provider state and candidate-scoped local/hosted
+checks before reporting delivery. The full-platform 007 contract still depends on
+006 and its applicable decision exits.
+
+**Readiness verification boundary:** Successful local checks do not satisfy an unexecuted
 remote-CI gate. Review the normal path with actual restored remote execution and
 any proposed temporary pre-alpha source-only exception separately. An exception
 requires explicit owner acceptance of its candidate, scope, residual risk,
-compensating verification and expiration conditions; none is approved here.
+compensating verification and expiration conditions; no CI waiver is approved here.
 Keep unavailable CI and unperformed remote checks explicit. Preparation or an
 exception decision alone never authorizes public visibility.
 

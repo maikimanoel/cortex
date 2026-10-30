@@ -1,4 +1,4 @@
-# Cortex
+# CORTEX
 
 Cortex is a software engineering platform designed to turn human intent into
 constructed, verified, and continuously improved solutions by integrating
@@ -12,8 +12,9 @@ boundaries. Projects engineered with Cortex do not need to contain AI.
 production-ready and makes no general API-stability or cross-platform guarantee.
 Milestone 003 has begun with canonical history, encrypted storage and bounded JSON
 reference knowledge, including selected source sets. Its remaining capabilities
-and Milestones 004–006 remain planned. Source preparation
-does not authorize a public launch, binary release or package publication.
+and Milestones 004–006 remain planned. The owner-approved open-source scope is an
+MIT source-only pre-alpha preview, including these incomplete increments. It
+includes no binary release, package publication or stable API commitment.
 
 **Milestone 002 delivers a bounded task-to-evidence CLI slice.**
 `cortex inspect` observes repositories; `cortex check` evaluates committed-HEAD
@@ -68,8 +69,7 @@ libcrypto; no beta cipher or network service is needed at runtime. Qualification
 currently covers Linux x86_64 with OpenSSL 3.6.5, not every OpenSSL 3 host.
 
 Obtain the source and bootstrap the toolchain and dependency cache with network
-access. Cloning the repository currently requires authorized GitHub access while
-it remains private:
+access:
 
 ```sh
 git clone https://github.com/maikimanoel/cortex.git
@@ -260,9 +260,9 @@ unapproved charges. Inspect the actual run and commit before claiming CI success
 See [CONTRIBUTING.md](CONTRIBUTING.md) for focused pull requests, local checks and
 maintainer review. Report ordinary bugs and discuss proposed features through
 GitHub issues. For suspected vulnerabilities, follow [SECURITY.md](SECURITY.md)
-and avoid public disclosure. GitHub Private Vulnerability Reporting must be
-activated and verified during the separately authorized public launch; this
-preparation does not claim it is already available.
+and avoid public disclosure. The maintainer must enable and verify GitHub Private
+Vulnerability Reporting before directing public reporters to that route. Follow
+the policy's instructions if the route is unavailable.
 
 ## Engineering commitments
 
@@ -278,9 +278,14 @@ payloads, and reference materials outside this Git repository.
 
 ## Repository status and licensing
 
-The official destination is the private repository `maikimanoel/cortex`. Keep it
-private. CORTEX is licensed under the [MIT License](LICENSE), copyright (c) 2026
-Maiki Manoel. Third-party dependencies retain their own applicable license terms.
+The official source project is [maikimanoel/cortex](https://github.com/maikimanoel/cortex).
+The owner has authorized its controlled public source-only pre-alpha transition
+under [DEC-009](docs/decisions/open-decisions.md#dec-009), subject to verified
+privacy and launch controls. Authorization is distinct from observed provider
+state. The separate historical repository and private evidence remain private.
+CORTEX is licensed under the [MIT License](LICENSE), copyright (c) 2026 Maiki
+Manoel. Third-party dependencies retain their own applicable license terms.
 See [third-party notices](THIRD_PARTY_NOTICES.md) for the linked storage components.
 All workspace packages remain unpublished. Do not publish packages, create releases,
-or change visibility without separate authorization.
+or change visibility outside explicit owner authorization. Source visibility does
+not complete Milestone 003, Milestone 007 or CAP-CLI-006.

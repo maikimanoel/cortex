@@ -190,9 +190,11 @@ claims are scoped to observed tests/evaluations. Proposed harness changes are
 separate candidates; promotion requires gates and an approver distinct from the
 proposer, with external authorization where required.
 
-The repository remains private under the owner-selected [MIT License](../../LICENSE).
-DEC-009 permits preparation for an early pre-alpha source launch; actual visibility
-requires separate owner approval after 002-P3 preparation. The bounded CI workflow checks PR/main
+The owner has authorized a controlled MIT source-only pre-alpha publication under
+[DEC-009](../decisions/open-decisions.md#dec-009), including the bounded incomplete
+003 increments. Actual visibility and launch controls require provider observations;
+this scope completes neither 003 nor 007. The historical repository and operational
+evidence remain private. The bounded CI workflow checks PR/main
 and manual requests using included standard Linux capacity under DEC-005. Its
 configuration is not evidence of a remote run. Completion of an engineering
 milestone does not authorize deployment, paid resources, package publication or
