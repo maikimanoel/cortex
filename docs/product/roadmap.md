@@ -274,13 +274,15 @@ not a replacement for method qualification or an effectful execution shortcut.
 ### Native parallel delivery sequence
 
 The [single native Rust design](../architecture/governed-parallel-engineering.md)
-refines CAP-WFL-004 under its existing Core/Evidence/Workflow/Harness owners. Every
-row is **PLANNED / NOT_RUN**. Full 004 retains its dependency on 003; neither this
-documentation change nor a priority label authorizes out-of-sequence execution.
+refines CAP-WFL-004 under its existing Core/Evidence/Workflow/Harness owners.
+G1 has a bounded implementation and local acceptance coverage; later rows remain
+**PLANNED / NOT_RUN**. The owner explicitly accepted only the pure G1 sequencing
+exception in DEC-012. Full 004 retains its dependency on 003 and its PLANNED status;
+no priority label or useful preview authorizes effectful out-of-sequence work.
 
 | Increment | Required input and bounded outcome | Gate before implementation/use |
 | --- | --- | --- |
-| G1, P0 proposed non-effectful 004 preview | Delivered 002 identities and supplied synthetic graph/review facts; pure std-only Core operation returns event-sensitive eligible/blocked and per-edge release/hold/refusal decisions, including chain/fan-in and causal invalidation | Owner accepts this exact limited sequencing exception and proposed DEC-007/012 input/trust boundary; separate Rust implementation authority. No production Evidence bridge, permission, persistence, dispatch, worktree or process operation |
+| G1, bounded non-effectful preview implemented | `cortex_core::parallel` uses delivered 002 identities and caller-supplied graph/review facts; its pure event reducer returns eligible/blocked and per-edge release/hold/refusal decisions, including chain/fan-in and causal invalidation | Scoped DEC-007/012 input/trust and early-preview decisions accepted by the owner. G1-01–10 and the in-memory part of G1-11 have local test coverage; real Evidence, permission, persistence and dispatch remain NOT_RUN and separately gated |
 | Evidence/inspection follow-ups, conditional | Accepted G1 interface; actual Evidence current-pass/context/coverage interpretation and CLI-first read-only operator view | Review edge-support mapping and minimum CLI input/privacy/API decisions before their consumers; no Core -> Evidence dependency or new evidence model |
 | Governed local execution, blocked until prerequisites | Real Core authority, qualified Workflow effect records/recovery and selected host/process adapter around the Codex CLI | Existing 004-A/B/C/D/E and relevant 003 exits, DEC-004/005/006/007/012, real denial/resource tests; supported approved storage extension before durable effects |
 | Evaluation and optional expansion, deferred | Accepted outcomes and complete attempt/resource accounting | CAP-EVL-001/002 controlled baselines; TUI only for demonstrated operator need, optional multi-host only for a justified later native Rust scope |
@@ -288,10 +290,10 @@ documentation change nor a priority label authorizes out-of-sequence execution.
 G1 uses delivered types and explicit caller assertions rather than pretending that
 CAP-EVD-003, the full policy engine, qualified method selection or durable workflows
 are delivered. It does not complete 003, advance 004's status or authorize agent
-execution. Until its scoped implementation decision is accepted, the safe alternative
-is review of the pure fixture/contract only, not provisioning workers or installing
-an external orchestrator. The minimum decision questions are recorded in DEC-007/012;
+execution. The scoped implementation decisions are recorded in DEC-007/012;
 host/budget/adoption policy remains open at its original execution boundary.
+Review and use of this advisory model cannot provision workers or release real
+operations. No external orchestrator is selected.
 
 ## 005: governed evolution and evaluation
 

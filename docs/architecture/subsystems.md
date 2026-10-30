@@ -105,8 +105,10 @@ validation, per-consumer artifact releases and event-driven eligibility to
 CAP-WFL-004, with deterministic domain logic housed in Core where appropriate.
 It introduces no scheduler service or second coordination authority. Evidence
 retains dependency validity, CAP-WFL-001 retains durable effects, and Core/Harness
-retain grants/enforcement. The proposed G1 projection consumes explicit caller facts
-without effects; it cannot authenticate reviews or release operational work.
+retain grants/enforcement. The implemented G1 projection in `cortex_core::parallel`
+consumes explicit caller facts without effects; it cannot authenticate reviews or
+release operational work. Its immutable graph and retained in-memory notifications
+are not a durable Workflow record or an additional Evidence store.
 
 ## Harness and controlled execution
 
