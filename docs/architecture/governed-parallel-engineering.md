@@ -1,6 +1,8 @@
 # Native governed parallel engineering
 
-Status: **PLANNED; native acceptance scenarios NOT_RUN**. Contract revision: **NGE-1**.
+Status: **CAP-WFL-004 PLANNED; bounded G1 preview implemented**. Contract revision:
+**NGE-1**, with the owner-approved G1 implementation decisions below. G1 model tests
+have local execution evidence; operational acceptance remains NOT_RUN.
 This is the single design contract for Cortex's native Rust parallel-engineering
 control plane, under [CAP-WFL-004](../product/capability-catalog.md#cap-wfl-004).
 The [catalog](../product/capability-catalog.md) owns functional scope/status,
@@ -30,12 +32,12 @@ Current [binding](candidate-binding.md), [evidence](unified-evidence.md),
 only their delivered bounded meanings. Manual parallel development is external
 practice, not native implementation or measured acceleration.
 
-The first proposed code mission, [G1](#g1-in-memory-readiness-projection), is a useful
+The first bounded code slice, [G1](#g1-in-memory-readiness-projection), implements a
 pure in-memory graph/event-to-decision operation. Its outputs describe readiness
 under supplied facts; they neither authenticate those facts nor authorize effects.
 Production Evidence integration, durable execution and host/process control are
 subsequent gates. Milestone 003 stays IN_PROGRESS; 004 and CAP-WFL-004 stay PLANNED.
-Accepting this specification does not authorize G1 implementation or dispatch.
+The owner separately authorized only this no-I/O G1 implementation, not dispatch.
 
 For material decisions in every NGE-R01–R16 requirement, retain the NGE contract
 revision, relevant mission/graph/artifact revisions, actual candidate contexts,
@@ -394,19 +396,20 @@ service, persistent store, distributed runtime or process launch.
 
 ## G1: In-memory readiness projection
 
-**Proposed first implementation contract; no code is delivered here.** Before code,
-accept the scoped preview and minimum decisions in
-[DEC-007](../decisions/open-decisions.md#dec-007)/
-[DEC-012](../decisions/open-decisions.md#dec-012) and the
-[roadmap gate](../product/roadmap.md#native-parallel-delivery-sequence).
-These proposals freeze G1's review target, not general persistence/trust policy.
+**Implemented bounded preview, under separately approved G1 decisions.**
+[DEC-007](../decisions/open-decisions.md#dec-007) records the native std-only,
+immutable graph/reducer and positive finite caller limits.
+[DEC-012](../decisions/open-decisions.md#dec-012) permits synthetic caller assertions
+only for advisory modeling and the specific early G1
+[roadmap exception](../product/roadmap.md#native-parallel-delivery-sequence).
+Neither decision closes its broader operational, persistence or trust questions.
 
 ### Module, inputs and useful output
 
-Place the domain operation in proposed `cortex_core::parallel`, one cohesive
-`crates/cortex-core/src/parallel.rs` plus public consumer tests in proposed
+The domain operation is `cortex_core::parallel`, one cohesive
+`crates/cortex-core/src/parallel.rs` plus public consumer tests in
 `crates/cortex-core/tests/parallel_readiness.rs`; only the required declaration in
-`src/lib.rs` is shared. These paths are planned additions. No crate/dependency,
+`src/lib.rs` is shared. No crate/dependency,
 Evidence -> CLI dependency, manifest, runner, CLI command or persistent format changes.
 
 Reuse `TaskId`, `TaskContract`, `binding::ContractRevision`, `CandidateId`,
@@ -416,12 +419,11 @@ identifier syntax; private validated fields prevent aliasing. A mission wraps th
 existing task/revision and exact supplied binding; it does not replace that API.
 Program/workstream references may be descriptive in G1, not a global registry.
 
-The proposed small API has these operations (names are an internal review target,
-not a stable API promise):
+The callable API has these operations, without a stable public API promise:
 
 | Operation | Observable behavior |
 | --- | --- |
-| `DependencyGraph::new(revision, missions, edges, limits)` | Validate unique identities, complete endpoints, predicate/level contracts, finite bounds and acyclicity before retaining a graph |
+| `DependencyGraph::new(reference, missions, edges, limits)` | Validate unique identities, complete endpoints, predicate/level contracts, finite bounds and acyclicity before retaining a graph |
 | `ReadinessProjection::new(graph)` | Empty release/fact basis; roots wait for explicit initial precondition/capacity events, without any dispatch method |
 | `apply(notification)` | Validate event identity/revision/context; atomically update supplied facts, recompute affected edges and missions, return a transition report |
 | `edge(id)` / `mission(id)` | Borrow the decision, blocking causes and exact supporting references; unknown keys return typed errors |
@@ -435,7 +437,7 @@ Every G1 result must expose that dispatch/authority is unimplemented, including 
 otherwise eligible root. Returning only static types or a precomputed task list
 fails the mission: applying A's release must observably change B's decision.
 
-The proposed signatures are `DependencyGraph::new(...) -> Result<DependencyGraph,
+The signatures are `DependencyGraph::new(...) -> Result<DependencyGraph,
 ReadinessError>` and `ReadinessProjection::apply(&mut self, Notification) ->
 Result<TransitionReport, ReadinessError>`, with private validated constructor inputs
 and borrowed lookup views. A graph reference pairs its own scoped ID with a positive
@@ -443,6 +445,61 @@ and borrowed lookup views. A graph reference pairs its own scoped ID with a posi
 No reference is silently normalized, resolved through a filesystem or treated as
 an authenticated identity. G1 models only explicit synthetic worker-slot capacity;
 real multi-resource reservations/accounting remain NGE-R09's later host boundary.
+
+### Concrete context, history and admission boundary
+
+`MissionContext` retains a `CandidateBindingContract` and optional original
+`CandidateObservation`. Known contradictions are refused; absent/incomplete
+capture, unknown HEAD/repository, dirty entries, insufficient capture consistency
+or a missing comparison basis block readiness. This checks declared structural
+correspondence only: no new observation, binding assessment or authentication is
+performed. An output's `ArtifactReference` has its own revision/candidate and may
+differ from the producer's frozen candidate capture.
+
+`MissionScope` combines that frozen context with a positive projection generation,
+initially one. Invalidation advances affected generations and clears their
+preconditions; it invalidates all incident releases and follows required downstream
+paths. Thus changing A also requires a new E -> F review for F's new scope, while
+D/E and D -> E can remain unchanged on declared complete non-impact coverage.
+Unknown impact coverage invalidates and blocks every mission until a new adequately
+declared graph/projection is constructed. Changing actual candidate, task contract,
+protected predicate or graph contents likewise requires a new immutable graph;
+releases never migrate implicitly. Merely obtaining the new model scope is not
+fresh source verification.
+
+Notifications retain their full supplied inputs in accepted arrival order.
+Historical release records reference the exact report/review notifications and
+first invalidating cause. `TransitionReport` gives changed edge/mission IDs in
+stable lexical order and a duplicate flag. `edge` borrows current Released/Held
+state and historical releases; incompatible proposals return atomic `Err` with
+`ReadinessError::rejected_review()` exposing Rejected. Missing support yields an
+admitted Held proposal. Neither a held nor a rejected proposal revokes a valid
+existing release; explicit invalidation owns revocation. Rejected identities are
+not consumed. Identical accepted redelivery is a no-op even at capacity.
+
+Whole-mission acceptance uses a distinct `DependencyKind::MissionAcceptance`
+report, accepted producer status and a fresh edge review; an intermediate Artifact
+release never completes its producer. Only Pending attempts can be eligible;
+Active/Accepted/Cancelled attempts cannot restart. Status updates are caller data,
+not dispatch. Capacity is synthetic free-slot availability, not reservation or
+exclusive allocation. Every edge/mission/transition exposes only
+`ExecutionAuthority::Unavailable`. Unsupported dispatch, responsibility transfer,
+external effects and graph-edit requests are refused.
+
+`GraphLimits` covers missions, edges, admitted notifications, aggregate predicate
+requirements/source-reference occurrences and retained text/path/comparison bytes.
+Every occurrence counts, including repeated contexts. Source reference groups
+retain reviewer/approval, observation/assessment/context and optional provisional
+risk/revalidation/cost references. Zero or sizes exceeding `isize::MAX` refuse;
+all aggregate additions are checked. Admission checks budgets before drafting
+state; long collections stop counting when a budget is exceeded. Constructor input
+allocation and normalization occur in caller-owned values before admission.
+There is no identity eviction. The reducer drafts derived state and publishes it
+with the notification only after all Result-producing validation/reservations
+succeed. Returned errors leave accepted graph, states, history and accounting
+unchanged; allocator panic/abort recovery is not promised. CPU work is a bounded
+iterative DAG traversal, not a latency or total-memory guarantee. Debug/errors
+redact payloads; explicit getters intentionally expose caller-owned inputs.
 
 ### Supplied review facts and trust limit
 
@@ -461,7 +518,7 @@ source references to retain support identity/version; they are not Evidence obje
 G1 checks **correspondence and completeness of these supplied references**, not
 whether a verifier ran or an assessment is true. In particular it must not accept
 a bare `qualified=true`, success string, producer message or absent required
-predicate. The proposed preview trusts explicitly supplied coordinator-role and
+predicate. The owner-approved preview consumes explicitly supplied coordinator-role and
 predicate-support facts only as **caller assertions in a synthetic/non-effectful
 model**. It authenticates no role, interprets no new PASS/validity vocabulary and
 cannot be attached to an effectful consumer as an authority source.
@@ -518,11 +575,13 @@ ordinary caller allocation failure is not universally recoverable. Deterministic
 bounded traversal is sufficient; no concurrency runtime or measured latency claim.
 Debug/errors omit caller text/paths/artifact payloads; use non-sensitive fixtures.
 
-### Planned discriminating fixture
+### Discriminating fixture and observed scope
 
-All scenarios below are **NOT_RUN for the native mechanism** until G1 or the named
-later boundary is implemented and its actual tests execute. Existing unrelated
-Rust passes cannot satisfy these cases. Use six missions, not six processes:
+The public integration target `parallel_readiness` exercises G1-01–10 and G1-11's
+in-memory implications with literal before/after assertions. These model cases
+passed locally; they are not operational release, dispatch or recovery tests.
+G1-11's external-effect behavior and all of G1-12 remain **NOT_RUN**. Use six
+missions, not six processes:
 
 ```mermaid
 graph LR
@@ -568,11 +627,12 @@ including literal expected edges/states independent of reducer helpers. Test bou
 at the configured limit and one beyond; preserve old reports on refusal.
 Run the repository's locked/offline metadata, formatting, check, Clippy, workspace
 tests, warning-free rustdoc and focused `cortex-core` integration target. Inspect
-nonzero selected test counts. Native scenarios remain NOT_RUN until those checks
-actually execute against the implemented candidate.
+nonzero selected test counts. The implementation's unit and public consumer tests
+cover bounded G1 cases; actual candidate, profile, command/count and hosted-CI
+observations belong in the delivery handoff. A test definition alone is not a pass.
 
-Before G1: accept this specification through protected PR review, the explicitly
-scoped non-effectful preview, and the proposed minimum input/trust boundary.
+G1 implementation authority and its minimum input/trust boundary are now explicitly
+approved; protected PR acceptance remains a separate integration boundary.
 Before production release support: implement/review the Evidence consumer and real
 Core authority. Before process dispatch: satisfy Workflow durability/effect recovery,
 privacy/host decisions and actual denial/resource enforcement. Before automatic

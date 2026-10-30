@@ -57,10 +57,13 @@ increments require separate authority.
 
 The planned [native governed parallel contract](docs/architecture/governed-parallel-engineering.md)
 defines per-consumer dependency release and rolling integration under the existing
-owners. Its first proposed Rust slice is a non-effectful in-memory readiness
-projection, not an implemented scheduler or permission to launch agents. The
-[roadmap](docs/product/roadmap.md#native-parallel-delivery-sequence) retains its
-preview decision and full execution prerequisites.
+owners. Its first Rust slice, `cortex_core::parallel`, implements a bounded,
+non-effectful in-memory readiness projection over caller-supplied assertions.
+It reports per-edge release/hold/refusal and mission eligibility with causal
+invalidation; it authenticates no Evidence and grants no execution permission.
+There is no scheduler or agent launcher. The
+[roadmap](docs/product/roadmap.md#native-parallel-delivery-sequence) records the
+owner-approved G1-only preview exception and full execution prerequisites.
 
 ## Run locally
 
@@ -152,7 +155,7 @@ these are not sandbox or hard real-time guarantees.
 
 | Crate | Current responsibility |
 | --- | --- |
-| `cortex-core` | Foundation contracts, typed candidate/task binding, canonical temporal records and immutable knowledge projections |
+| `cortex-core` | Foundation contracts, typed candidate/task binding, canonical temporal records, immutable knowledge projections and advisory G1 readiness |
 | `cortex-evidence` | Legacy reports plus unified candidate-bound result, applicability, validity and redacted library inspection |
 | `cortex-cli` | Existing commands, bounded Git inspection, knowledge acquisition and encrypted history infrastructure |
 

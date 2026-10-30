@@ -798,11 +798,13 @@ release a consumer while its producer continues. There is no all-workers barrier
 Core owns grants, Evidence owns contextual validity, CAP-WFL-001 owns durable effects
 and HRN owns actual dispatch; the scheduler creates none of those authorities.
 
-A proposed G1 non-effectful in-memory readiness projection is scoped in the
-[roadmap](roadmap.md#native-parallel-delivery-sequence). Its synthetic caller facts,
+The bounded G1 non-effectful in-memory readiness projection is implemented in
+`cortex_core::parallel`, under the owner-approved scoped DEC-007/012 decisions and
+[roadmap exception](roadmap.md#native-parallel-delivery-sequence). Its caller facts,
 release/hold/refusal and invalidation decisions grant no operational permission.
-The preview is PLANNED/NOT_RUN and requires scoped sequencing/input acceptance
-before code. It completes neither this capability nor 003/004. The selected Codex
+Local public-API tests exercise G1-01–10 and the in-memory part of G1-11; real
+Evidence release support (G1-12) and operational cases remain NOT_RUN. This preview
+completes neither this capability nor 003/004; their statuses remain unchanged. The selected Codex
 CLI is a later governed executor; orchestration remains Cortex-native Rust without
 an external workflow engine, broker or scheduler dependency.
 
@@ -820,11 +822,12 @@ an unresolved shared semantic dependency cannot be scheduled as independent work
 A clean merge with an incompatible dependency still blocks acceptance. A changed base
 invalidates affected evidence, and required integrated checks cannot be replaced
 by local passes. Missing approval or partial integration remains explicit.
-**Verification:** NOT_RUN; dependency/overlap/semantic-conflict fixtures, real
-isolated workspace tests, guarded integration and revalidation regressions.
-**Decisions:** DEC-005/006/007/012 retain their runtime, workspace, profile and
-approval gates. The new G1 proposals are not policy resolutions; no parallel
-executor is implemented by this blueprint.
+**Verification:** G1's bounded in-memory cases have local execution evidence;
+real isolated workspace tests, semantic integration, guarded promotion, operational
+revalidation and Evidence bridging remain NOT_RUN.
+**Decisions:** DEC-007/012 resolve only G1's internal boundary, caller-assertion trust
+and sequencing exception. DEC-005/006/007/012 retain all other runtime, workspace,
+profile and approval gates. No parallel executor is implemented.
 
 ## G. Isolated agent harness and controlled tool execution
 

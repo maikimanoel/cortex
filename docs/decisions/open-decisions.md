@@ -206,11 +206,11 @@ settle omission, size and version/applicability validation. The
 [method contract](../architecture/engineering-methods.md) selects obligations only,
 not a Rust trait, corpus format, persistence schema or Portable Context Package.
 
-**Native parallel G1 decision point — proposed, not resolved.** Before the
-[non-effectful readiness preview](../architecture/governed-parallel-engineering.md#g1-in-memory-readiness-projection),
-accept or reject the proposed internal std-only Core graph/reducer boundary,
-caller-supplied finite limits, immutable graph revisions and explicit asserted
-review/support references. No persisted schema, authenticated capture, automatic
+**Native parallel G1 scoped resolution; DEC-007 remains OPEN overall.** The owner
+authorized the [non-effectful readiness preview](../architecture/governed-parallel-engineering.md#g1-in-memory-readiness-projection)
+as a native std-only Core graph/event reducer with immutable graph revisions,
+validated typed references and explicit positive finite caller-provided limits.
+G1 retains exact task/binding/capture and asserted review/support references. No persisted schema, authenticated capture, automatic
 validity interpretation or stable public API is selected. An Evidence consumer
 must later derive gate support from actual applicable/current records without a
 Core dependency on Evidence. Full durable effects and CLI interchange retain their
@@ -371,16 +371,21 @@ acceptance assessment. The first useful method set needs actual discriminating
 qualification evidence; its contents and trusted-blocking authority are not selected
 by a source inventory or an implementation-priority label.
 
-**G1 preview trust and sequencing — proposed, not owner-approved implementation
-policy.** May the exact G1 fixture/reducer use supplied coordinator-role and
-predicate-support assertions only for non-effectful advisory projection, with all
-operational release/dispatch authority explicitly unavailable? May that bounded
-004 preview be implemented using delivered 002/003 identities before full 003 exits,
-without changing milestone dependencies or status? The conservative proposed answer
-is yes only for the documented no-I/O/no-effects mission, after acceptance of this
-contract and separate implementation authorization. Until decided, keep G1
-CONDITIONAL and review the fixture/specification only. This selects no risk threshold,
-method adoption, reviewer independence, delegated permission or host policy.
+**G1 preview trust — owner-approved scoped resolution; DEC-012 remains OPEN.**
+The owner authorized caller-supplied coordinator-role, review and predicate-support
+assertions only as data for G1's non-effectful advisory projection. These are not
+authenticated Evidence results and cannot confer execution, integration, permission
+or deployment authority. Missing, incompatible, stale by declared context or
+incomplete support remains held or rejected under the G1 contract. This selects
+no operational trust threshold, method adoption, reviewer independence, delegated
+permission or host policy.
+
+**G1 sequencing exception — owner-approved, limited to this implementation.**
+The owner authorized this pure in-memory 004 preview using delivered 002/003
+identities before all Milestone 003 prerequisites complete. It neither completes
+003/004 nor changes their general dependencies or authorizes effectful downstream
+work. This exception does not authorize the later Evidence bridge, scheduler,
+executor or persistence increments.
 The qualified-method inspector's own minimum DEC-007/012 decisions remain required.
 
 **Proportional profiles and required reviewers.** Before 004-C, establish

@@ -13,7 +13,7 @@ The Cortex foundation contains these actual crates:
 
 | Crate | Current responsibility | Dependency |
 | --- | --- | --- |
-| `cortex-core` | Foundation contracts, candidate/task binding, canonical temporal records and immutable knowledge projections | Standard library only |
+| `cortex-core` | Foundation contracts, candidate/task binding, canonical temporal records, immutable knowledge projections and advisory G1 readiness | Standard library only |
 | `cortex-evidence` | Legacy evidence plus unified result/applicability/validity, versioned context and redacted inspection | `cortex-core` |
 | `cortex-cli` | Existing commands, Git/JSON knowledge acquisition and explicit encrypted-history library adapter | Core/Evidence, JSON/codec and SQLCipher binding; local Git/util-linux and OpenSSL 3 build prerequisites |
 
@@ -122,9 +122,10 @@ cannot establish integrated acceptance. These paths are planned, not implemented
 The [native governed parallel design](governed-parallel-engineering.md) specifies
 one Rust control plane within these same owners. Per-edge artifact releases and
 causal eligibility replace any assumed all-workers completion barrier; authorization
-and dispatch remain separate. Its proposed G1 pure Core readiness projection is
-PLANNED/NOT_RUN, requires scoped preview acceptance and creates no runner, evidence
-model or permission engine. Later Codex CLI supervision belongs to the native
+and dispatch remain separate. Its bounded G1 pure Core readiness projection is
+implemented under the scoped DEC-007/012 decisions, with local public-API tests.
+It creates no runner, evidence model or permission engine; real Evidence support
+and effectful operations remain deferred. Later Codex CLI supervision belongs to the native
 host/process adapter, not an independent orchestrator.
 
 ## Knowledge, memory, and time
