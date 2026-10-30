@@ -202,7 +202,10 @@ release C. Evaluate F's full required fan-in on every relevant transition.
 Keep **dependency-ready**, **eligible**, **authorized**, **reserved** and **actually
 dispatched** distinct. For a concrete operation, eligibility additionally requires
 its applicable preconditions and available capacity. Missing authority can leave
-eligible work undispatched. Resource loss leaves dependency releases inspectable
+eligible work undispatched. An already active, cancelled or accepted mission is
+not eligible for another start of that same attempt. Reopening it requires a new
+explicitly reviewed mission/attempt revision, not replay of an old notification.
+Resource loss leaves dependency releases inspectable
 but blocks allocation/dispatch. Recheck scope, evidence, revocation and actual
 reservation atomically enough for the selected effect boundary; a stale plan is
 not a reservation. No event listener gains independent authority.
@@ -487,7 +490,10 @@ NOT implemented by G1; no circular dependency from Core to Evidence is permitted
    requires a new supplied review, not reactivation of an invalidated review.
 4. Evaluate all required incoming edges plus explicit preconditions and capacity.
    Root A/D require no incoming releases. Capacity updates alter eligibility;
-   dependency readiness remains separately inspectable. Missing authorization
+   dependency readiness remains separately inspectable. Only pending missions can
+   become start-eligible; active/cancelled missions cannot be queued again. A status
+   change alone does not erase a valid artifact release or imply effect rollback.
+   Missing authorization
    never becomes a dispatch; G1 has no launcher or authority implementation.
 5. Identical duplicate accepted notification is a no-op with no extra transition.
    Conflicting reuse refuses atomically. An invalid notification changes neither
@@ -534,7 +540,7 @@ candidate/contract identities; mutation and effects remain absent.
 | Case | Event/input and required discriminating assertion | Boundary |
 | --- | --- | --- |
 | G1-01 | After explicit initial precondition/capacity events, A/D eligible; B/C/E/F blocked on their named incoming edges | G1 |
-| G1-02 | A reports a1: B remains held. Coordinator review accepts a1 for B at its required level/context: B becomes eligible while A remains active | G1 |
+| G1-02 | A reports a1: B remains held. Coordinator review accepts a1 for B at its required level/context: B becomes eligible while A remains active and ineligible for another start | G1 |
 | G1-03 | Accept B's b1 for C: C becomes eligible; F still waits for its own B edge and E. Accept B -> F independently; it still waits for E | G1 |
 | G1-04 | D releases d1 to E independently; E releases e1 to F; only with both B -> F and E -> F satisfied does F become eligible | G1 |
 | G1-05 | C and F require different revisions/predicate supports for b1: one can be released while the other rejects/holds; neither copies its sibling's release | G1 |
@@ -543,7 +549,7 @@ candidate/contract identities; mutation and effects remain absent.
 | G1-08 | Producer Signal/peer text cannot release; capacity zero blocks eligibility while release basis remains; restoring capacity without authority leaves eligible work undispatched | G1; real dispatch later HRN |
 | G1-09 | Duplicate notification causes zero extra transitions; changed payload under that key, cycle, self-edge, ambiguous ID, missing node and over-limit input refuse with unchanged accepted state | G1 |
 | G1-10 | A fresh review after invalidation references new applicable context; replaying an old review cannot revive it. Unknown dependency coverage holds current use | G1 |
-| G1-11 | A clean merge is not an acceptance event; cancelled mission does not retract an externally integrated artifact. A lost effect outcome stays unreconciled, not rolled back or blindly retried | G1 ignores merge-as-proof; actual effects WFL-001 later |
+| G1-11 | A clean merge is not an acceptance event; cancelled mission cannot start again and does not retract an externally integrated artifact. A lost effect outcome stays unreconciled, not rolled back or blindly retried | G1 ignores merge-as-proof; actual effects WFL-001 later |
 | G1-12 | Real Evidence unassessed/zero-check/insufficient-oracle/STALE context cannot be exported as release support; changing a protected oracle requires a new approved revision | Later Evidence/Core bridge; NOT G1 verification |
 
 A/D may each have other unfinished outputs. Their intermediate integrated artifacts
