@@ -100,6 +100,14 @@ revalidation obligations under CAP-WFL-004. Core/harness still enforce
 authority/isolation; integration needs separate approval and affected checks
 on the integrated candidate. Branch-local success is not integrated acceptance.
 
+The [native parallel contract](governed-parallel-engineering.md) allocates graph
+validation, per-consumer artifact releases and event-driven eligibility to
+CAP-WFL-004, with deterministic domain logic housed in Core where appropriate.
+It introduces no scheduler service or second coordination authority. Evidence
+retains dependency validity, CAP-WFL-001 retains durable effects, and Core/Harness
+retain grants/enforcement. The proposed G1 projection consumes explicit caller facts
+without effects; it cannot authenticate reviews or release operational work.
+
 ## Harness and controlled execution
 
 Owns the single boundary for Cortex-initiated agent execution, actual host controls,

@@ -77,6 +77,12 @@ distinct. Integration changes the assessed material: branch-local `PASS` does no
 establish integrated `PASS`; detect semantic/interface conflicts and revalidate
 affected gates on the integrated candidate. A successful Git merge alone establishes
 neither semantic compatibility nor verification of the integrated result.
+Under the [native parallel contract](governed-parallel-engineering.md), a release
+is scoped to one consumer edge, artifact/revision and applicable evidence context.
+Stable contracts, provisional implementation and integrated acceptance are distinct
+dependency predicates, never permissions or Evidence-result substitutes. Informational
+signals cannot release work; dependency eligibility cannot authorize dispatch.
+Changed relevant inputs invalidate affected release use with explicit causality.
 A Portable Context Package identifies its project and snapshot. Snapshot reasoning without live repository access must
 not be presented as live verification.
 

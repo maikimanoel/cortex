@@ -256,22 +256,42 @@ family is sequenced later. No initial method is qualified by this roadmap entry.
 | 4. Language/domain coverage | 003-B/F source grounding and 004-B/C methods, integrated in 006 | Add qualified component/interface methods for demonstrated targets; can extend pure descriptions during earlier slices, but native analysis/execution claims require their own mechanisms and observations |
 | 5. Measured evolution and self-development | 005-A/B/C CAP-EVL-001/002, CAP-EVO-001/002 | Retained defect/repair/regression chain, protected evaluations and authorized proposal disposition under applicable prior policy; no automatic rule promotion or presumed productivity gain |
 
-Slice 1 must include CORTEX as the target of a bounded engineering proposal and a
+Slice 1 must include Cortex as the target of a bounded engineering proposal and a
 contrasting non-Rust/mixed-language scenario. Selection must expose unsupported
 verification rather than implying that describing a method implements an analyzer.
 Human-readable inspection/export may precede a portable package protocol; neither
 freezes interchange nor supplies execution authority. The existing essential local
 baseline must not depend on a paid service or a separately installed instruction suite.
 
-The proposed first parallel wave has two independent roles: a bounded non-executing
-definition/qualification inspector, and candidate/source grounding full-rebuild
-fixtures against the delivered source-set API. Both require explicit future
-authorization; the inspector also needs its minimum admission contract. Grounding
-fixtures use only the frozen existing API. A selector/contract composer consumes the new
-inspector interface and therefore waits until that interface and its evidence are
-reviewed; it is not independent merely because its files differ. Coordinator-owned
-integration and fresh combined-candidate checks remain mandatory. Full execution,
-persistence, risk thresholds and rule adoption cannot be smuggled into this preview.
+The earlier inspector/grounding wave proposal is not a current launch allocation.
+The delivered source-set/full-rebuild conformance mechanisms already provide bounded
+grounding coverage; do not manufacture another worker merely to repeat that work.
+The method inspector still needs its admission decisions and a qualified initial
+set. A selector consumes its reviewed interface and evidence and therefore waits.
+The native parallel control-plane preview below is a separate bounded building block,
+not a replacement for method qualification or an effectful execution shortcut.
+
+### Native parallel delivery sequence
+
+The [single native Rust design](../architecture/governed-parallel-engineering.md)
+refines CAP-WFL-004 under its existing Core/Evidence/Workflow/Harness owners. Every
+row is **PLANNED / NOT_RUN**. Full 004 retains its dependency on 003; neither this
+documentation change nor a priority label authorizes out-of-sequence execution.
+
+| Increment | Required input and bounded outcome | Gate before implementation/use |
+| --- | --- | --- |
+| G1, P0 proposed non-effectful 004 preview | Delivered 002 identities and supplied synthetic graph/review facts; pure std-only Core operation returns event-sensitive eligible/blocked and per-edge release/hold/refusal decisions, including chain/fan-in and causal invalidation | Owner accepts this exact limited sequencing exception and proposed DEC-007/012 input/trust boundary; separate Rust implementation authority. No production Evidence bridge, permission, persistence, dispatch, worktree or process operation |
+| Evidence/inspection follow-ups, conditional | Accepted G1 interface; actual Evidence current-pass/context/coverage interpretation and CLI-first read-only operator view | Review edge-support mapping and minimum CLI input/privacy/API decisions before their consumers; no Core -> Evidence dependency or new evidence model |
+| Governed local execution, blocked until prerequisites | Real Core authority, qualified Workflow effect records/recovery and selected host/process adapter around the Codex CLI | Existing 004-A/B/C/D/E and relevant 003 exits, DEC-004/005/006/007/012, real denial/resource tests; supported approved storage extension before durable effects |
+| Evaluation and optional expansion, deferred | Accepted outcomes and complete attempt/resource accounting | CAP-EVL-001/002 controlled baselines; TUI only for demonstrated operator need, optional multi-host only for a justified later native Rust scope |
+
+G1 uses delivered types and explicit caller assertions rather than pretending that
+CAP-EVD-003, the full policy engine, qualified method selection or durable workflows
+are delivered. It does not complete 003, advance 004's status or authorize agent
+execution. Until its scoped implementation decision is accepted, the safe alternative
+is review of the pure fixture/contract only, not provisioning workers or installing
+an external orchestrator. The minimum decision questions are recorded in DEC-007/012;
+host/budget/adoption policy remains open at its original execution boundary.
 
 ## 005: governed evolution and evaluation
 
