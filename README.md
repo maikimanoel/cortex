@@ -1,4 +1,4 @@
-# CORTEX
+# Cortex
 
 Cortex is a software engineering platform designed to turn human intent into
 constructed, verified, and continuously improved solutions by integrating
@@ -54,6 +54,13 @@ mechanisms. `cortex inspect` continues to create no binding or assessment. `chec
 verifies one explicit Git proposition; it does not establish general software
 correctness. The first 003-A library slice adds temporal records; remaining
 increments require separate authority.
+
+The planned [native governed parallel contract](docs/architecture/governed-parallel-engineering.md)
+defines per-consumer dependency release and rolling integration under the existing
+owners. Its first proposed Rust slice is a non-effectful in-memory readiness
+projection, not an implemented scheduler or permission to launch agents. The
+[roadmap](docs/product/roadmap.md#native-parallel-delivery-sequence) retains its
+preview decision and full execution prerequisites.
 
 ## Run locally
 
@@ -283,7 +290,7 @@ The owner has authorized its controlled public source-only pre-alpha transition
 under [DEC-009](docs/decisions/open-decisions.md#dec-009), subject to verified
 privacy and launch controls. Authorization is distinct from observed provider
 state. The separate historical repository and private evidence remain private.
-CORTEX is licensed under the [MIT License](LICENSE), copyright (c) 2026 Maiki
+Cortex is licensed under the [MIT License](LICENSE), copyright (c) 2026 Maiki
 Manoel. Third-party dependencies retain their own applicable license terms.
 See [third-party notices](THIRD_PARTY_NOTICES.md) for the linked storage components.
 All workspace packages remain unpublished. Do not publish packages, create releases,

@@ -13,7 +13,7 @@ explains the engineering doctrine behind them, without claiming future mechanism
 are implemented by the current foundation.
 
 The [native method contract](architecture/engineering-methods.md) specifies how
-future CORTEX methods make this doctrine inspectable: shared properties, qualified
+future Cortex methods make this doctrine inspectable: shared properties, qualified
 language/domain refinements, explicit applicability and candidate-bound evidence.
 Method selection must improve contract formation as well as verification; its
 planned native baseline is not a claim of current autonomous engineering support.
@@ -209,6 +209,13 @@ consequential promotion. Revalidate the integrated candidate; passing branch-loc
 checks cannot establish integrated acceptance. Evaluate actual time to verified
 integrated outcome, quality, token/resource expenditure, retries, coordination
 cost and regressions before making efficiency or superiority claims.
+
+The [native parallel contract](architecture/governed-parallel-engineering.md)
+refines this practice with per-consumer evidence-gated releases, causal readiness
+and separate dispatch authority. An intermediate release need not wait for its
+producer's whole mission; a scheduler cannot convert a signal into approval.
+Cortex will implement that control plane in Rust under the existing owners, preserving
+the separate qualified-method and effective-host boundaries.
 
 Plan–Execute–Reconcile, continuity/context features, portable packages and governed
 parallel work retain their catalog owners and roadmap targets. Selecting these

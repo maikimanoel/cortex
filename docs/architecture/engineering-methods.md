@@ -7,7 +7,7 @@ and status; the [roadmap](../product/roadmap.md#native-engineering-delivery-sequ
 owns sequencing. Existing [invariants](core-invariants.md) and
 [evidence semantics](unified-evidence.md) remain authoritative.
 
-CORTEX must eventually supply a useful, inspectable local engineering-method
+Cortex must eventually supply a useful, inspectable local engineering-method
 baseline without requiring separately installed instructional packages, repeated
 user checklists, a particular model or a hosted service. Optional imported methods
 use the same qualification and authority boundaries. This is a requirement for
@@ -205,7 +205,7 @@ Keep information kinds inspectably distinct:
 - Contextual heuristics and design recommendations, with applicability and limits.
 - Unqualified hypotheses and demonstrative examples.
 - Reproduced defects, separately from verified repairs and retained regressions.
-- Imported observations or reported incidents, separately from CORTEX-captured execution.
+- Imported observations or reported incidents, separately from Cortex-captured execution.
 
 A pattern match is a lead, not a confirmed defect. One failure in one candidate
 does not establish a global prohibition. A definition may reference canonical
@@ -247,7 +247,7 @@ This document creates no new result enum or implicit migration of Inconclusive.
 Shared properties govern behavior, identity, compatibility, errors, effects,
 security/privacy, resources, recovery and maintainability. Language/ecosystem and
 domain profiles refine them or add obligations. Rust is one specialization of these
-properties, not another quality authority or CORTEX's assumed target language.
+properties, not another quality authority or Cortex's assumed target language.
 
 Selection consumes explicit task intent/change scope, candidate-bound component
 facts, applicable project requirements, qualified method versions and declared
@@ -277,10 +277,10 @@ scope before implementation priority or execution is assigned.
 | Problem discovery, feasibility and stakeholder requirements | Product/task decisions need validation; WFL-002 with CORE-003 requirements |
 | Architecture evaluation/drift and mixed-component compatibility | An architectural/interface change; WFL-002 with KNW/CTX source facts |
 | Data integrity, persistence, migration and recovery | Relevant state/schema/effect changes; WFL-001/002, MEM and Evidence |
-| Security, privacy and data lifecycle | Applicable threat, data-use or retention obligation; SEC-001/002 and CORE/HRN enforcement; directly relevant to CORTEX |
+| Security, privacy and data lifecycle | Applicable threat, data-use or retention obligation; SEC-001/002 and CORE/HRN enforcement; directly relevant to Cortex |
 | Operations, deployment, incidents and decommissioning | An authorized operational lifecycle task; WFL/HRN with explicit effect and recovery contracts |
 | Usability, accessibility and internationalization | Affected users/interfaces/locales; WFL-002 qualified domain profiles |
-| AI/agent and engineering-process evaluation | Model/harness/method claims; EVL-001/002; directly relevant to CORTEX |
+| AI/agent and engineering-process evaluation | Model/harness/method claims; EVL-001/002; directly relevant to Cortex |
 | Scientific/numerical behavior | Relevant numeric model, units, tolerance or scientific oracle; WFL-002 domain qualification |
 | Distributed systems | Actual distribution/ordering/consistency requirement; CONDITIONAL, not an essential-service or consensus implementation mandate |
 | Hardware, real-time and safety-critical systems | A demonstrated timing/physical/hazard obligation; CONDITIONAL with qualified review; unsupported assurance remains unresolved |
@@ -303,7 +303,7 @@ candidate-bound counterexample; they must not expand scope while awaiting resolu
 
 Preserve distinct source claims, imported reports, actual capture by a supported
 mechanism, deterministic assessments and human authority. An import may retain its
-claimed result and provenance without being upgraded to CORTEX-observed execution.
+claimed result and provenance without being upgraded to Cortex-observed execution.
 Matching IDs or successful parsing does not authenticate a report. Current 002-C
 reports remain caller assertions; future producer/import distinctions require their
 own validated boundary, not retrospective relabeling of those values.
@@ -343,6 +343,14 @@ paths and candidate-bound handoffs, followed by separate integration and fresh
 combined-candidate checks. Worktrees are not sandboxes. The manual pilot provides
 bounded integration evidence, not native CAP-WFL-004 implementation or a speedup claim.
 
+The [native parallel control-plane contract](governed-parallel-engineering.md)
+owns the detailed per-edge release, communication and event-driven eligibility
+rules under CAP-WFL-004. Its G1 pure readiness preview is independent of automatic
+method selection; the qualified inspector still needs its DEC-007/012 boundary.
+A selected Codex CLI executes only behind a later Cortex-native governed adapter.
+No external orchestration authority, duplicate method registry or new evidence
+semantics are introduced by composing these contracts.
+
 Progressive self-application uses only delivered methods and explicit grants.
 Evaluate a proposed policy/method version under the applicable prior accepted
 baseline as well as required new checks. A candidate cannot approve its own
@@ -368,7 +376,7 @@ All cases are **PLANNED; execution NOT_RUN** for this native mechanism. Existing
 | 9. Mixed-language boundary | Both component and interface obligations selected; absent consumer verification remains unresolved | WFL-002, CTX-001 |
 | 10. Executor challenges a plan | Counterexample reconciled against the contract; no unauthorized extra edits | WFL-003 |
 | 11. Workers pass separately | A distinct integrated candidate still needs combined verification | WFL-004 |
-| 12. Imported success report | Preserve reported claim; no invented CORTEX capture, approval or PASS | Evidence, CTX-002 |
+| 12. Imported success report | Preserve reported claim; no invented Cortex capture, approval or PASS | Evidence, CTX-002 |
 | 13. Proposed weaker self-policy | Applicable prior protected gates and separate approval cannot be replaced by the candidate's policy | EVO-002, CORE-003 |
 | 14. High-risk trigger | Required qualified review remains a gate despite inconvenient cost | WFL-002, DEC-012 |
 | 15. Trivial low-risk change | Select only relevant obligations; no mandatory agents, consensus or formal machinery | WFL-002 |
@@ -386,7 +394,7 @@ All cases are **PLANNED; execution NOT_RUN** for this native mechanism. Existing
 
 ### Early concrete targets
 
-Use CORTEX itself: propose a bounded change to its JSON knowledge API. A future
+Use Cortex itself: propose a bounded change to its JSON knowledge API. A future
 preview selects shared identity/error/read-only properties and its applicable Rust
 ownership, crate-boundary and verification methods from the observed workspace.
 It retains the protected single-source API and explicit unknown evidence; it does

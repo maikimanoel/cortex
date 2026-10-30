@@ -9,7 +9,7 @@ an actual consequential choice is authorized and made.
 
 ## DEC-001
 
-**Open-source license — resolved by the owner.** CORTEX uses the standard
+**Open-source license — resolved by the owner.** Cortex uses the standard
 [MIT License](../../LICENSE), SPDX identifier `MIT`, with copyright (c) 2026
 Maiki Manoel. All workspace packages inherit this sole project license and retain
 `publish = false`. Third-party license obligations remain independently applicable.
@@ -21,7 +21,7 @@ Dependent capability: CAP-CLI-006.
 ## DEC-002
 
 **Project name — owner disposition resolved for the source preview.** The owner
-has definitively selected CORTEX. The publication audit established no infringement
+has definitively selected Cortex. The publication audit established no infringement
 or mandatory renaming. This decision is neither a legal opinion nor an independently
 verified trademark-clearance claim. Any distinct legal clearance remains unverified;
 material new evidence requires separate assessment rather than speculative reopening
@@ -31,7 +31,7 @@ point and CAP-CLI-006 ownership.
 ## DEC-003
 
 **Contribution and intellectual-property governance — initial source policy
-resolved for 002-P2.** Maiki Manoel maintains CORTEX. External source contributions
+resolved for 002-P2.** Maiki Manoel maintains Cortex. External source contributions
 use GitHub pull requests, maintainer review and automated validation, preserving
 architectural contracts. No CLA or DCO sign-off is required. Contributors must have
 the right to submit their material under MIT and retain applicable third-party
@@ -107,6 +107,12 @@ interchangeable; unsupported host controls must have explicit failure behavior.
 Decide before 004-D/004-E; validate any expanded matrix in 006. Component-style
 runtimes and MCP remain optional integration choices. Dependencies: CAP-HRN-001/002,
 CAP-CTX-002, and CAP-SEC-001.
+
+For the native parallel program, the owner selects the Codex CLI as the first
+executor target behind a future Cortex-native Rust host/process adapter. This
+settles neither its executable version/capability contract nor supported denial,
+process cleanup, resource, privacy or host guarantees. DEC-006 remains OPEN for
+those prerequisites; no provider interchangeability or executor is implemented.
 
 ## DEC-007
 
@@ -200,6 +206,16 @@ settle omission, size and version/applicability validation. The
 [method contract](../architecture/engineering-methods.md) selects obligations only,
 not a Rust trait, corpus format, persistence schema or Portable Context Package.
 
+**Native parallel G1 decision point — proposed, not resolved.** Before the
+[non-effectful readiness preview](../architecture/governed-parallel-engineering.md#g1-in-memory-readiness-projection),
+accept or reject the proposed internal std-only Core graph/reducer boundary,
+caller-supplied finite limits, immutable graph revisions and explicit asserted
+review/support references. No persisted schema, authenticated capture, automatic
+validity interpretation or stable public API is selected. An Evidence consumer
+must later derive gate support from actual applicable/current records without a
+Core dependency on Evidence. Full durable effects and CLI interchange retain their
+separate decisions; the current history store cannot already encode workflow effects.
+
 ## DEC-008
 
 **Evaluation cases, baselines, and comparison-publication policy.** Select
@@ -218,7 +234,7 @@ and CAP-EVO-002. No benchmark score or superiority claim is approved here.
 
 **Public source scope and controlled transition — owner approved.** Following
 002-P2 preparation and the final publication audit, the owner authorizes the
-independent replacement repository's controlled public transition as CORTEX, an MIT
+independent replacement repository's controlled public transition as Cortex, an MIT
 source-only pre-alpha project. Scope includes the corrected development history,
 delivered 001/002 and actual bounded but incomplete 003 source. This is a scoped
 exception to the full-platform 007 sequence; neither 003 nor later milestones,
@@ -354,6 +370,18 @@ revise or retire an adopted method. Mere listing never creates adoption or an
 acceptance assessment. The first useful method set needs actual discriminating
 qualification evidence; its contents and trusted-blocking authority are not selected
 by a source inventory or an implementation-priority label.
+
+**G1 preview trust and sequencing — proposed, not owner-approved implementation
+policy.** May the exact G1 fixture/reducer use supplied coordinator-role and
+predicate-support assertions only for non-effectful advisory projection, with all
+operational release/dispatch authority explicitly unavailable? May that bounded
+004 preview be implemented using delivered 002/003 identities before full 003 exits,
+without changing milestone dependencies or status? The conservative proposed answer
+is yes only for the documented no-I/O/no-effects mission, after acceptance of this
+contract and separate implementation authorization. Until decided, keep G1
+CONDITIONAL and review the fixture/specification only. This selects no risk threshold,
+method adoption, reviewer independence, delegated permission or host policy.
+The qualified-method inspector's own minimum DEC-007/012 decisions remain required.
 
 **Proportional profiles and required reviewers.** Before 004-C, establish
 auditable classification rules for trivial/standard/critical work and the qualified

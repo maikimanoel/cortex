@@ -119,6 +119,14 @@ separate source trees; actual isolation still belongs to host controls. No
 executor self-approves its consequential promotion, and branch-local results
 cannot establish integrated acceptance. These paths are planned, not implemented.
 
+The [native governed parallel design](governed-parallel-engineering.md) specifies
+one Rust control plane within these same owners. Per-edge artifact releases and
+causal eligibility replace any assumed all-workers completion barrier; authorization
+and dispatch remain separate. Its proposed G1 pure Core readiness projection is
+PLANNED/NOT_RUN, requires scoped preview acceptance and creates no runner, evidence
+model or permission engine. Later Codex CLI supervision belongs to the native
+host/process adapter, not an independent orchestrator.
+
 ## Knowledge, memory, and time
 
 Canonical requirements, decisions, learning events, and evidence have their own

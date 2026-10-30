@@ -683,7 +683,7 @@ when suitable. Inspect states, guards, and evidence expectations before running.
 Unsupported classification or missing qualified review blocks the affected path.
 
 Select contracts, verification mechanisms and risk controls for the target
-project's language, ecosystem, architecture and task, rather than CORTEX's Rust
+project's language, ecosystem, architecture and task, rather than Cortex's Rust
 implementation language. All selected methods use the same candidate/evidence and
 authority semantics. Required unsupported verification remains explicit. Distinguish
 the authorized behavior delta from behavior that must remain stable. Where relevant,
@@ -723,7 +723,7 @@ than an assumed universal verifier. A refactor that changes protected interface
 semantics fails its contracted checks even if unrelated tests pass; an authorized
 migration identifies the revised baseline and obtains fresh evidence.
 Multiple applicable profiles retain shared requirements and expose conflicts;
-unknown applicability or missing tools cannot remove an obligation. CORTEX and a
+unknown applicability or missing tools cannot remove an obligation. Cortex and a
 contrasting mixed-language task exercise selection without assuming Rust-only
 verification or imposing specialized machinery on an unrelated trivial change.
 **Verification:** NOT_RUN; profile/guard cases and complete representative methods.
@@ -789,6 +789,23 @@ record. Unresolved dependencies/conflicts remain blocked or uncertain. A success
 Git merge or branch-local `PASS` does not establish semantic compatibility or
 integrated `PASS`.
 
+The [native Rust control-plane contract](../architecture/governed-parallel-engineering.md)
+refines this capability: versioned program/workstream/mission contracts, typed
+artifact dependencies, consumer-specific readiness levels and evidence-gated edge
+releases. Signal, DependencyRelease and ResponsibilityHandoff have distinct meanings.
+Eligibility is recomputed on relevant events; an accepted intermediate artifact may
+release a consumer while its producer continues. There is no all-workers barrier.
+Core owns grants, Evidence owns contextual validity, CAP-WFL-001 owns durable effects
+and HRN owns actual dispatch; the scheduler creates none of those authorities.
+
+A proposed G1 non-effectful in-memory readiness projection is scoped in the
+[roadmap](roadmap.md#native-parallel-delivery-sequence). Its synthetic caller facts,
+release/hold/refusal and invalidation decisions grant no operational permission.
+The preview is PLANNED/NOT_RUN and requires scoped sequencing/input acceptance
+before code. It completes neither this capability nor 003/004. The selected Codex
+CLI is a later governed executor; orchestration remains Cortex-native Rust without
+an external workflow engine, broker or scheduler dependency.
+
 **Advanced properties:** Non-amplifying delegation, reproducible candidate
 correspondence, effective isolation, and evidence-based integration gates
 (INV-001/003/004/005/006/008/009). Git worktrees may supply independent trees;
@@ -805,8 +822,9 @@ invalidates affected evidence, and required integrated checks cannot be replaced
 by local passes. Missing approval or partial integration remains explicit.
 **Verification:** NOT_RUN; dependency/overlap/semantic-conflict fixtures, real
 isolated workspace tests, guarded integration and revalidation regressions.
-**Decisions:** DEC-005/006/007/012; workspace mechanics and approval policy remain
-open, and no parallel executor is implemented by this blueprint.
+**Decisions:** DEC-005/006/007/012 retain their runtime, workspace, profile and
+approval gates. The new G1 proposals are not policy resolutions; no parallel
+executor is implemented by this blueprint.
 
 ## G. Isolated agent harness and controlled tool execution
 
@@ -867,8 +885,10 @@ compatibility across the chosen host matrix (INV-001/004/008/010/011).
 without a required control is refused. A protocol tool cannot bypass policy or
 export unauthorized data. The local baseline operates with optional integrations
 absent. **Verification:** NOT_RUN; actual adapter conformance, denial and
-unavailable-integration cases. **Decisions:** DEC-005/006/007; no agent/provider or
-MCP dependency selected, and no paid integration authorized.
+unavailable-integration cases. **Decisions:** DEC-005/006/007; the native parallel
+program selects the Codex CLI as its first future supervised executor. Actual
+version/capabilities, host enforcement and adapter acceptance remain open; no MCP
+dependency or paid integration is authorized.
 
 ## H. Governed recursive harness evolution
 
