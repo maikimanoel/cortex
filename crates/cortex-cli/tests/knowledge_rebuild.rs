@@ -117,7 +117,12 @@ fn snapshot(repo: &Repo) -> BTreeMap<PathBuf, FileState> {
     let mut pending = vec![repo.path.clone()];
     let mut result = BTreeMap::new();
     while let Some(p) = pending.pop() {
-        let m = fs::symlink_metadata(&p).unwrap();
+        let m = fs::symlink_metadata(&p).unwrap_or_else(|error| {
+            panic!(
+                "snapshot metadata {:?}: {error}",
+                p.strip_prefix(&repo.path).unwrap()
+            )
+        });
         assert!(!m.is_symlink());
         let directory = m.is_dir();
         let bytes = if directory {
@@ -146,6 +151,53 @@ fn read_only<T>(repo: &Repo, operation: impl FnOnce() -> T) -> T {
     // Also compare returned failures before checking their categories.
     assert_eq!(snapshot(repo), before);
     result
+}
+
+#[test]
+fn fixture_commit_keeps_automatic_maintenance_in_the_foreground() {
+    let repo = Repo::new();
+    fs::write(repo.path.join("a.json"), A_ID).unwrap();
+    repo.git(&["add", "a.json"]);
+    // Explicitly trace only fixture setup; remove the trace before measuring reads.
+    let trace = repo.path.join("setup-trace.json");
+    let output = repo
+        .command()
+        .args(["commit", "-m", "fixture maintenance lifecycle"])
+        .env("GIT_TRACE2_EVENT", &trace)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "fixture commit failed");
+    let events: Vec<serde_json::Value> = fs::read_to_string(&trace)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let maintenance = events
+        .iter()
+        .find(|event| {
+            event["event"] == "child_start"
+                && event["argv"]
+                    .as_array()
+                    .is_some_and(|args| args.iter().any(|arg| arg == "maintenance"))
+        })
+        .expect("fixture commit must exercise automatic maintenance");
+    let args = maintenance["argv"].as_array().unwrap();
+    assert!(args.iter().any(|arg| arg == "--auto"));
+    assert!(!args.iter().any(|arg| arg == "--detach"));
+    assert!(!repo.path.join(".git/objects/maintenance.lock").exists());
+    fs::remove_file(trace).unwrap();
+    read_only(&repo, || inspect(&repo.path).unwrap());
+}
+
+#[test]
+#[should_panic(expected = "assertion `left == right` failed")]
+fn read_only_oracle_rejects_an_intentional_git_metadata_write() {
+    let repo = Repo::new();
+    commit(&repo, &[("a.json", A_ID)]);
+    let config = repo.path.join(".git/config");
+    let mut changed = fs::read(&config).unwrap();
+    changed.extend_from_slice(b"\n# intentional read-only oracle violation\n");
+    read_only(&repo, || fs::write(config, changed)).unwrap();
 }
 
 fn contract(repo: &Repo, revision: u64) -> CandidateBindingContract {
