@@ -31,6 +31,10 @@ impl Repo {
         repo.git(&["config", "user.name", "Cortex Test"]);
         repo.git(&["config", "user.email", "cortex-test@example.invalid"]);
         repo.git(&["config", "commit.gpgSign", "false"]);
+        // Complete fixture maintenance before read-only tests snapshot all Git metadata.
+        // Detached maintenance can otherwise remove its lock after commit returns.
+        // Automatic maintenance also honors gc.autoDetach when its own setting is absent.
+        repo.git(&["config", "gc.autoDetach", "false"]);
         repo
     }
 
