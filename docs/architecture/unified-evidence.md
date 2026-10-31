@@ -187,3 +187,114 @@ external handoff. No independent review, cross-platform assurance, authenticated
 execution, atomic snapshot, privacy policy or hosted CI result is claimed.
 CAP-EVD-002's bounded C/D contract is implemented with the
 [002-D CLI path](cli-check.md); transitive validity/interchange remains planned.
+
+## Dependency support inspection (A-1)
+
+`cortex_evidence::readiness::inspect_support` is an additional bounded, synchronous
+consumer of unified Evidence and the existing G1 projection. It evaluates the
+Evidence portion of **one exact consumer edge**. Core does not depend on Evidence;
+actual capture remains in the CLI/producer. This owner-approved advisory preview
+completes neither CAP-EVD-003 nor CAP-WFL-004 or Milestone 003/004. Its scoped
+[DEC-007/012 decisions](../decisions/open-decisions.md#dec-012) authorize no effects.
+
+The caller supplies a `ReadinessProjection`, immutable `EdgeEvidenceContract`,
+mutable canonical `EvidenceRecord` slice, borrowed `SupportRequest` and positive
+finite `SupportLimits`. `EdgeScopeSnapshot::capture` retains graph/edge identity,
+producer/consumer full mission scopes/generations, artifact/revision/candidate,
+dependency kind, exact readiness level and required predicates. Its notification
+cursor is historical only; unrelated Signal/capacity changes do not invalidate the
+same semantic scope. The artifact has its own explicit repository/worktree
+requirement; its candidate need not equal either mission candidate.
+
+Each `PredicateCorrespondence` retains the exact full verification task, revision,
+single criterion and candidate requirement, complete expected `VerificationProfile`
+and caller-declared `CriterionCoverage`. `ExactSingleCriterion` maps that whole
+frozen criterion to the predicate; `Unestablished` cannot supply support. Existing
+`OracleEvaluation` has a conclusion and reasoning, **no standalone qualified oracle
+identity or coverage manifest**. The component parses no rationale for entailment
+and cannot establish independent qualification, capture authenticity or that the
+reported mechanism ran. A requirement for such stronger support remains unresolved.
+The mapping is edge-local data, not an engineering-method registry/adoption rule.
+
+A `WitnessBinding` names the exact artifact and compound verification-report plus
+expected assessment identity. Missing assessment references are never automatically
+filled. All required predicates and all distinct assigned witnesses are conjunctive;
+there is no latest-wins, majority or favorable-record selection. Exact duplicate
+bindings add no support but still consume admission budget. Reusing an AssessmentId
+across distinct reports is legitimate; duplicate record-pool identities are ambiguous.
+Alias checks cover supplied material, not a global/cross-call identity registry.
+
+`RecordExamination` supplies a legitimate source contract, current capture and
+expected source profile independently of the target correspondence. A narrow
+CURRENT PASS assigned to a broader predicate remains unsupported without poisoning
+its valid source record. Current producer/consumer captures are checked separately
+through existing `bind_candidate`. Missing, incomplete, indeterminate or incompatible
+inputs remain inspectable. Source reports, judgment identities/times/rationales and
+available historical invalidation causes are retained unchanged.
+
+The result exposes `SupportReport::evidence_part`, ordered `findings`,
+`inspected_records`, `basis`, `input_usage` and `authority`. Predicate findings are
+`SupportedWithinDeclaredContract` or `NotSupported`, not new Evidence verdicts.
+An applicable CURRENT explicitly assessed PASS, qualifying completed execution,
+positive relevant checks and matching conclusive oracle are necessary but still
+require exact criterion/profile/artifact/edge coverage. Result, applicability and
+validity remain the existing independent dimensions. Even complete support does
+not confer CONTRACT_STABLE review, provisional authority, INTEGRATED_ACCEPTED
+acceptance or whole-mission completion. Authority is always `Unavailable`. No
+G1 review/attestation/event, dependency release, permission, reservation or dispatch
+is constructed. Genuine coordinator/operational acceptance remains separate.
+
+### A-1 state-retention boundary
+
+`inspect` is **not read-only toward its record**. The consumer first validates the
+complete request, identities and budgets, then inspects bounded draft copies under
+their own source contexts. All fallible result preparation finishes before publication.
+A malformed `Err(SupportInputError)` leaves every supplied record and G1 unchanged.
+A well-formed `Ok` negative support result still atomically publishes legitimate
+inspection-driven sticky invalidations. It does not roll back known staleness or
+explicitly invalidate records just because a target asks a broader criterion.
+Unreferenced records are never inspected/mutated. Original observations and terminal
+assessments are not replaced; only existing inspection invalidation can change.
+Ordinary allocation panic/abort is outside this typed-error atomicity claim.
+
+The report borrows committed originals immutably and owns its context/correspondence
+basis. Retain `SupportBasis` and use `check_scope` to reject changed scopes,
+same-revision definition aliases or a new correspondence revision before reuse.
+That structural comparison does not recapture sources: repeat inspection with
+actual current contexts. Old invalidated records cannot revive by restoring values;
+revalidation requires a new actual observation and explicit assessment. A caller
+who discards history or fabricates captures cannot be detected by this bounded API.
+Existing sticky state retains a first issue/reference, not a complete historical
+invalidation event/profile log; missing detail must not be invented.
+
+`SupportLimits` bounds record-pool/examination counts, witness occurrences,
+required-predicate/correspondence counts and charged nested material. Each paired
+collection is independently bounded; usage reports the greater count. Budgets are
+positive, finite, caller-selected and checked before staging. Material includes
+paths/comparison bytes, profiles/provenance, oracle/assessment rationale, retained
+assessment contexts and a conservative 128-byte scope charge for opaque existing
+sticky comparison state. These are logical occurrence budgets, not total RSS,
+host-resource enforcement, a persisted format or performance guarantee. No history
+is evicted. New Debug/Display diagnostics omit caller payloads; typed getters expose
+retained private data deliberately.
+
+### A-1 acceptance mechanisms and limits
+
+[Public Evidence consumer tests](../../crates/cortex-evidence/tests/readiness_support.rs)
+trace A-01–A-32: positive/repeated/multi-predicate support, all non-PASS dimensions,
+zero-check/absent-oracle refusal, candidate/contract/artifact/profile mismatch,
+coverage and sibling isolation, sticky invalidation/new records, atomic rejection,
+limits/identity conflicts, redaction, scope changes and no authority. Focused unit
+tests cover accounting overflow and finite-limit validation. The
+[real-Git consumer tests](../../crates/cortex-cli/tests/readiness_support.rs) execute
+actual capture/query/oracle/assessment-to-support sequences, compare complete
+controlled fixture/Git metadata and repeat a genuine query after restoration.
+Execution observations/counts belong to the exact candidate's external handoff;
+source mechanisms alone are not proof they ran.
+
+This covers advisory Evidence-checking cases within G1-12, **not** authenticated
+capture, trusted coordinator release/protected-oracle approval, real authorization,
+reservation/dispatch or external recovery. Those remain NOT_RUN. G1-01–10 and
+G1-11's existing in-memory scope are unchanged; G1-11 effects and full transitive
+Evidence validity remain separate future work. Engineering Intelligence method
+qualification, adoption and selection are not implemented here.

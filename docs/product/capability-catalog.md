@@ -266,8 +266,14 @@ preserves the result/validity distinction; missing dependencies stay explicit.
 A conclusion-changing runtime, toolchain, environment or oracle change invalidates
 affected evidence; insufficient dependency coverage cannot justify CURRENT reuse.
 An observation never supports a claim beyond its declared verification coverage.
-**Verification:** NOT_RUN; dependency/property tests and interchange/historical
-query integration. **Decisions:** DEC-004/007/010.
+**Bounded A-1 preview:** The Evidence-owned
+[dependency-support consumer](../architecture/unified-evidence.md#dependency-support-inspection-a-1)
+reuses current unified inspection for exact caller-declared edge predicates. It
+retains contextual invalidation and source assessments but creates no coordinator
+release, authority or general transitive invalidation/interchange mechanism.
+**Verification:** A-1 has focused domain and real-Git consumer test mechanisms;
+full dependency/property/interchange/historical-query integration remains NOT_RUN.
+Status remains PLANNED. **Decisions:** DEC-004/007/010/012.
 
 ## C. Knowledge graph and code intelligence
 
@@ -803,7 +809,9 @@ The bounded G1 non-effectful in-memory readiness projection is implemented in
 [roadmap exception](roadmap.md#native-parallel-delivery-sequence). Its caller facts,
 release/hold/refusal and invalidation decisions grant no operational permission.
 Local public-API tests exercise G1-01–10 and the in-memory part of G1-11; real
-Evidence release support (G1-12) and operational cases remain NOT_RUN. This preview
+Evidence predicate inspection now has a bounded advisory A-1 consumer in
+`cortex_evidence::readiness`; trusted coordinator release/full G1-12 and operational
+cases remain NOT_RUN. This preview
 completes neither this capability nor 003/004; their statuses remain unchanged. The selected Codex
 CLI is a later governed executor; orchestration remains Cortex-native Rust without
 an external workflow engine, broker or scheduler dependency.
@@ -824,9 +832,11 @@ invalidates affected evidence, and required integrated checks cannot be replaced
 by local passes. Missing approval or partial integration remains explicit.
 **Verification:** G1's bounded in-memory cases have local execution evidence;
 real isolated workspace tests, semantic integration, guarded promotion, operational
-revalidation and Evidence bridging remain NOT_RUN.
-**Decisions:** DEC-007/012 resolve only G1's internal boundary, caller-assertion trust
-and sequencing exception. DEC-005/006/007/012 retain all other runtime, workspace,
+revalidation and authoritative Evidence bridging remain NOT_RUN. A-1 adds only
+advisory predicate inspection; no G1 runtime behavior changes.
+**Decisions:** DEC-007/012 resolve G1's internal boundary, caller-assertion trust
+and sequencing exception, plus A-1's separately approved advisory correspondence
+and sequencing boundary. DEC-005/006/007/012 retain all other runtime, workspace,
 profile and approval gates. No parallel executor is implemented.
 
 ## G. Isolated agent harness and controlled tool execution

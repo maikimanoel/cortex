@@ -211,10 +211,20 @@ authorized the [non-effectful readiness preview](../architecture/governed-parall
 as a native std-only Core graph/event reducer with immutable graph revisions,
 validated typed references and explicit positive finite caller-provided limits.
 G1 retains exact task/binding/capture and asserted review/support references. No persisted schema, authenticated capture, automatic
-validity interpretation or stable public API is selected. An Evidence consumer
-must later derive gate support from actual applicable/current records without a
-Core dependency on Evidence. Full durable effects and CLI interchange retain their
+validity interpretation or stable public API is selected by G1. The separately
+approved A-1 consumer below inspects actual applicable/current records without a
+Core dependency on Evidence; authoritative gate release remains later. Full durable effects and CLI interchange retain their
 separate decisions; the current history store cannot already encode workflow effects.
+
+**A-1 Evidence support — owner-approved scoped resolution; DEC-007 remains OPEN.**
+The owner authorized the bounded `cortex_evidence::readiness` consumer of existing
+unified records and Core/G1 references, with immutable edge-local correspondence,
+explicit finite caller limits and typed advisory findings. The
+[A-1 contract](../architecture/unified-evidence.md#dependency-support-inspection-a-1)
+retains full criteria/profiles/candidate contexts and stages mutable inspection
+before atomic publication of legitimate invalidation. It adds no Core dependency
+on Evidence, persisted format, new registry, stable API guarantee or release event.
+Broader storage, interoperability and operational decisions remain open.
 
 ## DEC-008
 
@@ -387,6 +397,22 @@ identities before all Milestone 003 prerequisites complete. It neither completes
 work. This exception does not authorize the later Evidence bridge, scheduler,
 executor or persistence increments.
 The qualified-method inspector's own minimum DEC-007/012 decisions remain required.
+
+**A-1 advisory correspondence and sequencing — separately owner-approved.**
+The owner authorized early implementation of only the non-effectful Evidence-owned
+dependency-support consumer before broader 003/004 prerequisites complete. This
+exception is separate from G1's exception. It advances no milestone/capability
+status and authorizes no agent execution, operational release, permission,
+scheduler, host harness, persistence or durable effects.
+
+The owner also authorized caller-supplied exact-criterion correspondence as input
+data for advisory inspection. Structure, identities, revisions, contextual
+applicability and consistency with existing Evidence semantics may be checked;
+records and declared mappings do not prove execution or authenticated provenance.
+The component constructs no coordinator approval or G1 review/release and grants
+no authority. DEC-007/012 remain OPEN beyond this narrow boundary. No method
+adoption, qualification-admission, reviewer-independence or trusted-blocking policy
+is settled; the method inspector's own prerequisites remain required.
 
 **Proportional profiles and required reviewers.** Before 004-C, establish
 auditable classification rules for trivial/standard/critical work and the qualified
