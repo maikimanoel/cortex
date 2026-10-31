@@ -61,9 +61,14 @@ owners. Its first Rust slice, `cortex_core::parallel`, implements a bounded,
 non-effectful in-memory readiness projection over caller-supplied assertions.
 It reports per-edge release/hold/refusal and mission eligibility with causal
 invalidation; it authenticates no Evidence and grants no execution permission.
-There is no scheduler or agent launcher. The
+There is no scheduler or agent launcher. The Evidence-owned
+`cortex_evidence::readiness::inspect_support` additionally evaluates actual unified
+records for exact edge predicates, under caller-declared criterion correspondence.
+It preserves inspection-driven invalidation and returns advisory findings only;
+it does not authenticate execution, construct a coordinator review or release an
+edge. See the [support boundary](docs/architecture/unified-evidence.md#dependency-support-inspection-a-1). The
 [roadmap](docs/product/roadmap.md#native-parallel-delivery-sequence) records the
-owner-approved G1-only preview exception and full execution prerequisites.
+separately scoped G1/A-1 preview exceptions and full execution prerequisites.
 
 ## Run locally
 

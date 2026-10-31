@@ -3,6 +3,8 @@
 //! Callers supply observations and provenance. This library validates consistency;
 //! it neither executes verification nor authenticates that a report is truthful.
 
+/// Advisory support for exact G1 dependency predicates, without release authority.
+pub mod readiness;
 /// Candidate-bound evidence with independent result, applicability and validity.
 pub mod unified;
 
