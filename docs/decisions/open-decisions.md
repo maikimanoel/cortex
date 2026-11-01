@@ -226,6 +226,16 @@ before atomic publication of legitimate invalidation. It adds no Core dependency
 on Evidence, persisted format, new registry, stable API guarantee or release event.
 Broader storage, interoperability and operational decisions remain open.
 
+**Native method inspector P0 — owner-approved scoped DEC-007 resolution.**
+OD-B1 selects caller-supplied immutable exact definitions and source/access claims
+in `cortex_core::methods`, with positive internal ContractRevision references and
+finite explicit-set limits. `cortex_evidence::methods` owns exact case/criterion,
+profile, fixture/oracle correspondence and advisory inspection of unified records.
+Declarations and reference equality authenticate neither origin nor execution.
+No full SemVer registry, persisted format, transport, new knowledge index or stable
+API commitment is selected. Existing Core/Evidence/G1/A-1 contracts remain unchanged.
+Broader DEC-007 stays OPEN.
+
 ## DEC-008
 
 **Evaluation cases, baselines, and comparison-publication policy.** Select
@@ -396,7 +406,7 @@ identities before all Milestone 003 prerequisites complete. It neither completes
 003/004 nor changes their general dependencies or authorizes effectful downstream
 work. This exception does not authorize the later Evidence bridge, scheduler,
 executor or persistence increments.
-The qualified-method inspector's own minimum DEC-007/012 decisions remain required.
+The method inspector's separate P0 resolution below does not extend G1's grant.
 
 **A-1 advisory correspondence and sequencing — separately owner-approved.**
 The owner authorized early implementation of only the non-effectful Evidence-owned
@@ -412,7 +422,27 @@ records and declared mappings do not prove execution or authenticated provenance
 The component constructs no coordinator approval or G1 review/release and grants
 no authority. DEC-007/012 remain OPEN beyond this narrow boundary. No method
 adoption, qualification-admission, reviewer-independence or trusted-blocking policy
-is settled; the method inspector's own prerequisites remain required.
+is settled by A-1; the separate P0 resolution below supplies only its own boundary.
+
+**Native method inspector P0 — owner-approved OD-B1/OD-B2; DEC-012 remains OPEN.**
+OD-B1 permits caller-supplied method definitions, source/availability claims and
+exact case/criterion correspondence solely as advisory inspection inputs. Complete
+finite claim support requires every declared violation/legitimate-neighbor case,
+matching context/profile/coverage, explicit CURRENT Applicable assessed PASS under
+unified Evidence and no unresolved required source/contradiction. Partial,
+unassessed, unavailable, conflicting and unsupported claims remain inspectable.
+This is consistency and scoped support, not authenticated capture, method adoption,
+trusted blocking or a permission grant. Existing inspection may atomically retain
+legitimate first in-memory invalidation; typed errors leave records unchanged, and
+original reports/terminal assessments are never replaced. No source label or
+qualification result grants approval, dispatch, integration or revision authority.
+
+OD-B2 authorizes this non-effectful inspector and its starter qualification ahead
+of full 003/004 prerequisites, plus bounded protected-PR delivery. This exception
+is distinct from G1/A-1 and completes no capability or milestone. It does not
+approve selectors, agents, operational release, durable effects, execution,
+automatic integration or broader policy. General adoption/revision/retirement,
+exceptions, trusted-blocking and reviewer decisions remain open at their consumers.
 
 **Proportional profiles and required reviewers.** Before 004-C, establish
 auditable classification rules for trivial/standard/critical work and the qualified

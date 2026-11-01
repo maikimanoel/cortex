@@ -228,6 +228,14 @@ non-executing preview may use delivered 002/003 identities and evidence without
 claiming the full workflow/harness or weakening their gates; scheduling it before
 the full prerequisites requires an explicit scoped owner decision.
 
+The separately owner-approved OD-B1/OD-B2 P0 exception now has a bounded
+[method inspector implementation](../architecture/engineering-methods.md#native-method-inspection-p0):
+Core definitions and Evidence-owned advisory case qualification for two native
+starter mechanisms. It does not complete the larger slice, select/adopt methods
+or authorize execution. G1/A-1 remain independent. Full milestone dependencies,
+CAP-SKL-001/002 and CAP-WFL-002 statuses remain unchanged; later selection still
+requires the inspected interface, grounded inputs and separate authorization.
+
 Before scheduling a method, use the
 [independent reconciliation decisions](../architecture/engineering-methods.md#independent-reconciliation-decisions):
 normalize its objective, inspect coverage and support, then justify disposition

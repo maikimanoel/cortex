@@ -70,6 +70,14 @@ edge. See the [support boundary](docs/architecture/unified-evidence.md#dependenc
 [roadmap](docs/product/roadmap.md#native-parallel-delivery-sequence) records the
 separately scoped G1/A-1 preview exceptions and full execution prerequisites.
 
+The bounded [native method inspector](docs/architecture/engineering-methods.md#native-method-inspection-p0)
+adds immutable `cortex_core::methods` definitions and advisory
+`cortex_evidence::methods::inspect_method` qualification views. Its two unassessed
+starter definitions describe candidate correspondence and assessment adequacy;
+actual case evidence is supplied separately. It preserves missing/contradictory/
+stale support and grants no adoption or execution authority. There is no method
+selector or new CLI command, and broader Skills/Workflow capabilities remain planned.
+
 ## Run locally
 
 Use Linux with Rustup, Git supporting `--no-lazy-fetch`, and util-linux

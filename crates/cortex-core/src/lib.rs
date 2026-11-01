@@ -14,6 +14,9 @@ pub mod knowledge;
 /// Bounded advisory dependency readiness over caller assertions; no execution authority.
 pub mod parallel;
 
+/// Immutable method definitions and bounded exact inspection; no execution or authority.
+pub mod methods;
+
 use std::{error::Error, fmt};
 
 /// Maximum task identifier size in UTF-8 bytes (identifiers are ASCII).
