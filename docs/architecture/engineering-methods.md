@@ -1,8 +1,9 @@
 # Native engineering methods
 
-Status: **PLANNED**. This is the shared architectural contract for native method
-knowledge, qualification and selection, not an implemented Rust API or execution
-grant. The [catalog](../product/capability-catalog.md) owns capability requirements
+Status: **PLANNED** for the full method/selection contract. The bounded
+[native P0 inspector](#native-method-inspection-p0) has a Rust implementation; it
+does not implement general selection, adoption or execution authority. This is the
+shared architectural contract for method knowledge, qualification and selection. The [catalog](../product/capability-catalog.md) owns capability requirements
 and status; the [roadmap](../product/roadmap.md#native-engineering-delivery-sequence)
 owns sequencing. Existing [invariants](core-invariants.md) and
 [evidence semantics](unified-evidence.md) remain authoritative.
@@ -242,6 +243,92 @@ Qualification/adoption lifecycle, feature status, result, applicability and vali
 answer different questions. Reuse the existing Evidence dimensions for assessments.
 This document creates no new result enum or implicit migration of Inconclusive.
 
+## Native method inspection (P0)
+
+The owner-approved OD-B1/OD-B2 preview implements explicit immutable definitions
+in `cortex_core::methods` and advisory qualification inspection in
+`cortex_evidence::methods`. CAP-SKL-001/002 retain their broader PLANNED status;
+this slice completes no milestone and changes no G1/A-1 behavior. It requires no
+external instructional package, new dependency, CLI command, persistence or executor.
+The scoped [decisions](../decisions/open-decisions.md#dec-012) preserve all later
+adoption, trusted-blocking and operational prerequisites.
+
+`starter_methods(DefinitionLimits)` returns two unassessed exact internal revision-1
+definitions: `native.candidate-correspondence` describes existing `bind_candidate`,
+including mismatches and legitimate detached/dirty cases;
+`native.assessment-adequacy` describes explicit unified assessment/oracle/context
+rules, including zero-check refusal and legitimate zero-exit FAIL/UNKNOWN.
+Definitions retain separate property/method/claim/case identities, exact source
+versions, component/interface descriptions, applicability/absence conditions,
+required sources, exclusions, exceptions and adoption/requalification dependencies.
+These are internal positive revisions, not full skill SemVer discovery or stable
+execution references. No constructor or availability label qualifies the method.
+
+`inspect_method` consumes one exact `MethodSet` reference, optional borrowed
+`QualificationRequest`, caller-owned records and positive finite `InspectionLimits`.
+Its immutable `QualificationContract` maps every declared case to an entire single
+candidate-bound criterion, profile and oracle. All cases are required in that finite
+scope; a claim needs both a violation and legitimate neighbor. Every distinct witness
+is inspected. One report cannot silently discharge another case, and a favorable
+witness cannot hide a contradictory one. Missing assessment references are never
+filled from records. Claim/case/witness findings expose original Evidence result,
+applicability and contextual validity independently, with precise coverage gaps and
+contradictions. `requirements_met()` means conditional coverage within this declared
+contract; it is not an Evidence verdict, authenticated qualification or adoption.
+
+A case PASS must be explicit, Applicable and CURRENT under existing unified rules,
+including completed qualifying execution, positive relevant checks and a matching
+conclusive oracle. The declared full criterion, mechanism/profile, fixture and oracle
+references must also correspond. For this internal API, profile `version` matches the
+mechanism source version, and components `oracle-source`, `oracle-version`,
+`fixture-source` and `fixture-version` match each case's references. Each declared
+requalification dependency also requires matching `dependency-N-source` and
+`dependency-N-version` components and inspected required source material. The
+existing 32-component profile limit remains: insufficient representable coverage
+holds qualification rather than silently omitting dependencies. These fields
+validate declared correspondence; they do not authenticate source or execution.
+A correctly detected defective target is not automatically a qualification PASS:
+the separate qualification oracle must establish the expected case behavior.
+
+Source access/kind, qualification and applicability remain separate. Required
+summary-only/unavailable material or unresolved source disagreement prevents full
+claim support; optional missing background remains visible without erasing independent
+scoped support. An explicit target-trigger correspondence may establish applicability;
+method names, broad relevance, target language or unavailable tools cannot. Unknown
+facts stay uncertain. Cortex's Rust JSON knowledge change and a Rust/JavaScript
+large-identifier interface can be described, but native fixture evidence cannot
+establish unsupported JavaScript/interface verification or choose a schema.
+Inherited requirements and unapproved exceptions remain visible without weakening
+one another. No disposition/priority/adoption decision is computed.
+
+Inspection runs no process, callback, filesystem/network operation or clock. It
+never changes definitions, active policy, source reports or terminal assessments.
+Existing mutable `EvidenceRecord::inspect` may retain first sticky invalidation.
+Structural/identity/budget admission precedes staged inspection; all results and
+allocations are prepared before publishing legitimate invalidations. A typed Err
+leaves the whole supplied record pool unchanged; valid negative findings can retain
+invalidation, and unrelated records remain unchanged. Allocation panics/aborts are
+outside this typed-error guarantee. Returning to old values cannot revive stale
+records; actual revalidation requires new observations and assessments.
+
+The report retains its exact basis and borrowed original records. `check_basis`
+rejects changed definitions/correspondence/scopes; it is not live capture or full
+transitive validity. Logical count/material/output budgets charge occurrences before
+deduplication, nested candidate paths/comparison/profile text and an allowance for
+opaque invalidation references. They are not total allocation, RSS or host limits.
+Debug/errors omit private payloads; explicit getters may expose them. There is no
+operational authority token or conversion to a G1 review/release.
+
+[Definition tests](../../crates/cortex-core/tests/method_definitions.rs) and
+[qualification tests](../../crates/cortex-evidence/tests/method_qualification.rs)
+exercise public APIs. A bounded test-only child protocol actually runs the starter
+mechanisms and compares emitted observations to literal parent oracles; an overbroad
+wrapper is rejected by its legitimate-neighbor case. These executions are distinct
+from model-supplied Evidence fixtures and do not authenticate Git captures, prove
+universal detector efficacy or implement a product runner. Candidate-scoped executed
+results belong in delivery evidence. G1-11 external effects and G1-12's authenticated
+and authoritative bridge remain NOT_RUN.
+
 ## Common properties and contextual selection
 
 Shared properties govern behavior, identity, compatibility, errors, effects,
@@ -267,7 +354,8 @@ omitting required qualified review; no universal risk threshold is selected here
 
 ### Lifecycle coverage inventory
 
-All native methods below remain PLANNED/NOT_RUN. A future inventory must identify
+Broader native coverage below remains PLANNED/NOT_RUN. The two P0 descriptions
+and their finite qualification cases above do not complete these domains. A future inventory must identify
 the exact developed/qualified operational methods separately from research topics.
 Each specialized family requires a concrete use case and declared verification
 scope before implementation priority or execution is assigned.
@@ -360,8 +448,9 @@ the qualified/external review required by their accepted contract.
 
 ## Future acceptance scenarios
 
-All cases are **PLANNED; execution NOT_RUN** for this native mechanism. Existing
-002/003 tests demonstrate only their documented bounded behavior.
+The full selection/adoption/operational scenarios remain **PLANNED**. P0 supplies
+only the bounded inspection mechanisms described above; its tests cannot establish
+the entire lifecycle below. Existing 002/003 tests retain their documented scope.
 
 | Case | Required discriminating observation | Owner |
 | --- | --- | --- |

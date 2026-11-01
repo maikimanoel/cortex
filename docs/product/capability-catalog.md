@@ -578,6 +578,13 @@ that reference silently. Missing evidence requirements prevent stable promotion.
 **Verification:** NOT_RUN; registry/discovery integrity and contract tests.
 **Decisions:** DEC-003/007; registry representation and public API remain open.
 
+**Bounded P0 implementation:** `cortex_core::methods` provides explicit immutable
+method/property/claim/case definitions, provenance and exact internal revision
+inspection under OD-B1/OD-B2. Its two starter definitions are unassessed without
+qualification records. This is not full skill discovery, SemVer execution
+resolution, invocation or adoption. Full status above remains PLANNED. See the
+[native inspector boundary](../architecture/engineering-methods.md#native-method-inspection-p0).
+
 ### CAP-SKL-002
 
 **Name:** Guarded skill composition, imports, and promotion.
@@ -627,6 +634,15 @@ Scope qualification to supported claims: preserve a disputed example, legitimate
 exception and correction/requalification dependency without invalidating a useful
 property or accepting an unmeasured optimization. Inspect-only consumers change no
 active policy or acceptance state, launch no processes and mutate no files.
+
+**Bounded P0 implementation:** `cortex_evidence::methods::inspect_method` returns
+case/claim-scoped advisory support, contradictions and gaps using actual unified
+records and declared exact correspondence. Required violation and legitimate
+neighbor cases are conjunctive; source claims do not authenticate execution.
+Typed refusal is atomic; valid inspection can retain sticky invalidation without
+changing source reports or terminal judgments. No trusted blocker, promotion,
+adoption or operational authority is delivered. Full CAP-SKL-002 remains PLANNED;
+qualification test mechanisms and executed candidate evidence remain distinct.
 
 ## F. Typed workflows and engineering methods
 
