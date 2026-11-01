@@ -918,8 +918,29 @@ fn mi25_all_inspection_limits_and_mi34_late_budget_refusal_are_atomic() {
             Err(MethodInspectionError::InvalidLimits)
         );
     }
-    // A valid examination would invalidate the first record, but a typed output
-    // budget refusal is atomic: nothing has been published yet.
+    // One claim, four cases and four witnesses fit exactly. This cap is above
+    // the early claim-plus-case minimum (5), unlike an early-refusal cap of 1.
+    let restricted = InspectionLimits::new(256, 256, 256, 4096, 8_000_000, 9).unwrap();
+    let sufficient = InspectionLimits::new(256, 256, 256, 4096, 8_000_000, 10).unwrap();
+    let before = f.records.clone();
+    {
+        let r = inspect_method(&f.set, &f.method, Some(&q), &mut f.records, restricted).unwrap();
+        assert!(complete(&r));
+        assert_eq!(r.claims().len(), 1);
+        assert_eq!(r.claims()[0].cases().len(), 4);
+        assert!(
+            r.claims()[0]
+                .cases()
+                .iter()
+                .all(|case| case.witnesses().len() == 1)
+        );
+        assert_eq!(r.input_usage().get(InspectionLimitKind::Findings), 9);
+        assert_eq!(first(&r).validity(), Some(Validity::Current));
+        assert_eq!(r.records(), before);
+    }
+    // Changing only the examination profile stages a sticky invalidation and
+    // adds one NotCurrentPass reason. Final accounting (10) must refuse at 9
+    // before any of those drafts are published to the original record pool.
     let changed = VerificationProfile::new(
         f.cases[0].profile.provenance().clone(),
         "changed",
@@ -935,18 +956,55 @@ fn mi25_all_inspection_limits_and_mi34_late_budget_refusal_are_atomic() {
         Some(&changed),
     );
     let q = QualificationRequest::new(&f.contract, f.contract.scope(), &w, &e, None);
-    let before = f.records.clone();
-    assert!(matches!(
-        inspect_method(
-            &f.set,
-            &f.method,
-            Some(&q),
-            &mut f.records,
-            InspectionLimits::new(256, 256, 256, 4096, 8_000_000, 1).unwrap()
-        ),
-        Err(MethodInspectionError::Limit(InspectionLimitKind::Findings))
-    ));
+    assert_eq!(
+        inspect_method(&f.set, &f.method, Some(&q), &mut f.records, restricted).unwrap_err(),
+        MethodInspectionError::Limit(InspectionLimitKind::Findings)
+    );
     assert_eq!(f.records, before);
+
+    // The identical changed request succeeds at the exact next cap, exposing
+    // both the late count and the staged state the refused call could not publish.
+    let first_invalidation;
+    {
+        let r = inspect_method(&f.set, &f.method, Some(&q), &mut f.records, sufficient).unwrap();
+        assert_eq!(r.input_usage().get(InspectionLimitKind::Findings), 10);
+        assert!(!complete(&r));
+        assert_eq!(first(&r).validity(), Some(Validity::Stale));
+        assert_eq!(
+            first(&r).validity_issue(),
+            Some(&ValidityIssue::ProfileChanged)
+        );
+        assert_eq!(first(&r).reasons(), [QualificationIssue::NotCurrentPass]);
+        assert!(
+            r.claims()[0].cases()[1..]
+                .iter()
+                .all(CaseInspection::requirements_met)
+        );
+        first_invalidation = (
+            first(&r).validity_issue().cloned(),
+            first(&r).compared_to().cloned(),
+        );
+        for (record, original) in r.records().iter().zip(&before) {
+            assert_eq!(record.observation(), original.observation());
+            assert_eq!(record.assessment(), original.assessment());
+        }
+        assert_eq!(&r.records()[1..], &before[1..]);
+        assert_ne!(r.records()[0], before[0]);
+    }
+    let invalidated = f.records.clone();
+    {
+        let restored = run(&mut f);
+        assert!(!complete(&restored));
+        assert_eq!(first(&restored).validity(), Some(Validity::Stale));
+        assert_eq!(
+            (
+                first(&restored).validity_issue().cloned(),
+                first(&restored).compared_to().cloned(),
+            ),
+            first_invalidation
+        );
+    }
+    assert_eq!(f.records, invalidated);
 }
 #[test]
 fn mi25_debug_and_error_chains_do_not_repeat_private_payloads() {
