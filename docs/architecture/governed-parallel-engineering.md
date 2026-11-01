@@ -580,7 +580,12 @@ Debug/errors omit caller text/paths/artifact payloads; use non-sensitive fixture
 The public integration target `parallel_readiness` exercises G1-01–10 and G1-11's
 in-memory implications with literal before/after assertions. These model cases
 passed locally; they are not operational release, dispatch or recovery tests.
-G1-11's external-effect behavior and all of G1-12 remain **NOT_RUN**. Use six
+G1-11's external-effect behavior and G1-12's authenticated/coordinator/operational
+integration remain **NOT_RUN**. The separately authorized
+[A-1 Evidence consumer](unified-evidence.md#dependency-support-inspection-a-1)
+now inspects existing records for exact predicate support without changing G1,
+creating a review/release event or authenticating execution. Its tests cover the
+advisory no-false-support subset of G1-12; protected oracle approval remains later. Use six
 missions, not six processes:
 
 ```mermaid
@@ -609,7 +614,7 @@ candidate/contract identities; mutation and effects remain absent.
 | G1-09 | Duplicate notification causes zero extra transitions; changed payload under that key, cycle, self-edge, ambiguous ID, missing node and over-limit input refuse with unchanged accepted state | G1 |
 | G1-10 | A fresh review after invalidation references new applicable context; replaying an old review cannot revive it. Unknown dependency coverage holds current use | G1 |
 | G1-11 | A clean merge is not an acceptance event; cancelled mission cannot start again and does not retract an externally integrated artifact. A lost effect outcome stays unreconciled, not rolled back or blindly retried | G1 ignores merge-as-proof; actual effects WFL-001 later |
-| G1-12 | Real Evidence unassessed/zero-check/insufficient-oracle/STALE context cannot be exported as release support; changing a protected oracle requires a new approved revision | Later Evidence/Core bridge; NOT G1 verification |
+| G1-12 | Real Evidence unassessed/zero-check/insufficient-oracle/STALE context cannot be exported as release support; changing a protected oracle requires a new approved revision | A-1 advisory Evidence checks; authenticated/authoritative bridge and protected-oracle approval remain NOT_RUN; NOT G1 verification |
 
 A/D may each have other unfinished outputs. Their intermediate integrated artifacts
 have their own reviewed candidate; they do not borrow the producer's moving HEAD.

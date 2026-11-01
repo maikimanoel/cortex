@@ -275,15 +275,17 @@ not a replacement for method qualification or an effectful execution shortcut.
 
 The [single native Rust design](../architecture/governed-parallel-engineering.md)
 refines CAP-WFL-004 under its existing Core/Evidence/Workflow/Harness owners.
-G1 has a bounded implementation and local acceptance coverage; later rows remain
-**PLANNED / NOT_RUN**. The owner explicitly accepted only the pure G1 sequencing
-exception in DEC-012. Full 004 retains its dependency on 003 and its PLANNED status;
+G1 and A-1 have bounded implementations and acceptance mechanisms; remaining
+operational rows stay **PLANNED / NOT_RUN**. The owner accepted G1's pure sequencing
+exception and A-1's separately scoped advisory Evidence exception in DEC-012;
+neither extends to effectful work. Full 004 retains its dependency
+on 003 and its PLANNED status;
 no priority label or useful preview authorizes effectful out-of-sequence work.
 
 | Increment | Required input and bounded outcome | Gate before implementation/use |
 | --- | --- | --- |
-| G1, bounded non-effectful preview implemented | `cortex_core::parallel` uses delivered 002 identities and caller-supplied graph/review facts; its pure event reducer returns eligible/blocked and per-edge release/hold/refusal decisions, including chain/fan-in and causal invalidation | Scoped DEC-007/012 input/trust and early-preview decisions accepted by the owner. G1-01–10 and the in-memory part of G1-11 have local test coverage; real Evidence, permission, persistence and dispatch remain NOT_RUN and separately gated |
-| Evidence/inspection follow-ups, conditional | Accepted G1 interface; actual Evidence current-pass/context/coverage interpretation and CLI-first read-only operator view | Review edge-support mapping and minimum CLI input/privacy/API decisions before their consumers; no Core -> Evidence dependency or new evidence model |
+| G1, bounded non-effectful preview implemented | `cortex_core::parallel` uses delivered 002 identities and caller-supplied graph/review facts; its pure event reducer returns eligible/blocked and per-edge release/hold/refusal decisions, including chain/fan-in and causal invalidation | Scoped DEC-007/012 input/trust and early-preview decisions accepted by the owner. G1-01–10 and the in-memory part of G1-11 have local test coverage; authenticated Evidence review, permission, persistence and dispatch remain NOT_RUN and separately gated |
+| A-1 advisory Evidence support implemented; operator interface conditional | `cortex_evidence::readiness` inspects actual unified records against exact edge predicates/context; retained invalidation, no coordinator release or authority | Separately owner-approved caller-declared correspondence and bounded sequencing exception in DEC-007/012; no milestone completion. CLI-first operator view still needs its own minimum input/privacy/API decisions; no Core -> Evidence dependency or new evidence model |
 | Governed local execution, blocked until prerequisites | Real Core authority, qualified Workflow effect records/recovery and selected host/process adapter around the Codex CLI | Existing 004-A/B/C/D/E and relevant 003 exits, DEC-004/005/006/007/012, real denial/resource tests; supported approved storage extension before durable effects |
 | Evaluation and optional expansion, deferred | Accepted outcomes and complete attempt/resource accounting | CAP-EVL-001/002 controlled baselines; TUI only for demonstrated operator need, optional multi-host only for a justified later native Rust scope |
 
