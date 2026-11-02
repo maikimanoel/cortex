@@ -228,3 +228,180 @@ fn complete_reference_links_and_neighboring_definitions_are_not_multiline_fragme
     let (_, refs) = parsed("# A\n[x][id]\n[y][id]\n[x](#a)\n[ordinary]\n[z](#a)\n[id]: #a\n");
     assert_eq!(refs.len(), 5);
 }
+
+#[test]
+fn repair_definition_title_continuations_refuse_but_separated_quoted_links_survive() {
+    for title in [
+        r#""[not prose](#local)""#,
+        "'[not prose](#local)'",
+        "([not prose](#local))",
+    ] {
+        for indentation in ["", " ", "   ", "\t", "\t  ", " \t "] {
+            let source = format!("# Local\n[key]: #local\n{indentation}{title}\n[key]\n");
+            assert!(
+                matches!(
+                    scanner::extract(source.as_bytes()),
+                    Err(ExtractionError::Unsupported(UnsupportedSyntax::Link))
+                ),
+                "adjacent reference title must refuse: {source:?}"
+            );
+            let separated = format!("# Local\n[key]: #local\n \t\n{title}\n[key]\n");
+            let (_, refs) = parsed(&separated);
+            assert_eq!(refs.len(), 3);
+            assert_eq!(
+                refs.iter()
+                    .filter(|r| r.target() == &ReferenceTarget::Local("#local".into()))
+                    .count(),
+                2
+            );
+        }
+    }
+    let (_, refs) = parsed(
+        "# Local\n[key]: #local\nOrdinary prose breaks title adjacency.\n\"[visible](#local)\"\n[key]\n",
+    );
+    assert_eq!(refs.len(), 3);
+}
+
+#[test]
+fn repair_padded_setext_markers_refuse_while_prose_and_code_neighbors_survive() {
+    for marker in ["=== ", "---\t", "= \t", "-- \t  "] {
+        let source = format!("Hidden\n  {marker}\n[read](#hidden)\n");
+        assert!(
+            matches!(
+                scanner::extract(source.as_bytes()),
+                Err(ExtractionError::Unsupported(UnsupportedSyntax::Anchor))
+            ),
+            "padded Setext marker must refuse: {source:?}"
+        );
+    }
+    let (_, refs) = parsed(
+        "# Local\nEquality === and dashes --- are ordinary prose.\n\\=== \n```text\nHidden\n=== \n---\t\n```\n    === \n\t---\t\n[read](#local)\n",
+    );
+    assert_eq!(refs.len(), 1);
+    assert_eq!(refs[0].target(), &ReferenceTarget::Local("#local".into()));
+}
+
+#[test]
+fn repair_tab_list_markers_refuse_containers_but_preserve_flat_list_links() {
+    for marker in ["-", "+", "*", "1.", "2)"] {
+        for separator in ["\t", " \t"] {
+            for body in ["# Hidden", "```text", "> Nested", "[key]: #local"] {
+                let source = format!("{marker}{separator}{body}\n[read](#hidden)\n");
+                assert!(
+                    matches!(
+                        scanner::extract(source.as_bytes()),
+                        Err(ExtractionError::Unsupported(UnsupportedSyntax::Container))
+                    ),
+                    "container with tab separator must refuse: {source:?}"
+                );
+            }
+            let source = format!("# Local\n{marker}{separator}Ordinary [read](#local) prose.\n");
+            let (nodes, refs) = parsed(&source);
+            assert_eq!(refs.len(), 1);
+            assert_eq!(refs[0].target(), &ReferenceTarget::Local("#local".into()));
+            let span = nodes
+                .iter()
+                .find(|n| n.locator() == refs[0].from())
+                .unwrap()
+                .span();
+            assert_eq!(&source[span.start()..span.end()], "[read](#local)");
+        }
+    }
+}
+
+#[test]
+fn repair_nonletter_email_autolinks_refuse_without_rejecting_literal_neighbors() {
+    for address in [
+        "123@example.invalid",
+        "_reader@example.invalid",
+        "+reader@example.invalid",
+        "9.reader+tag@example.invalid",
+    ] {
+        for line in [
+            format!("<{address}>"),
+            format!("[text <{address}>](#local)"),
+        ] {
+            let source = format!("# Local\n{line}\n[read](#local)\n");
+            assert!(
+                matches!(
+                    scanner::extract(source.as_bytes()),
+                    Err(ExtractionError::Unsupported(UnsupportedSyntax::Html))
+                ),
+                "angle email must refuse: {source:?}"
+            );
+        }
+        let source = format!(
+            "# Local\n{address} and 2 < 3, x > y, <123>, \\<{address}> and `<{address}>`.\n[read](<#local>)\n"
+        );
+        let (_, refs) = parsed(&source);
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].target(), &ReferenceTarget::Local("#local".into()));
+    }
+}
+
+#[test]
+fn docs5_full_reference_uses_refuse_controls_anywhere_in_retained_markup() {
+    for markup in [
+        "[read][key\tname]",
+        "[read\ttext][key name]",
+        "[`read\ttext`][key name]",
+        "[read][missing\tname]",
+    ] {
+        let source = format!("# Local\n{markup}\n[key name]: #local\n");
+        assert!(
+            matches!(
+                scanner::extract(source.as_bytes()),
+                Err(ExtractionError::Unsupported(UnsupportedSyntax::Link))
+            ),
+            "raw control-bearing full reference must refuse: {markup:?}"
+        );
+    }
+    for control in ['\0', '\u{7f}', '\u{85}'] {
+        let source = format!("# Local\n[read][key{control}name]\n[key name]: #local\n");
+        assert!(matches!(
+            scanner::extract(source.as_bytes()),
+            Err(ExtractionError::InvalidMarkdown)
+        ));
+    }
+}
+
+#[test]
+fn docs5_collapsed_reference_use_refuses_control_bearing_original_markup() {
+    let source = "# Local\n[key\tname][]\n[key name]: #local\n";
+    assert!(matches!(
+        scanner::extract(source.as_bytes()),
+        Err(ExtractionError::Unsupported(UnsupportedSyntax::Link))
+    ));
+}
+
+#[test]
+fn docs5_defined_shortcut_refuses_control_bearing_original_markup() {
+    let source = "# Local\n[key\tname]\n[key name]: #local\n";
+    assert!(matches!(
+        scanner::extract(source.as_bytes()),
+        Err(ExtractionError::Unsupported(UnsupportedSyntax::Link))
+    ));
+}
+
+#[test]
+fn docs5_tabbed_definition_matches_space_uses_without_changing_their_spelling() {
+    let source = "# Local\n[KEY\tNAME]: #local\n[ação][key  name] [key name][] [KEY NAME]\n-\tFlat [read](#local) prose.\n`[key\tname]` and ordinary [not\tdefined], 2 < 3.\n";
+    let (nodes, refs) = parsed(source);
+    assert_eq!(refs.len(), 5);
+    let definition = format!("definition@{}", source.find("[KEY\tNAME]:").unwrap());
+    for markup in ["[ação][key  name]", "[key name][]", "[KEY NAME]"] {
+        let locator = format!("link@{}", source.find(markup).unwrap());
+        let reference = refs.iter().find(|r| r.from() == locator).unwrap();
+        assert_eq!(reference.spelling(), markup);
+        assert_eq!(
+            reference.target(),
+            &ReferenceTarget::Local(definition.clone())
+        );
+        let span = nodes
+            .iter()
+            .find(|n| n.locator() == locator)
+            .unwrap()
+            .span();
+        assert_eq!(&source[span.start()..span.end()], markup);
+    }
+}

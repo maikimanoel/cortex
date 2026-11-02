@@ -429,3 +429,133 @@ fn missing_committed_object_and_untracked_or_changed_configuration_never_establi
         Err(ExtractionError::Inspection(_))
     ));
 }
+
+#[test]
+fn unsupported_syntax_repair_refuses_committed_sources_before_any_index_can_be_qualified() {
+    let r = Repo::new();
+    for (finding, source, category) in [
+        (
+            "DOCS-1",
+            "# Local\n[key]: #local\n \"[hidden](#local)\"\n[key]\n",
+            UnsupportedSyntax::Link,
+        ),
+        (
+            "DOCS-1",
+            "# Local\n[key]: #local\n\t ([hidden](#local))\n[key]\n",
+            UnsupportedSyntax::Link,
+        ),
+        (
+            "DOCS-2",
+            "Hidden\n=== \n[read](#hidden)\n",
+            UnsupportedSyntax::Anchor,
+        ),
+        ("DOCS-2", "Hidden\n---\t\n", UnsupportedSyntax::Anchor),
+        (
+            "DOCS-3",
+            "-\t# Hidden\n[read](#hidden)\n",
+            UnsupportedSyntax::Container,
+        ),
+        (
+            "DOCS-4",
+            "# Local\n<123@example.invalid>\n[read](#local)\n",
+            UnsupportedSyntax::Html,
+        ),
+    ] {
+        r.commit_file("repair.md", source);
+        let before = snapshot(&r);
+        let result = extract(&r, &contract(&r), b"repair.md");
+        assert!(
+            matches!(result, Err(ExtractionError::Unsupported(actual)) if actual == category),
+            "{finding} must refuse with its typed syntax category"
+        );
+        assert_eq!(
+            snapshot(&r),
+            before,
+            "{finding} must preserve content and metadata on refusal"
+        );
+    }
+}
+
+#[test]
+fn syntax_repair_retains_committed_near_neighbors_spans_and_scoped_current_validity() {
+    let r = Repo::new();
+    let source = "# Local\n[key]: #local\n\n \"[visible](#local)\"\n[key]\n-\tFlat [bullet](#local) prose.\n1.\tFlat [ordered](#local) prose.\n2 < 3 and x > y; 123@example.invalid, <123>, ordinary [notes].\n[angle](<#local>)\n";
+    r.commit_file("repair.md", source);
+    let c = contract(&r);
+    let before = snapshot(&r);
+    let g = extract(&r, &c, b"repair.md").unwrap();
+    assert_eq!(g.bytes(), source.as_bytes());
+    assert_eq!(g.references().len(), 6);
+    assert_eq!(g.incoming("#local").unwrap().count(), 5);
+    let definition = format!("definition@{}", source.find("[key]:").unwrap());
+    assert_eq!(g.incoming(&definition).unwrap().count(), 1);
+    for markup in [
+        "[visible](#local)",
+        "[bullet](#local)",
+        "[ordered](#local)",
+        "[angle](<#local>)",
+    ] {
+        let link = occurrence(&g, markup);
+        assert_eq!(text(&g, link.from()), markup);
+        assert_eq!(link.target(), &ReferenceTarget::Local("#local".into()));
+    }
+    let view = reinspect(&r.path, &g, id(4)).unwrap();
+    assert!(view.profile_matches());
+    assert_eq!(view.validity(), Some(Validity::Current));
+    assert_eq!(snapshot(&r), before);
+}
+
+#[test]
+fn docs5_committed_control_bearing_reference_uses_refuse_at_the_adapter_boundary() {
+    let r = Repo::new();
+    for markup in [
+        "[read][key\tname]",
+        "[key\tname][]",
+        "[key\tname]",
+        "[read\ttext][key name]",
+        "[read][missing\tname]",
+    ] {
+        let source = format!("# Local\n{markup}\n[key name]: #local\n");
+        r.commit_file("control-use.md", &source);
+        let c = contract(&r);
+        let before = snapshot(&r);
+        assert!(
+            matches!(
+                extract(&r, &c, b"control-use.md"),
+                Err(ExtractionError::Unsupported(UnsupportedSyntax::Link))
+            ),
+            "DOCS-5 must refuse the raw reference use, not return a Core domain error"
+        );
+        assert_eq!(snapshot(&r), before);
+    }
+}
+
+#[test]
+fn docs5_committed_tabbed_definitions_preserve_control_free_use_spellings_and_neighbors() {
+    let r = Repo::new();
+    let source = "# Local\n[KEY\tNAME]: #local\n[ação][key  name] [key name][] [KEY NAME]\n-\tFlat [read](#local) prose.\n`[key\tname]` and ordinary [not\tdefined], 2 < 3.\n";
+    r.commit_file("control-neighbor.md", source);
+    let c = contract(&r);
+    let before = snapshot(&r);
+    let g = extract(&r, &c, b"control-neighbor.md").unwrap();
+    assert_eq!(g.bytes(), source.as_bytes());
+    assert_eq!(g.references().len(), 5);
+    let definition = format!("definition@{}", source.find("[KEY\tNAME]:").unwrap());
+    assert_eq!(text(&g, &definition), "[KEY\tNAME]: #local");
+    assert_eq!(g.incoming(&definition).unwrap().count(), 3);
+    assert_eq!(g.incoming("#local").unwrap().count(), 2);
+    for markup in ["[ação][key  name]", "[key name][]", "[KEY NAME]"] {
+        let reference = occurrence(&g, markup);
+        assert_eq!(reference.spelling(), markup);
+        assert_eq!(text(&g, reference.from()), markup);
+        assert_eq!(
+            reference.target(),
+            &ReferenceTarget::Local(definition.clone())
+        );
+    }
+    assert_eq!(
+        reinspect(&r.path, &g, id(4)).unwrap().validity(),
+        Some(Validity::Current)
+    );
+    assert_eq!(snapshot(&r), before);
+}

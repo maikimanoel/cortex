@@ -101,9 +101,28 @@ fn code_end(b: &[u8], start: usize) -> Result<usize, E> {
     Err(E::InvalidMarkdown)
 }
 fn html_start(b: &[u8], i: usize) -> bool {
-    b[i] == b'<'
-        && b.get(i + 1)
-            .is_some_and(|c| c.is_ascii_alphabetic() || matches!(c, b'/' | b'!' | b'?'))
+    if b[i] != b'<' {
+        return false;
+    }
+    if b.get(i + 1)
+        .is_some_and(|c| c.is_ascii_alphabetic() || matches!(c, b'/' | b'!' | b'?'))
+    {
+        return true;
+    }
+    // Email autolinks may start with digits or punctuation. Refuse an angled
+    // email candidate without interpreting or following it. Stop at another '<'
+    // so repeated angle characters cannot cause repeated scans of the same tail.
+    let mut at = false;
+    for c in &b[i + 1..] {
+        match c {
+            b'>' => return at,
+            b'<' => break,
+            b'@' => at = true,
+            c if c.is_ascii_whitespace() => break,
+            _ => (),
+        }
+    }
+    false
 }
 // The opening bracket is known. Nested brackets would need renderer precedence.
 fn bracket_end(b: &[u8], start: usize) -> Result<usize, E> {
@@ -249,18 +268,26 @@ fn heading(s: &str) -> Result<Option<String>, E> {
     }
     Ok(Some(anchor))
 }
+fn setext_marker(s: &str) -> bool {
+    let marker = s.trim_end_matches([' ', '\t']);
+    !marker.is_empty() && (marker.bytes().all(|b| b == b'=') || marker.bytes().all(|b| b == b'-'))
+}
 fn list_item(s: &str) -> Option<&str> {
-    let rest = if s.starts_with("- ") || s.starts_with("+ ") || s.starts_with("* ") {
-        &s[2..]
+    let b = s.as_bytes();
+    let marker_end = if matches!(b.first(), Some(b'-' | b'+' | b'*')) {
+        1
     } else {
-        let n = s.bytes().take_while(u8::is_ascii_digit).count();
-        if n > 0 && (s[n..].starts_with(". ") || s[n..].starts_with(") ")) {
-            &s[n + 2..]
+        let n = b.iter().take_while(|c| c.is_ascii_digit()).count();
+        if n > 0 && matches!(b.get(n), Some(b'.' | b')')) {
+            n + 1
         } else {
             return None;
         }
     };
-    Some(rest.trim_start_matches([' ', '\t']))
+    if !matches!(b.get(marker_end), Some(b' ' | b'\t')) {
+        return None;
+    }
+    Some(s[marker_end + 1..].trim_start_matches([' ', '\t']))
 }
 fn container(s: &str) -> bool {
     if s.starts_with('>') {
@@ -323,12 +350,18 @@ fn inline(scan: &mut Scan, s: &str, offset: usize) -> Result<(), E> {
                 };
                 let definition = scan.definitions.get(&key).cloned();
                 if explicit || definition.is_some() {
+                    let spelling = &s[i..end];
+                    // Core retains the whole original use and forbids controls;
+                    // refuse this unsupported spelling instead of rewriting it.
+                    if spelling.chars().any(char::is_control) {
+                        return Err(E::Unsupported(U::Link));
+                    }
                     scan.node(&locator, offset + i, offset + end)?;
                     let target = definition.map_or(
                         ReferenceTarget::Unresolved(UnresolvedReference::OutsideCoverage),
                         ReferenceTarget::Local,
                     );
-                    scan.reference(&locator, &s[i..end], target)?;
+                    scan.reference(&locator, spelling, target)?;
                 }
                 i = end;
                 continue;
@@ -419,6 +452,7 @@ pub(super) fn extract(bytes: &[u8]) -> Result<Parsed, E> {
     let mut offset = 0;
     let mut list_context = false;
     let mut previous_bracket_line = false;
+    let mut previous_definition_line = false;
     for line in source.split_inclusive('\n') {
         let raw = line.strip_suffix('\n').unwrap_or(line);
         let raw = if line.ends_with('\n') {
@@ -432,6 +466,16 @@ pub(super) fn extract(bytes: &[u8]) -> Result<Parsed, E> {
         let trimmed = raw.trim_start_matches(' ');
         let indent = raw.len() - trimmed.len();
         let b = trimmed.as_bytes();
+        if previous_definition_line
+            && trimmed
+                .trim_start_matches([' ', '\t'])
+                .starts_with(['"', '\'', '('])
+        {
+            // A possible title on the next physical line may still belong to
+            // an unsupported multiline definition; do not extract it as prose.
+            return Err(E::Unsupported(U::Link));
+        }
+        previous_definition_line = false;
         if fence.is_none() && previous_bracket_line && continues_bracket(trimmed)? {
             return Err(E::Unsupported(U::Link));
         }
@@ -466,9 +510,7 @@ pub(super) fn extract(bytes: &[u8]) -> Result<Parsed, E> {
                 fence = Some((ch, run));
             } else if container(trimmed) {
                 return Err(E::Unsupported(U::Container));
-            } else if !trimmed.is_empty()
-                && (trimmed.bytes().all(|b| b == b'=') || trimmed.bytes().all(|b| b == b'-'))
-            {
+            } else if setext_marker(trimmed) {
                 return Err(E::Unsupported(U::Anchor));
             } else if let Some(base) = heading(trimmed)? {
                 let mut anchor = base.clone();
@@ -492,6 +534,7 @@ pub(super) fn extract(bytes: &[u8]) -> Result<Parsed, E> {
                         return Err(E::DuplicateDefinition);
                     }
                     definitions.push((locator, d.raw, d.decoded));
+                    previous_definition_line = true;
                 } else {
                     previous_bracket_line = trailing_bracket(trimmed)?;
                     lines.push((trimmed, offset + indent));

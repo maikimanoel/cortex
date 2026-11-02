@@ -34,12 +34,20 @@ text with no definition remain non-links.
 Reference definitions use a single line `[label]: destination`, optionally an
 angle-delimited destination, with up to three leading spaces. Full `[text][label]`,
 collapsed `[label][]` and defined shortcut `[label]` uses are supported. Labels
-are ASCII, case-insensitive and normalize consecutive spaces/tabs to one space;
-backslash-escaped punctuation is decoded. Duplicate normalized definitions are
-refused, rather than silently selecting one. Explicit uses without a definition
+are ASCII, case-insensitive and collapse ordinary spaces; backslash-escaped
+punctuation is decoded. Definition labels also normalize tabs to spaces. Captured
+reference-use markup must be control-free. Tabs in the text or labels of full,
+collapsed or defined shortcut uses are refused with `Unsupported(Link)`. Controls
+already prohibited at the input boundary retain invalid-input failures. Original
+spelling is never rewritten to bypass Core's unchanged validation. Definition-side tab normalization and ordinary-space uses
+remain supported. Duplicate normalized definitions are refused, rather than
+silently selecting one. Explicit uses without a definition
 remain unresolved outside coverage. Multiline definitions/links are refused,
 including a following-line destination or reference label that could continue
-preceding bracket text. Blank lines separate
+preceding bracket text. A line immediately following a definition that starts,
+after spaces/tabs, with a single quote, double quote or opening parenthesis is
+refused as a possible title continuation. A blank line ends that adjacency, so
+separated quoted prose retains its ordinary links. Blank lines also separate
 ordinary bracket text. Angle destinations treat parentheses literally. Entities
 are never decoded: local fragments containing them remain unsupported.
 
@@ -47,13 +55,17 @@ Top-level backtick/tilde fences of at least three characters, indented by up to
 three spaces, suppress all contents until a matching same-character closing run
 of at least the opening length with only trailing whitespace. Unterminated fences
 are malformed. Lines starting with four spaces or a tab are excluded as indented
-code. Flat list prose may contain links; indented continuations after a list
+code. Existing bullet and ordered-list markers recognize ASCII spaces or tabs as
+separators. Flat list prose may contain links; indented continuations after a list
 that could hide nested code are refused. Same-line inline code uses matching
 exact-length backtick runs; an unmatched
 run is malformed. Container interpretation (block quotes/list continuations) is
 outside the profile: container-prefixed code/heading forms are refused. HTML,
-autolinks, Setext heading forms and explicit anchors are refused so they cannot
-hide an unsupported target behind an observed missing-target claim.
+autolinks, Setext heading forms (including trailing spaces/tabs) and explicit
+anchors are refused so they cannot hide an unsupported target behind an observed
+missing-target claim. Angle-delimited email candidates containing `@` without
+whitespace are refused even when they start with digits or punctuation; bare
+emails, escaped angles and ordinary comparisons remain prose.
 
 Only destinations beginning with `#` are considered for same-document resolution.
 The fragment must contain only lowercase ASCII letters, digits, hyphens and
