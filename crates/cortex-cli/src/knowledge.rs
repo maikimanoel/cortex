@@ -21,6 +21,8 @@
 mod json;
 /// Producer-owned bounded JSON refresh with fresh acquisition and explicit parse reuse.
 pub mod refresh;
+/// Bounded Rust lexical declarations, imports and explicit local correspondence.
+pub mod rust;
 /// Bounded committed JSON source-set acquisition and contextual qualification.
 pub mod source_set;
 #[cfg(test)]
