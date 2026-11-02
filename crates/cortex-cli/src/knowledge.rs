@@ -19,6 +19,8 @@
 //! ```
 
 mod json;
+/// Bounded candidate-bound native Markdown heading/link extraction.
+pub mod markdown;
 /// Producer-owned bounded JSON refresh with fresh acquisition and explicit parse reuse.
 pub mod refresh;
 /// Bounded committed JSON source-set acquisition and contextual qualification.
