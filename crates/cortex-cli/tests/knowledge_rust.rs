@@ -868,3 +868,61 @@ fn repair2_impl_types_and_weak_union_names_preserve_real_item_boundaries() {
         }
     }
 }
+
+#[test]
+fn repair3_raw_pointer_returns_are_opaque_signatures() {
+    let r = Repo::new();
+    let mut failures = Vec::new();
+    for source in [
+        "fn f() -> *const u8 { core::ptr::null() } fn after() {}",
+        "fn f() -> *mut u8 { core::ptr::null_mut() } fn after() {}",
+        "fn f<T>() -> *const T { core::ptr::null() } fn after() {}",
+        "fn f<T>() -> *mut T { core::ptr::null_mut() } fn after() {}",
+        "fn f() -> (*const u8, *mut u8) { (core::ptr::null(), core::ptr::null_mut()) } fn after() {}",
+        "fn f() -> Result<*const u8, ()> { Ok(core::ptr::null()) } fn after() {}",
+    ] {
+        r.commit_file("source.rs", source);
+        match extract(&r, &contract(&r)) {
+            Ok(g) => {
+                let names = [("f", 3), ("after", source.rfind("after").unwrap())];
+                let exact = names.iter().all(|(name, at)| {
+                    g.node(&loc("fn", name, *at))
+                        .is_ok_and(|n| n.span().start() == *at && n.span().end() == at + name.len())
+                });
+                if !exact
+                    || g.nodes().len() != 3
+                    || !g.references().is_empty()
+                    || g.bytes() != source.as_bytes()
+                {
+                    failures.push(format!("{source}: incorrect captured structure {g:?}"));
+                }
+            }
+            Err(e) => failures.push(format!("{source}: {e:?}")),
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "opaque pointer signatures refused:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn repair3_following_const_items_still_refuse() {
+    let r = Repo::new();
+    for source in [
+        "fn broken() const NEXT: u8 = 0;",
+        "fn broken() -> *const u8 const NEXT: u8 = 0;",
+        "fn broken<T>() -> *const T const NEXT: u8 = 0;",
+        "fn broken() -> *mut u8 const NEXT: u8 = 0;",
+    ] {
+        r.commit_file("source.rs", source);
+        assert!(
+            matches!(
+                extract(&r, &contract(&r)),
+                Err(ExtractionError::InvalidRust | ExtractionError::UnsupportedSyntax)
+            ),
+            "borrowed a real following const item: {source}"
+        );
+    }
+}

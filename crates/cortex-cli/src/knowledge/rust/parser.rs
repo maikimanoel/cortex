@@ -251,7 +251,10 @@ impl Parser<'_> {
             "union" => next_word && identifier(self.text(i + 1)), // Weak keyword.
             "impl" => angles == 0 && !type_start,
             "static" => i == 0 || self.text(i - 1) != "'",
-            "const" => angles == 0 && (i == 0 || self.text(i - 1) != "~") && next_word,
+            "const" => {
+                // `*const` is an opaque pointer qualifier, not a named item.
+                angles == 0 && (i == 0 || !matches!(self.text(i - 1), "~" | "*")) && next_word
+            }
             "extern" => {
                 matches!(self.text(i + 1), "{" | "crate")
                     || (self
