@@ -18,6 +18,8 @@
 //! }
 //! ```
 
+/// Bounded committed Cargo TOML declarations and lexical feature references.
+pub mod cargo_manifest;
 mod json;
 /// Producer-owned bounded JSON refresh with fresh acquisition and explicit parse reuse.
 pub mod refresh;
