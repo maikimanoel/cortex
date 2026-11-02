@@ -761,3 +761,110 @@ fn repair_macro_and_ordinary_block_neighbors_retain_only_observed_items() {
         );
     }
 }
+
+#[test]
+fn repair2_following_union_cannot_supply_a_missing_body() {
+    let r = Repo::new();
+    r.commit_file("source.rs", "fn broken() union Next { field: u8 }");
+    assert!(matches!(
+        extract(&r, &contract(&r)),
+        Err(ExtractionError::InvalidRust | ExtractionError::UnsupportedSyntax)
+    ));
+}
+
+#[test]
+fn repair2_following_impl_cannot_supply_a_missing_body_or_local_proof() {
+    let r = Repo::new();
+    r.commit_file(
+        "source.rs",
+        "struct Item; fn broken() impl Item { fn method() { use self::Item as Alias; } }",
+    );
+    assert!(matches!(
+        extract(&r, &contract(&r)),
+        Err(ExtractionError::InvalidRust | ExtractionError::UnsupportedSyntax)
+    ));
+}
+
+#[test]
+fn repair2_supported_item_header_boundaries_refuse_the_whole_index() {
+    let r = Repo::new();
+    let mut failures = Vec::new();
+    // Cover the finite item-introducer catalog across each header owner. Keep
+    // observing all rows so one failure cannot hide later boundary classes.
+    for header in [
+        "struct Item; fn broken()",
+        "struct Item; fn broken() -> impl Trait",
+        "struct Item; fn broken() -> (Opaque)",
+        "struct Item; fn broken() -> [u8; 4]",
+        "struct Item; struct Broken<T>",
+        "struct Item; struct Broken<T> where T: Clone",
+        "struct Item; impl Item",
+    ] {
+        for following in [
+            "mod Next {}",
+            "fn next() {}",
+            "struct Next;",
+            "enum Next { Value }",
+            "union Next { field: u8 }",
+            "trait Next {}",
+            "type Next = u8;",
+            "const NEXT: u8 = 0;",
+            "static NEXT: u8 = 0;",
+            "impl Item { fn method() {} }",
+            "use self::Item as Alias;",
+            "extern \"C\" { fn next(); }",
+            "macro_rules! next { () => { fn invented() {} } }",
+        ] {
+            let source = format!("{header} {following}");
+            r.commit_file("source.rs", &source);
+            match extract(&r, &contract(&r)) {
+                Err(ExtractionError::InvalidRust | ExtractionError::UnsupportedSyntax) => {}
+                other => failures.push(format!("{source}: {other:?}")),
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "borrowed subsequent items:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn repair2_impl_types_and_weak_union_names_preserve_real_item_boundaries() {
+    let r = Repo::new();
+    // These are lexical signature controls; opaque return expressions and type
+    // bounds are not checked by a compiler or semantic resolver here.
+    for source in [
+        "fn f() -> impl Trait {} fn after() {}",
+        "fn f<T>() -> impl Iterator<Item = T> where T: Clone {} fn after() {}",
+        "fn f() -> impl Fn() -> usize {} fn after() {}",
+        "struct union; fn f() -> union {} fn after() {}",
+        "struct union<T> { f: T } fn f() -> union<u8> {} fn after() {}",
+        "union U { field: u8 } fn after() {}",
+        "struct Item; impl Item { fn method() {} } fn after() {}",
+        "fn f() -> &impl Trait {} fn after() {}",
+        "fn f() -> &'static mut impl Trait {} fn after() {}",
+        "fn f() -> Result<impl Trait, Error> {} fn after() {}",
+        "struct union; impl union { fn method() {} } fn after() {}",
+        "trait union {} fn f<T>() -> impl union where T: union {} fn after() {}",
+        "struct union; fn f() -> (union,) {} fn after() {}",
+        "struct union; fn f() -> [union; 4] {} fn after() {}",
+    ] {
+        r.commit_file("source.rs", source);
+        let g = extract(&r, &contract(&r)).unwrap();
+        let after = loc("fn", "after", source.rfind("after").unwrap());
+        assert_eq!(span(&g, &after), b"after");
+        assert!(g.references().is_empty());
+        if source.contains("fn method()") {
+            assert!(
+                g.nodes()
+                    .iter()
+                    .any(|n| n.locator().starts_with("impl@") && n.locator().ends_with("/method"))
+            );
+        }
+        if source.starts_with("union U") {
+            assert_eq!(span(&g, &loc("union", "U", 6)), b"U");
+        }
+    }
+}

@@ -103,6 +103,12 @@ fn identifier(s: &str) -> bool {
             | "try"
     )
 }
+fn named_item(keyword: &str) -> bool {
+    matches!(
+        keyword,
+        "mod" | "fn" | "struct" | "enum" | "union" | "trait" | "type" | "const" | "static"
+    )
+}
 impl Parser<'_> {
     fn text(&self, i: usize) -> &str {
         self.tokens.get(i).map_or("", |t| t.text)
@@ -236,38 +242,56 @@ impl Parser<'_> {
         }
         Ok(i)
     }
+    // The same finite named-item catalog drives dispatch and header refusal.
+    // Special forms distinguish item starts from opaque type/signature tokens.
+    fn header_item_boundary(&self, i: usize, angles: usize, type_start: bool) -> bool {
+        let next_word = self.tokens.get(i + 1).is_some_and(|t| t.kind == Kind::Word);
+        match self.text(i) {
+            "fn" => next_word, // A bare `fn(...)` is a type, not a named item.
+            "union" => next_word && identifier(self.text(i + 1)), // Weak keyword.
+            "impl" => angles == 0 && !type_start,
+            "static" => i == 0 || self.text(i - 1) != "'",
+            "const" => angles == 0 && (i == 0 || self.text(i - 1) != "~") && next_word,
+            "extern" => {
+                matches!(self.text(i + 1), "{" | "crate")
+                    || (self
+                        .tokens
+                        .get(i + 1)
+                        .is_some_and(|t| t.kind == Kind::Literal)
+                        && self.text(i + 2) == "{")
+            }
+            "macro_rules" => {
+                self.text(i + 1) == "!"
+                    && self.tokens.get(i + 2).is_some_and(|t| t.kind == Kind::Word)
+            }
+            "use" | "macro" | "pub" => true,
+            keyword => named_item(keyword),
+        }
+    }
     // Scan a signature/item tail without mistaking nested parameter/const-generic
     // syntax for a new declaration. Expression/type semantics deliberately stay opaque.
     fn terminator(&self, mut i: usize, end: usize) -> Result<usize, E> {
         let mut angles = 0usize;
+        let mut type_start = false;
         while i < end {
+            if self.header_item_boundary(i, angles, type_start) {
+                return Err(E::InvalidRust);
+            }
+            if angles == 0 {
+                if self.text(i) == ">" && i > 0 && self.text(i - 1) == "-" {
+                    type_start = true;
+                } else if matches!(self.text(i), "<" | "(" | "[")
+                    || self.tokens[i].kind == Kind::Literal
+                    || (self.tokens[i].kind == Kind::Word
+                        && (i == 0 || self.text(i - 1) != "'")
+                        && !matches!(self.text(i), "mut" | "const"))
+                {
+                    // References/lifetimes may precede an opaque impl type.
+                    // A consumed type atom/group/impl keyword ends that slot.
+                    type_start = false;
+                }
+            }
             match self.text(i) {
-                // A named function is a new item, whereas bare `fn(...)` may
-                // belong to an opaque return type or generic/where bound.
-                "fn" if self.tokens.get(i + 1).is_some_and(|t| t.kind == Kind::Word) => {
-                    return Err(E::InvalidRust);
-                }
-                "use" | "mod" | "struct" | "enum" | "trait" | "type" | "macro" | "pub" => {
-                    return Err(E::InvalidRust);
-                }
-                "extern"
-                    if matches!(self.text(i + 1), "{" | "crate")
-                        || (self
-                            .tokens
-                            .get(i + 1)
-                            .is_some_and(|t| t.kind == Kind::Literal)
-                            && self.text(i + 2) == "{") =>
-                {
-                    return Err(E::InvalidRust);
-                }
-                "static" if i == 0 || self.text(i - 1) != "'" => return Err(E::InvalidRust),
-                "const"
-                    if angles == 0
-                        && (i == 0 || self.text(i - 1) != "~")
-                        && self.tokens.get(i + 1).is_some_and(|t| t.kind == Kind::Word) =>
-                {
-                    return Err(E::InvalidRust);
-                }
                 "(" | "[" => i = self.tokens[i].close + 1,
                 "<" => {
                     angles += 1;
@@ -577,10 +601,8 @@ impl Parser<'_> {
                 i = close + 1;
                 continue;
             }
-            if matches!(
-                kind.as_str(),
-                "mod" | "fn" | "struct" | "enum" | "union" | "trait" | "type" | "const" | "static"
-            ) && !(context == Context::Block && kind == "const" && self.text(i + 1) == "{")
+            if named_item(&kind)
+                && !(context == Context::Block && kind == "const" && self.text(i + 1) == "{")
             {
                 let at = i + 1 + usize::from(kind == "static" && self.text(i + 1) == "mut");
                 let d = self.declaration(scope, &kind, at, false)?;

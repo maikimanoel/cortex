@@ -61,6 +61,9 @@ operation. Arbitrary semantic or expression errors are not diagnosed by this ada
 Function/aggregate header scanning refuses recognizable subsequent named items or
 imports instead of borrowing their body or semicolon. Bare `fn(...)` return types,
 qualified types and generic/where delimiters remain opaque signature material.
+A shared finite named-item catalog drives dispatch and header refusal. Named
+`union` declarations are distinguished from weak-keyword `union` types; `impl`
+at an opaque return-type start or within generic types remains type material.
 Unsupported `macro name...` syntax refuses in traversed blocks; its body is never
 visited as ordinary code. Supported `macro_rules!` and invocation trees stay opaque.
 
