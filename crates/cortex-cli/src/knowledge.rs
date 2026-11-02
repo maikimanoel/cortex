@@ -18,6 +18,8 @@
 //! }
 //! ```
 
+/// Bounded committed Cargo TOML declarations and lexical feature references.
+pub mod cargo_manifest;
 mod json;
 /// Bounded candidate-bound native Markdown heading/link extraction.
 pub mod markdown;
