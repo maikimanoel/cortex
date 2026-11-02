@@ -588,3 +588,176 @@ fn multiline_commented_use_spans_retain_original_utf8_trivia_without_fake_occurr
     assert!(matches!(reference.target(), ReferenceTarget::Local(_)));
     assert!(g.nodes().iter().all(|n| !n.locator().contains("fake")));
 }
+
+#[test]
+fn repair_incomplete_function_cannot_consume_following_item() {
+    let r = Repo::new();
+    for source in [
+        "struct Item; fn broken() fn next() { use self::Item as Alias; }",
+        "fn broken() pub unsafe fn next() {}",
+        "fn broken() -> fn() fn next() {}",
+        "fn broken<T>() where T: Send fn next() {}",
+        "fn broken() mod next { fn nested() {} }",
+        "fn broken() struct Next;",
+        "fn broken() extern \"C\" { fn next(); }",
+        "fn broken() extern crate missing;",
+        "fn broken() const NEXT: usize = 0;",
+        "fn broken() static NEXT: usize = 0;",
+    ] {
+        r.commit_file("source.rs", source);
+        let before = snapshot(&r);
+        assert!(
+            matches!(
+                extract(&r, &contract(&r)),
+                Err(ExtractionError::InvalidRust | ExtractionError::UnsupportedSyntax)
+            ),
+            "accepted a subsequent item as the missing body: {source}"
+        );
+        assert_eq!(snapshot(&r), before);
+    }
+}
+
+#[test]
+fn repair_missing_function_body_cannot_swallow_use() {
+    let r = Repo::new();
+    r.commit_file("source.rs", "fn broken() use self::Missing as Alias;");
+    assert!(matches!(
+        extract(&r, &contract(&r)),
+        Err(ExtractionError::InvalidRust | ExtractionError::UnsupportedSyntax)
+    ));
+}
+
+#[test]
+fn repair_generic_struct_header_cannot_consume_function() {
+    let r = Repo::new();
+    for source in [
+        "struct Broken<T> fn swallowed() {}",
+        "struct Broken<T> where T: Send fn swallowed() {}",
+        "trait Broken<T> fn swallowed() {}",
+        "impl Broken fn swallowed() {}",
+    ] {
+        r.commit_file("source.rs", source);
+        assert!(
+            matches!(
+                extract(&r, &contract(&r)),
+                Err(ExtractionError::InvalidRust | ExtractionError::UnsupportedSyntax)
+            ),
+            "accepted a subsequent function as the missing body: {source}"
+        );
+    }
+}
+
+#[test]
+fn repair_unsupported_local_macro_refuses_without_expansion() {
+    let r = Repo::new();
+    for source in [
+        "fn f() { macro future() { fn invented() {} } }",
+        "struct Item; fn f() { macro future() { use self::Item as Alias; } }",
+        "fn f() { { macro future() { fn invented() {} } } }",
+        "fn f() { let _ = (macro future() { fn invented() {} }); }",
+        "fn f() { let _ = 0; macro future() { fn invented() {} } }",
+        "fn f() { let _ = [0, macro future() { fn invented() {} }]; }",
+    ] {
+        r.commit_file("source.rs", source);
+        assert!(
+            matches!(
+                extract(&r, &contract(&r)),
+                Err(ExtractionError::UnsupportedSyntax)
+            ),
+            "traversed an unsupported macro item: {source}"
+        );
+    }
+}
+
+#[test]
+fn repair_signature_type_neighbors_keep_item_boundaries() {
+    let r = Repo::new();
+    // Function-pointer and generic/where forms are neighboring lexical fixtures,
+    // not claims that opaque return expressions satisfy Rust types.
+    for item in [
+        "fn f() -> fn() {}",
+        "fn f() -> unsafe extern \"C\" fn() {}",
+        "fn f<'a, T: Fn() -> usize>(v: &'a T) -> impl Fn() -> usize where T: Send {}",
+        "struct S<T> where T: Fn() -> usize { f: T }",
+        "struct S<const N: usize = { 1 }>;",
+        "fn f<const N: usize, T: Trait<{ 1 }>>() {}",
+        "fn f() -> for<'a> unsafe extern \"C\" fn(&'a str) -> usize {}",
+        "fn f<T>() -> <T as Trait>::Output where T: Trait {}",
+        "fn f() -> &'static dyn Trait {}",
+        "struct S<T: Trait<Item = fn()>> where T: Fn() -> usize { f: T }",
+        "fn f() -> extern fn() {}",
+        "struct S<T> where T: ~const Trait { f: T }",
+    ] {
+        let source = format!("{item} fn after() {{}}");
+        r.commit_file("source.rs", &source);
+        let g = extract(&r, &contract(&r)).unwrap();
+        let after = loc("fn", "after", source.rfind("after").unwrap());
+        assert_eq!(span(&g, &after), b"after");
+        assert_eq!(g.nodes().len(), 3, "invented or swallowed an item: {item}");
+        assert!(g.references().is_empty());
+    }
+    let source =
+        "struct Item; fn f() -> fn() { fn nested() {} use self::Item as Alias; } fn after() {}";
+    r.commit_file("source.rs", source);
+    let g = extract(&r, &contract(&r)).unwrap();
+    let f = loc("fn", "f", source.find("f()").unwrap());
+    let nested = format!(
+        "{f}/{}",
+        loc("fn", "nested", source.find("nested").unwrap())
+    );
+    let occurrence = format!(
+        "{f}/{}",
+        loc("use", "Alias", source.find("self::").unwrap())
+    );
+    assert_eq!(span(&g, &nested), b"nested");
+    assert_eq!(span(&g, &occurrence), b"self::Item as Alias");
+    assert_eq!(g.references().len(), 1);
+    assert!(matches!(
+        g.references()[0].target(),
+        ReferenceTarget::Local(_)
+    ));
+}
+
+#[test]
+fn repair_macro_and_ordinary_block_neighbors_retain_only_observed_items() {
+    let r = Repo::new();
+    for (body, count) in [
+        (
+            "macro_rules! local { () => { macro future() { fn invented() {} } } } local!(); use self::Item as Alias; fn nested() {}",
+            3,
+        ),
+        ("println!{} use self::Item as Alias; fn nested() {}", 2),
+        (
+            "let _ = opaque!(); use self::Item as Alias; fn nested() {}",
+            2,
+        ),
+        (
+            "let _ = (if true { use self::Item as Alias; fn nested() {} 0 } else { 1 });",
+            1,
+        ),
+        (
+            "let _ = async { 1 }; use self::Item as Alias; fn nested() {}",
+            1,
+        ),
+        (
+            "const TEXT: &str = r#\"macro future() { fn invented() {} }\"#; /* macro future() { fn invented() {} } */ use self::Item as Alias; fn nested() {}",
+            1,
+        ),
+        (
+            "let r#macro = 0; use self::Item as Alias; fn nested() {}",
+            1,
+        ),
+    ] {
+        let source = format!("struct Item; fn f() {{ {body} }}");
+        r.commit_file("source.rs", &source);
+        let g = extract(&r, &contract(&r)).unwrap();
+        assert_eq!(g.references().len(), count);
+        assert!(g.nodes().iter().any(|n| n.locator().ends_with("/nested")));
+        assert!(g.nodes().iter().all(|n| !n.locator().contains("invented")));
+        assert!(
+            g.references()
+                .iter()
+                .any(|r| r.spelling() == "self::Item as Alias")
+        );
+    }
+}

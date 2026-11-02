@@ -242,6 +242,32 @@ impl Parser<'_> {
         let mut angles = 0usize;
         while i < end {
             match self.text(i) {
+                // A named function is a new item, whereas bare `fn(...)` may
+                // belong to an opaque return type or generic/where bound.
+                "fn" if self.tokens.get(i + 1).is_some_and(|t| t.kind == Kind::Word) => {
+                    return Err(E::InvalidRust);
+                }
+                "use" | "mod" | "struct" | "enum" | "trait" | "type" | "macro" | "pub" => {
+                    return Err(E::InvalidRust);
+                }
+                "extern"
+                    if matches!(self.text(i + 1), "{" | "crate")
+                        || (self
+                            .tokens
+                            .get(i + 1)
+                            .is_some_and(|t| t.kind == Kind::Literal)
+                            && self.text(i + 2) == "{") =>
+                {
+                    return Err(E::InvalidRust);
+                }
+                "static" if i == 0 || self.text(i - 1) != "'" => return Err(E::InvalidRust),
+                "const"
+                    if angles == 0
+                        && (i == 0 || self.text(i - 1) != "~")
+                        && self.tokens.get(i + 1).is_some_and(|t| t.kind == Kind::Word) =>
+                {
+                    return Err(E::InvalidRust);
+                }
                 "(" | "[" => i = self.tokens[i].close + 1,
                 "<" => {
                     angles += 1;
@@ -428,6 +454,11 @@ impl Parser<'_> {
             if let Some(next) = self.macro_at(i, end, scope)? {
                 i = next;
                 continue;
+            }
+            // Unsupported macro items must not reach the expression fallback:
+            // their token bodies are not ordinary blocks containing observed items.
+            if self.text(i) == "macro" {
+                return Err(E::UnsupportedSyntax);
             }
             if context == Context::Block && !statement_start {
                 if self.text(i) == "{" {

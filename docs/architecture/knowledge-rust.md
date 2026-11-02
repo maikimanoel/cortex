@@ -58,6 +58,11 @@ are opaque, not claimed as extracted symbols, references or validated Rust synta
 Macros in opaque fields/signatures/variants are outside occurrence coverage.
 Unknown item forms and malformed/truncated supported structure refuse the whole
 operation. Arbitrary semantic or expression errors are not diagnosed by this adapter.
+Function/aggregate header scanning refuses recognizable subsequent named items or
+imports instead of borrowing their body or semicolon. Bare `fn(...)` return types,
+qualified types and generic/where delimiters remain opaque signature material.
+Unsupported `macro name...` syntax refuses in traversed blocks; its body is never
+visited as ordinary code. Supported `macro_rules!` and invocation trees stay opaque.
 
 The root locator is empty. A declaration/occurrence locator is
 `scope/kind@OOOOOO/name`, without an initial slash; `OOOOOO` is a six-digit original
