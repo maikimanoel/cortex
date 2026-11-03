@@ -1187,6 +1187,15 @@ the prompt at the real enforcement
 boundary. Unsupported translation or absent optional integrations must fail
 diagnostically or use an explicitly permitted complete baseline path.
 
+Optional executor-specific instruction bridges and thin instructional skills
+provide bounded discovery/translation of native contracts and actually delivered
+capabilities. They are not a separate method store, mandatory installation or
+authority source. Native CLI is primary; later optional Rust-native MCP preserves
+the same domain/evidence semantics under CAP-HRN-002. Using these surfaces must not
+require copying a complete methodology into every prompt. Instruction delivery
+cannot guarantee executor adherence or effective host isolation. Persistent bridge
+changes use CAP-CLI-004's operator-review boundary.
+
 **Advanced properties:** Observable compatibility without prompt-based authority
 and exact compiler/adapter version references (INV-001/004/008/010/011).
 
@@ -1195,7 +1204,10 @@ translation; one lacking required semantics is rejected before invocation.
 An exported prompt/package cannot authorize extra tools. A manually transferred
 package supports snapshot reasoning without a connector; changed project/candidate
 or freshness dependencies prevent current/live verification claims. Tampered or
-privacy-incompatible packages are rejected. **Verification:** NOT_RUN;
+privacy-incompatible packages are rejected. Optional bridge/skill/protocol output
+preserves the exact native contract/version, evidence limits and unsupported
+capabilities without creating permission or claiming an unavailable implementation.
+**Verification:** NOT_RUN;
 translation conformance, package integrity and actual adapter compatibility cases.
 **Decisions:** DEC-006/007; no universal instruction format promised.
 
@@ -1310,12 +1322,31 @@ outputs, typed error semantics, bounded operations, portable explicit configurat
 and reliable exits. Invalid or incompatible configuration cannot silently expand
 authority or select an optional provider.
 
+For optional external-project assisted use in 004-E, provide a read-only preflight
+of the selected repository/candidate, installed Cortex availability, actual
+executor/adapter version and capabilities, missing prerequisites and exact proposed
+settings/file edits. Preflight neither launches an executor nor writes or uploads
+data. A persistent instruction/configuration bridge needs operator review of its
+specific changes, narrowly declared ownership and a reversible removal path.
+Never silently replace an existing `AGENTS.md` or equivalent, change global
+credentials, or require a large instructional prompt. Preserve unrelated content;
+if later operator edits prevent safe reversal, diagnose the conflict rather than
+overwrite them. Association syntax, file layout and consent/compatibility policies
+remain open under DEC-004/006/007. The operator launches an external CLI normally;
+querying Cortex does not imply that process is governed by Cortex's harness.
+
 **Advanced properties:** Consistent candidate/time/validity semantics across all
 surfaces and observed host/adapter compatibility (INV-001/004/005/010/011).
 
 **Acceptance:** Export/import context and handoffs retain meaning; diagnostics
 show stale/blocked state and limitations. Inspecting workflow/skill definitions
 has no effects. Execution uses the same policy boundary as all other callers.
+Preflight is non-effectful; bridge setup leaves existing instructions/configuration
+unchanged without approval. Approved removal preserves unrelated content and reports
+reversal conflicts.
+A missing Cortex/executor binary or unsupported client yields diagnostics and a
+supported manual fallback, with no hidden write, upload or claimed compatibility.
+With optional integration absent, the supported local baseline still works.
 **Verification:** NOT_RUN; CLI integration and actual supported-host/configuration
 tests. **Decisions:** DEC-005/006/007; no complete command tree selected now.
 

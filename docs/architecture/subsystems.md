@@ -120,6 +120,14 @@ controls and preserve evidence on tool failure or exhaustion. Backends report
 their real guarantees. Local/external agents and optional MCP enter through this
 same boundary. Output is lower-trust observation/proposal data, not a new grant.
 
+An operator-started external coding CLI may query delivered Cortex capabilities
+through CLI/context surfaces without becoming Cortex-initiated execution. Those
+owners present the optional preflight/bridge contract in
+[CAP-CLI-004](../product/capability-catalog.md#cap-cli-004), using actual adapter
+capability observations from this subsystem. A query or instruction bridge does
+not place that external process under Cortex host enforcement. Cortex-initiated
+dispatch still requires the governed boundary above.
+
 ## Evolution governance
 
 Owns separately identified change proposals, impact/evaluation plans, dispositions,
