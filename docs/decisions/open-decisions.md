@@ -114,6 +114,13 @@ settles neither its executable version/capability contract nor supported denial,
 process cleanup, resource, privacy or host guarantees. DEC-006 remains OPEN for
 those prerequisites; no provider interchangeability or executor is implemented.
 
+Before the first external-project assisted adapter in 004-E, decide its observed
+executable/version discovery, compatibility and capability-negotiation contract,
+including missing-binary/unsupported-client diagnostics and manual fallback.
+Distinguish operator-started assisted queries from Cortex-initiated governed
+execution; neither an instruction bridge nor MCP proves host enforcement. This
+does not extend the selected parallel executor's scope or claim current support.
+
 ## DEC-007
 
 **Storage, graph backends, formats, and API compatibility.** Choose persisted
@@ -134,6 +141,15 @@ and operation-specific retry/reconciliation semantics for CAP-WFL-001, linked to
 actual harness dispatch and applicable Core authority. Prefer a bounded local-first
 contract before considering distributed coordination. The scoped resolutions below select only their actual consumers; future graph,
 transport and workspace formats remain open. Lifecycle requirements are not a schema.
+
+Before a persistent external-project bridge under CAP-CLI-004/CAP-CTX-002 in 004-E,
+decide project association identity/location, configuration precedence, consent
+scope, coexistence with existing instruction files, ownership/removal and conflict
+handling, and revalidation after project/client/configuration changes. Link any
+retention/disclosure choices to DEC-004 and observed compatibility to DEC-006.
+No command syntax, project manifest, bootstrap text, file layout, MCP interface or
+retention default is selected here. These remain owner-review decisions before
+their dependent implementation; no bridge or adapter is delivered by this record.
 
 **002-C scoped resolution:** The [evidence contract](../architecture/unified-evidence.md#identity-provenance-and-time)
 retains exact existing task/revision/candidate/capture identities, a separate

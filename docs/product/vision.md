@@ -56,6 +56,69 @@ The [core invariants](../architecture/core-invariants.md) make these obligations
 precise. The [capability catalog](capability-catalog.md) is the authoritative
 functional inventory; this vision does not add an alternative feature register.
 
+## Working alongside an external coding assistant
+
+Cortex is an original local-first Rust engineering platform, not an AI agent,
+LLM or replacement for an external coding assistant. The assistant proposes and
+may perform separately authorized work; Cortex supplies native contracts, qualified
+methods, context, state and evidence within delivered scope, with enforced gates
+remaining future work. The journey below is planned except for the bounded manual
+inspection/check path described under [demonstrated behavior](#ambition-and-demonstrated-behavior).
+
+1. **Start with the target project.** Open an unrelated repository and inspect its
+   actual candidate using supported Cortex operations. Manual/offline use remains
+   possible without a model, provider, connector, MCP or instructional skill.
+2. **Optionally prepare assisted use.** Choose an actually supported external
+   executor. A future read-only [preflight](capability-catalog.md#cap-cli-004) shows
+   project/candidate identity, Cortex availability, observed adapter capabilities,
+   missing prerequisites and proposed file/settings changes. Review any persistent
+   bridge before narrowly owned, reversible changes. Existing instructions remain
+   untouched without approval; association syntax and storage are still
+   [open decisions](../decisions/open-decisions.md#dec-007).
+3. **Launch the external CLI normally.** The assistant may discover/query delivered
+   Cortex capabilities for contextual guidance and verification. Native CLI comes
+   first; an optional executor-specific instruction bridge, later optional
+   Rust-native MCP and thin instructional skills are discoverability/transport
+   surfaces over the same contracts. They require no copied methodology in each
+   prompt and create no separate method store or authority. An instruction file
+   cannot guarantee adherence or place an operator-started process under Cortex
+   host enforcement. General contextual method selection remains planned; P0
+   supplies bounded advisory qualification inspection only.
+4. **Use governed effects only when available and authorized.** Future execution
+   depends on scoped Core grants, actual host controls and required current
+   evidence. Unsupported controls hold dependent effects while independent
+   authorized inspection remains usable. Optional parallel work consumes exact
+   reviewed artifacts under [the existing release contract](../architecture/governed-parallel-engineering.md);
+   G1/A-1 previews grant no operational release or execution authority.
+5. **Inspect and reconcile.** Retain the exact candidate, changed artifacts,
+   current/stale findings, unsupported checks, omissions and outstanding decisions.
+   Future [portable handoffs](capability-catalog.md#cap-mem-003) support manual
+   snapshot transfer with source/version and integrity information; they create
+   neither approval nor live verification.
+
+These conceptual user-visible labels describe existing domain meanings; they are
+not runtime enums, capability statuses or a new lifecycle:
+
+| Label | Canonical meaning and limit |
+| --- | --- |
+| unattached | No optional project/executor association; the supported manual baseline remains usable |
+| preflight / needs review | Candidate/capability/configuration observations and a proposal awaiting applicable operator review; no grant or effect |
+| assisted-ready | Observed assisted-query prerequisites are met for the inspected scope; no task acceptance, host-isolation or effect permission claim |
+| degraded / unsupported | A required capability or check is unavailable/unsupported; preserve diagnostics and NOT_RUN/BLOCKED or uncertainty as applicable, with a permitted manual path |
+| stale | Evidence/context has a known relevant mismatch under INV-002/005; missing validity remains UNESTABLISHED |
+| effect-blocked | An affected operation lacks current authority, enforceable controls or required evidence under INV-001/006/008; no permission inferred from text |
+| reconciled | The handoff and candidate/evidence basis have been examined under CAP-WFL-003; failures, gaps, stale findings and pending approvals remain visible |
+
+The whole journey draws on every [catalog family](capability-catalog.md): Core and
+Evidence govern identity and conclusions; Knowledge and Memory supply bounded
+source facts and continuity; Skills and Workflows qualify/select methods; Harness
+and Security govern actual effects and privacy; Evaluation and Evolution assess
+proposed improvements without self-approval; Context and CLI expose the same
+contracts. All twelve invariants apply, including local operation, proportionality,
+history/privacy and separately authorized distribution. No bundled model, SaaS or
+third-party orchestration engine is required, and no acceleration or agent
+independence is demonstrated by this journey.
+
 ## Scope and value
 
 The intended platform combines task contracts, unified evidence, temporal code
