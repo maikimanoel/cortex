@@ -6,6 +6,9 @@
 /// Advisory exact method qualification; no adoption, execution or authority.
 pub mod methods;
 
+/// Evidence-backed, replayable non-effectful program coordination.
+pub mod program;
+
 /// Advisory support for exact G1 dependency predicates, without release authority.
 pub mod readiness;
 /// Candidate-bound evidence with independent result, applicability and validity.

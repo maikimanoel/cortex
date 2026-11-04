@@ -17,6 +17,9 @@ pub mod parallel;
 /// Immutable method definitions and bounded exact inspection; no execution or authority.
 pub mod methods;
 
+/// Bounded metadata-only program coordination contracts.
+pub mod program;
+
 use std::{error::Error, fmt};
 
 /// Maximum task identifier size in UTF-8 bytes (identifiers are ASCII).

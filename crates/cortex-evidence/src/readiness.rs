@@ -208,6 +208,15 @@ impl EdgeScopeSnapshot {
             cursor: projection.notifications().len(),
         })
     }
+    /// Restore an earlier informational cursor after reconstructing the same
+    /// semantic scope. This cannot change the graph, artifact or mission scopes.
+    pub fn with_historical_cursor(mut self, cursor: usize) -> Result<Self, SupportInputError> {
+        if cursor > self.cursor {
+            return Err(SupportInputError::ContextChanged);
+        }
+        self.cursor = cursor;
+        Ok(self)
+    }
     /// Exact graph identity and revision.
     pub fn graph(&self) -> &GraphReference {
         &self.graph
