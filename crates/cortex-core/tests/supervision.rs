@@ -427,6 +427,74 @@ fn finite_process_shape_rejects_relative_paths_null_arguments_and_unbounded_limi
         assert!(bad.validate(state.definition().limits()).is_err());
     }
 }
+
+#[test]
+fn optional_transport_has_explicit_finite_limits_without_changing_legacy_shape() {
+    let (state, _, scope) = setup();
+    let mut s = spec(&scope);
+    assert!(s.limits.transport.is_none());
+    s.limits.transport = Some(TransportLimits {
+        startup_ms: 200,
+        idle_ms: 100,
+        stdout_bytes: 900,
+        stderr_bytes: 100,
+        records: 8,
+        buffer_bytes: 8302, // exact input + frame + read scratch
+    });
+    s.validate(state.definition().limits()).unwrap();
+    for change in 0..9 {
+        let mut bad = s.clone();
+        let t = bad.limits.transport.as_mut().unwrap();
+        match change {
+            0 => t.startup_ms = 0,
+            1 => t.startup_ms = 1001,
+            2 => t.idle_ms = 0,
+            3 => t.idle_ms = 1001,
+            4 => t.stdout_bytes = 0,
+            5 => t.stdout_bytes = 1001,
+            6 => t.stderr_bytes = 1001,
+            7 => t.records = 0,
+            _ => t.buffer_bytes = 8301,
+        }
+        assert!(bad.validate(state.definition().limits()).is_err());
+    }
+    s.limits.transport.as_mut().unwrap().stderr_bytes = 0;
+    s.validate(state.definition().limits()).unwrap();
+}
+
+#[test]
+fn supplied_exit_zero_does_not_override_transport_count_or_startup_obligations() {
+    let (_, _, scope) = setup();
+    let mut s = spec(&scope);
+    s.limits.transport = Some(TransportLimits {
+        startup_ms: 200,
+        idle_ms: 100,
+        stdout_bytes: 3,
+        stderr_bytes: 0,
+        records: 1,
+        buffer_bytes: 8302,
+    });
+    let valid = observation(
+        &scope,
+        1,
+        ProcessCompletion::Exited {
+            code: Some(0),
+            signal: None,
+        },
+        Quiescence::DirectChildReapedStreamsClosed,
+    );
+    assert_eq!(valid.outcome(&s), Some(EffectOutcome::Succeeded));
+    for change in 0..4 {
+        let mut false_success = valid.clone();
+        match change {
+            0 => false_success.stdout_bytes = 4,
+            1 => false_success.stderr_bytes = 1,
+            2 => false_success.structured_records = 0,
+            _ => false_success.structured_records = 2,
+        }
+        assert_eq!(false_success.outcome(&s), Some(EffectOutcome::Failed));
+    }
+}
 #[test]
 fn supervised_replay_retains_process_identity_without_creating_a_launch_or_clock_origin() {
     let (state, mut p, s) = setup();

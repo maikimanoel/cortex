@@ -5,6 +5,9 @@
 //! and supports no AI provider, hostile executor or process-tree isolation.
 
 #[cfg(target_os = "linux")]
+pub mod host_preflight;
+
+#[cfg(target_os = "linux")]
 mod supervisor;
 #[cfg(target_os = "linux")]
 pub use supervisor::{

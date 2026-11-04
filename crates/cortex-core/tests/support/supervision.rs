@@ -114,6 +114,7 @@ pub fn spec(scope: &EffectScope) -> ProcessSpec {
             executable_bytes: 1_000_000,
             arguments: 2,
             argument_bytes: 50,
+            transport: None,
         },
     }
 }

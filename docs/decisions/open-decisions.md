@@ -90,6 +90,20 @@ and applicable host qualification remain unresolved for their actual consumers.
 The [roadmap exception](../product/roadmap.md#gpe-b-stage-2b-sequencing-exception)
 does not complete any broader milestone or capability.
 
+## GPE-B provider-free host campaign scoped authorization
+
+The separately authorized [provider-free host campaign](../architecture/host-qualification.md)
+selects finite private qualification limits and owned synthetic inputs only.
+DEC-004 permits bounded private evidence with manual retention and no real
+credentials, sessions or provider disclosure. DEC-005 separates those selected
+trial limits from live budgets and requires actual enforcement/reserves. DEC-006
+permits read-only preflight and only safely contained provider-free probes; missing
+delegation cannot be repaired through escalation or host-wide policy changes.
+DEC-007 retains one journal and the explicit optional transport extension with
+old-record compatibility and old-reader refusal. DEC-012 requires independent
+technical acceptance and grants no protected merge or live execution authority.
+These scoped choices close none of the broader live or milestone decisions.
+
 ## DEC-001
 
 **Open-source license — resolved by the owner.** Cortex uses the standard

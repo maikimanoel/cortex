@@ -27,6 +27,30 @@ pub struct ProcessLimits {
     pub arguments: usize,
     /// Maximum aggregate argument UTF-8 bytes; zero permits only empty arguments.
     pub argument_bytes: usize,
+    /// Optional exact transport extension. Absence retains the original combined
+    /// output/wall-only fixture contract, without selecting new implicit limits.
+    pub transport: Option<TransportLimits>,
+}
+/// Additional fixture transport limits, included in the immutable process spec.
+/// These are cooperative supervisor controls, not host CPU/RSS or kernel-queue
+/// quotas. No default values are selected by this type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransportLimits {
+    /// Dispatch-to-first-valid-stdout-record deadline, inside the wall deadline.
+    pub startup_ms: u64,
+    /// Maximum interval without actual input/output byte progress, inside wall.
+    pub idle_ms: u64,
+    /// Independent captured stdout byte ceiling, inside the combined ceiling.
+    pub stdout_bytes: u64,
+    /// Independent captured stderr byte ceiling; zero forbids captured stderr.
+    pub stderr_bytes: u64,
+    /// Maximum valid stdout JSON records, including a final record at EOF.
+    pub records: u64,
+    /// Maximum supervisor-owned input/frame/read-scratch bytes. This excludes
+    /// canonical journal reconstruction, executable pins, allocator metadata,
+    /// JSON parser nesting scratch/stack and kernel queues; it is not a
+    /// whole-process limit. Parser metadata remains bounded by the frame size.
+    pub buffer_bytes: u64,
 }
 /// Immutable exact process intent. Environment is cleared, shell/PATH expansion
 /// is unavailable, and stdin is the named unchanged prepared fixture package.
@@ -83,6 +107,20 @@ pub enum Quiescence {
 pub enum InterruptionReason {
     /// Explicit execution deadline expired.
     Timeout,
+    /// No complete valid stdout record was observed before startup deadline.
+    StartupTimeout,
+    /// No input/output byte progress was observed within the idle deadline.
+    IdleTimeout,
+    /// Captured stdout exceeded its independent byte ceiling.
+    StdoutLimit,
+    /// Captured stderr exceeded its independent byte ceiling.
+    StderrLimit,
+    /// An additional valid JSON record exceeded the explicit event ceiling.
+    EventLimit,
+    /// The explicit supervisor transport-buffer bound could not be honored.
+    BufferLimit,
+    /// The child ended without the required first valid stdout record.
+    StartupIncomplete,
     /// Explicit cancellation request was observed.
     Cancelled,
     /// Captured output reached or exceeded its bound.
@@ -174,6 +212,26 @@ impl ProcessSpec {
             || l.arguments > bounds.entries
             || l.argument_bytes > bounds.bytes
             || self.args.len() > l.arguments
+        {
+            return Err(ProgramError::Capacity);
+        }
+        if let Some(t) = &l.transport
+            && (t.startup_ms == 0
+                || t.startup_ms > l.wall_ms
+                || t.idle_ms == 0
+                || t.idle_ms > l.wall_ms
+                || t.stdout_bytes == 0
+                || t.stdout_bytes > l.output_bytes
+                || t.stderr_bytes > l.output_bytes
+                || t.records == 0
+                || t.records > bounds.entries as u64
+                || t.buffer_bytes == 0
+                || t.buffer_bytes > bounds.bytes as u64
+                || self
+                    .input_len
+                    .checked_add(l.frame_bytes)
+                    .and_then(|n| n.checked_add(8192))
+                    .is_none_or(|n| n > t.buffer_bytes))
         {
             return Err(ProgramError::Capacity);
         }
@@ -275,6 +333,14 @@ impl ProcessObservation {
                     .is_some_and(|n| n <= spec.limits.output_bytes)
                 && self.elapsed_ms <= spec.limits.wall_ms =>
             {
+                if spec.limits.transport.as_ref().is_some_and(|t| {
+                    self.stdout_bytes > t.stdout_bytes
+                        || self.stderr_bytes > t.stderr_bytes
+                        || self.structured_records == 0
+                        || self.structured_records > t.records
+                }) {
+                    return Some(EffectOutcome::Failed);
+                }
                 if self.quiescence == Quiescence::DirectChildReapedStreamsClosed {
                     Some(EffectOutcome::Succeeded)
                 } else {

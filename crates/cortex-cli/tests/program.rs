@@ -381,6 +381,52 @@ fn supervised_reported_fixture_input_is_visible_without_implying_acceptance() {
     assert_eq!(snapshot(&f), before);
 }
 #[test]
+fn extended_fixture_limits_are_inspectable_without_dispatch_or_store_mutation() {
+    use cortex_core::program::supervision::TransportLimits;
+    let f = Temp::new();
+    let (mut k, scope, mut spec) = supervised_fixture::configured_kernel(None);
+    spec.limits.transport = Some(TransportLimits {
+        startup_ms: 100,
+        idle_ms: 50,
+        stdout_bytes: 256,
+        stderr_bytes: 0,
+        records: 2,
+        buffer_bytes: spec.input_len + spec.limits.frame_bytes + 8192,
+    });
+    supervised_fixture::prepare(&mut k, &scope, &spec);
+    let s =
+        ProgramStore::create_supervised_fixture(&f.store(), &key(), k.initial().clone(), limits())
+            .unwrap();
+    for op in k.operations() {
+        s.admit(&key(), op.clone()).unwrap();
+    }
+    let before = snapshot(&f);
+    let mut c = command(&f);
+    c.arg("--json");
+    let result = run(c, &[0x57; 32]);
+    assert!(result.status.success());
+    let view: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    let effect = &view["supervised_projection"]["effects"][0];
+    assert_eq!(effect["dispatch_intent_durable"], false);
+    assert!(effect["observations"].as_array().unwrap().is_empty());
+    let limits = &effect["configured_process_limits"];
+    assert_eq!(limits["wall_ms"], spec.limits.wall_ms);
+    assert_eq!(limits["transport"]["startup_ms"], 100);
+    assert_eq!(limits["transport"]["idle_ms"], 50);
+    assert_eq!(limits["transport"]["stderr_bytes"], 0);
+    assert_eq!(limits["transport"]["records"], 2);
+    assert_eq!(
+        limits["enforcement_scope"],
+        "TRUSTED_FIXTURE_COOPERATIVE_TRANSPORT_NOT_HOST_ISOLATION"
+    );
+    assert_eq!(snapshot(&f), before);
+    assert_eq!(
+        s.load(&key(), Access::ReadOnly).unwrap().revision(),
+        k.revision()
+    );
+}
+
+#[test]
 fn wrong_key_program_and_short_or_long_key_are_safe_refusals() {
     let f = Temp::new();
     create(&f);

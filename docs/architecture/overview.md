@@ -17,7 +17,7 @@ The Cortex foundation contains these actual crates:
 | `cortex-evidence` | Legacy evidence plus unified result/applicability/validity, versioned context, redacted inspection and evidence-backed non-effectful program admission | `cortex-core` |
 | `cortex-storage` | Shared explicit encrypted lifecycle, compatible history and separate replayable program/Evidence codecs | Core/Evidence, existing JSON/SQLCipher bindings; OpenSSL 3 build prerequisite |
 | `cortex-harness` | Native supervision of explicitly granted trusted local process fixtures; no AI executor or isolation backend | Core/Evidence/Storage and existing JSON |
-| `cortex-cli` | Existing commands, Git/lexical knowledge acquisition, history facade and read-only program inspection | Core/Evidence/Storage and JSON; local Git/util-linux |
+| `cortex-cli` | Existing commands, Git/lexical knowledge acquisition, history facade and read-only program/host inspection | Core/Evidence/Storage/Harness and JSON; local Git/util-linux |
 
 The accepted [0001 foundation decision](0001-foundation.md) is authoritative for
 those bounded design choices. Rust 1.99.1, edition 2024,
@@ -66,6 +66,11 @@ serializes fresh dispatch with the existing journal, and Core/Evidence still own
 guards and state. Live AI execution, hostile isolation and protected integration
 remain unavailable. The new crate's actual consumers and alternatives are documented
 at that boundary; it creates no second scheduler, effect store or authority.
+
+The [provider-free host extension](host-qualification.md) adds bounded metadata
+inspection in Harness, consumed read-only by CLI (CLI -> Harness), and optional
+journal-bound transport limits. It activates no isolation backend and supplies no
+qualification token. Core/Evidence/Storage retain their existing owners.
 
 ## Logical areas and dependency direction
 

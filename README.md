@@ -94,6 +94,12 @@ bounded transport, cancellation and unknown-outcome records. Replay and CLI insp
 never launch work. This is a library development profile, not a live Codex adapter,
 sandbox or hard host resource guarantee. Live execution decisions remain pending.
 
+The bounded [host qualification extension](docs/architecture/host-qualification.md)
+adds `cortex host inspect [--json]` for causal read-only host prerequisites and
+explicit journal-bound startup, idle, stream, record and transfer-buffer limits
+for trusted fixtures. Metadata inspection never activates or qualifies a backend.
+Actual containment-dependent probes remain blocked when required controls are absent.
+
 The bounded [native method inspector](docs/architecture/engineering-methods.md#native-method-inspection-p0)
 adds immutable `cortex_core::methods` definitions and advisory
 `cortex_evidence::methods::inspect_method` qualification views. Its two unassessed
@@ -196,11 +202,12 @@ these are not sandbox or hard real-time guarantees.
 | `cortex-evidence` | Legacy reports plus unified candidate-bound result, applicability, validity, redacted inspection and evidence-backed program admission |
 | `cortex-storage` | Explicit encrypted history/program persistence, exact reconstruction and reconciliation |
 | `cortex-harness` | Store-gated native trusted process-fixture supervision and bounded observations |
-| `cortex-cli` | Existing commands, bounded Git/knowledge acquisition, history facade and read-only program inspection |
+| `cortex-cli` | Existing commands, bounded Git/knowledge acquisition, history facade, read-only program and host inspection |
 
 The production direction is CLI -> Storage -> Evidence -> Core, with consumers
 also using Core/Evidence directly.
 Harness consumes Storage/Evidence/Core and has no CLI dependency or separate journal.
+CLI consumes Harness's read-only host metadata API without exposing dispatch.
 The inspection
 adapter supplies actual observations to Core's binding boundary. Foundation
 `TaskContract`, `CandidateId` and evidence APIs retain their meanings. A binding

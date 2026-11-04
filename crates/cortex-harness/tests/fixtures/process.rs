@@ -15,6 +15,15 @@ fn main() {
         thread::sleep(Duration::from_millis(250));
         return;
     }
+    if mode == "prefill-output" {
+        // A finite owned fixture lets the guard regression observe queued bytes
+        // before supervision begins, without pressure or scheduler assumptions.
+        println!("{{}}");
+        std::io::stdout().flush().unwrap();
+        std::fs::write(args.next().unwrap(), b"queued").unwrap();
+        thread::sleep(Duration::from_millis(250));
+        return;
+    }
     let descendant_marker = if mode == "descendant" {
         let marker = args.next().unwrap();
         if let Some(ready) = args.next() {
@@ -62,6 +71,26 @@ fn main() {
         return;
     }
     match mode.as_str() {
+        "no-record" => {}
+        "one-record" => println!("{{}}"),
+        "two-records" => print!("{{}}\n{{}}\n"),
+        "two-eof-records" => print!("{{}}\n{{}}"),
+        "idle-after-record" => {
+            println!("{{}}");
+            std::io::stdout().flush().unwrap();
+            thread::sleep(Duration::from_millis(250));
+        }
+        "paced-records" => {
+            for _ in 0..4 {
+                println!("{{}}");
+                std::io::stdout().flush().unwrap();
+                thread::sleep(Duration::from_millis(20));
+            }
+        }
+        "delayed-record" => {
+            thread::sleep(Duration::from_millis(250));
+            println!("{{}}");
+        }
         "malformed" => print!("private-malformed-payload\n"),
         "partial" => print!("{{\"incomplete\":"),
         "eof-record" => print!("{{\"complete\":true}}"),

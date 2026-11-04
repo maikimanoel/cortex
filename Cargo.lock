@@ -24,6 +24,7 @@ version = "0.1.0"
 dependencies = [
  "cortex-core",
  "cortex-evidence",
+ "cortex-harness",
  "cortex-storage",
  "libc",
  "serde",

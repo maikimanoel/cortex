@@ -92,6 +92,14 @@ all 36 IDs remain unchanged. Live host/provider/resource decisions and protected
 integration remain gated; the [roadmap exception](roadmap.md#gpe-b-stage-2b-sequencing-exception)
 defines this bounded sequence.
 
+The separately authorized [provider-free host qualification extension](../architecture/host-qualification.md)
+adds bounded read-only host prerequisite acquisition and causal CLI diagnostics,
+plus optional durable transport deadlines and stream/record/buffer ceilings for
+trusted fixtures. It preserves the same authority/journal owners. Metadata is not
+denial evidence or delegation, and unavailable mandatory controls block dependent
+probes. Independent source verification and actual host qualification are separate;
+all capability IDs, ownership and full statuses remain unchanged.
+
 ## A. Core, task contracts, and operational authority
 
 ### CAP-CORE-001

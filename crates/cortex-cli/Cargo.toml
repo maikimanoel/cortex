@@ -17,6 +17,7 @@ cortex-evidence = { path = "../cortex-evidence" }
 serde_json = { version = "1.0.154", features = ["raw_value"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+cortex-harness = { path = "../cortex-harness" }
 cortex-storage = { path = "../cortex-storage" }
 serde = { version = "1.0.229", features = ["derive"] }
 zeroize = "1.9.0"
