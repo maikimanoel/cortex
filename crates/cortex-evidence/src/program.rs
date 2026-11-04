@@ -7,7 +7,8 @@
 
 use crate::{readiness::*, unified::*};
 use cortex_core::{
-    TaskId, binding::*, parallel::*, program::context::*, program::*, temporal::SourceReference,
+    TaskId, binding::*, parallel::*, program::context::*, program::operational::*, program::*,
+    temporal::SourceReference,
 };
 use std::{error::Error, fmt, time::SystemTime};
 
@@ -20,6 +21,10 @@ pub enum KernelError {
     Evidence(SemanticError),
     /// A-1 rejected malformed/context-incompatible support input.
     Support(SupportInputError),
+    /// Executor input preparation refused an exact contract.
+    Executor(cortex_core::program::executor::ExecutorError),
+    /// Controlled-fixture operational guards refused the input.
+    Operational(OperationalError),
 }
 impl fmt::Display for KernelError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -27,6 +32,8 @@ impl fmt::Display for KernelError {
             Self::Core(e) => e.fmt(f),
             Self::Evidence(e) => e.fmt(f),
             Self::Support(e) => e.fmt(f),
+            Self::Operational(e) => e.fmt(f),
+            Self::Executor(e) => e.fmt(f),
         }
     }
 }
@@ -36,6 +43,8 @@ impl Error for KernelError {
             Self::Core(e) => e,
             Self::Evidence(e) => e,
             Self::Support(e) => e,
+            Self::Operational(e) => e,
+            Self::Executor(e) => e,
         })
     }
 }
@@ -57,6 +66,17 @@ impl From<SemanticError> for KernelError {
 impl From<SupportInputError> for KernelError {
     fn from(e: SupportInputError) -> Self {
         Self::Support(e)
+    }
+}
+
+impl From<cortex_core::program::executor::ExecutorError> for KernelError {
+    fn from(e: cortex_core::program::executor::ExecutorError) -> Self {
+        Self::Executor(e)
+    }
+}
+impl From<OperationalError> for KernelError {
+    fn from(e: OperationalError) -> Self {
+        Self::Operational(e)
     }
 }
 
@@ -125,7 +145,21 @@ pub struct NonImpact {
     /// Explicit operator-supplied coverage/rationale reference.
     pub basis: SourceReference,
 }
-/// Canonical admitted command families. No external-effect command exists.
+/// Exact non-executing executor input preparation retained for reconstruction.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ExecutorInputRequest {
+    /// Exact stored package identity.
+    pub package: PackageId,
+    /// Exact stored package revision.
+    pub revision: ContractRevision,
+    /// Complete declared executor/host capability observations.
+    pub descriptor: cortex_core::program::executor::ExecutorDescriptor,
+    /// Complete mandatory control requirements.
+    pub requirements: cortex_core::program::executor::Requirements,
+    /// Explicit input byte bound, no greater than the program envelope.
+    pub max_bytes: usize,
+}
+/// Canonical admitted command families. No real external-effect command exists.
 #[derive(Clone, PartialEq, Eq)]
 pub enum Command {
     /// Informational G1 input; raw Review and Status are prohibited here.
@@ -178,6 +212,10 @@ pub enum Command {
     },
     /// Assemble and retain an exact non-effectful instruction package.
     Package(PackageRequest),
+    /// Controlled fixture input only; never dispatches or creates real authority.
+    FixtureEffect(Box<EffectEvent>),
+    /// Retain exact proposed transport input without submission or authority.
+    PrepareExecutorInput(Box<ExecutorInputRequest>),
 }
 /// Complete immutable input, including expected predecessor and local assertion.
 #[derive(Clone, PartialEq, Eq)]
@@ -234,6 +272,8 @@ pub struct CoordinationKernel {
     records: Vec<EvidenceRecord>,
     decisions: Vec<DependencyDecision>,
     packages: Vec<InstructionPackage>,
+    fixture_effects: OperationalProjection,
+    prepared_inputs: Vec<(OperationId, cortex_core::program::executor::PreparedInput)>,
 }
 impl CoordinationKernel {
     /// Create a kernel from a validated accepted initial baseline.
@@ -245,6 +285,8 @@ impl CoordinationKernel {
             records: vec![],
             decisions: vec![],
             packages: vec![],
+            fixture_effects: OperationalProjection::default(),
+            prepared_inputs: vec![],
         })
     }
     /// Initial immutable input, used for exact reconstruction.
@@ -270,6 +312,16 @@ impl CoordinationKernel {
     /// Exact assembled bytes and inputs.
     pub fn packages(&self) -> &[InstructionPackage] {
         &self.packages
+    }
+    /// Reconstructed controlled fixtures, separate from real effects and Evidence.
+    pub fn fixture_effects(&self) -> &OperationalProjection {
+        &self.fixture_effects
+    }
+    /// Retained exact transport preparations, identified by their journal operations.
+    pub fn prepared_inputs(
+        &self,
+    ) -> &[(OperationId, cortex_core::program::executor::PreparedInput)] {
+        &self.prepared_inputs
     }
     /// Current accepted operation count.
     pub fn revision(&self) -> u64 {
@@ -477,14 +529,24 @@ impl CoordinationKernel {
                 generation,
                 status,
                 basis,
-            } => self
-                .state
-                .reconcile_attempt(g, id, *generation, *status, basis.clone())?,
+            } => {
+                if self.fixture_effects.has_pending_attempt(id) && *status != AttemptStatus::Unknown
+                {
+                    return Err(ProgramError::Claimed.into());
+                }
+                self.state
+                    .reconcile_attempt(g, id, *generation, *status, basis.clone())?;
+            }
             Command::Handoff {
                 old,
                 recipient,
                 next,
-            } => self.state.handoff(g, recipient, old, next.clone())?,
+            } => {
+                if self.fixture_effects.has_pending_attempt(old) {
+                    return Err(ProgramError::Claimed.into());
+                }
+                self.state.handoff(g, recipient, old, next.clone())?;
+            }
             Command::Amend { next, non_impact } => {
                 let affected = self.state.amend(g, *next.clone())?;
                 let mut actual: Vec<_> = self
@@ -503,6 +565,39 @@ impl CoordinationKernel {
                     return Err(ProgramError::Structure.into());
                 }
             }
+            Command::FixtureEffect(event) => self.fixture_event(g, event)?,
+            Command::PrepareExecutorInput(request) => {
+                for (_, previous) in &self.prepared_inputs {
+                    if (previous.descriptor().reference() == request.descriptor.reference()
+                        && previous.descriptor() != &request.descriptor)
+                        || (previous.requirements().reference() == request.requirements.reference()
+                            && previous.requirements() != &request.requirements)
+                    {
+                        return Err(ProgramError::IdentityConflict.into());
+                    }
+                }
+                let package = self
+                    .packages
+                    .iter()
+                    .find(|p| {
+                        p.request().id == request.package
+                            && p.request().revision == request.revision
+                    })
+                    .ok_or(ProgramError::Missing)?;
+                self.check(
+                    g,
+                    CoordinationPermission::Plan,
+                    std::slice::from_ref(&package.request().mission),
+                )?;
+                let prepared = cortex_core::program::executor::prepare(
+                    &self.state,
+                    package,
+                    &request.descriptor,
+                    &request.requirements,
+                    request.max_bytes,
+                )?;
+                self.prepared_inputs.push((o.id.clone(), prepared));
+            }
             Command::Package(p) => {
                 self.check(
                     g,
@@ -515,6 +610,66 @@ impl CoordinationKernel {
                 self.packages.push(assemble(&self.state, p.clone())?);
             }
         }
+        Ok(())
+    }
+    fn fixture_event(
+        &mut self,
+        grant: &CoordinationGrant,
+        event: &EffectEvent,
+    ) -> Result<(), KernelError> {
+        let missions = match event {
+            EffectEvent::Policy(_) => self
+                .state
+                .definition()
+                .graph()
+                .missions()
+                .iter()
+                .map(|m| m.id().clone())
+                .collect(),
+            EffectEvent::Grant(g) => vec![g.scope.mission.clone()],
+            EffectEvent::Reserve { intent, .. } => vec![intent.scope.mission.clone()],
+            EffectEvent::Revoke { grant, .. } => vec![
+                self.fixture_effects
+                    .grants()
+                    .iter()
+                    .find(|g| &g.id == grant)
+                    .ok_or(ProgramError::Missing)?
+                    .scope
+                    .mission
+                    .clone(),
+            ],
+            EffectEvent::Dispatch { scope, .. }
+            | EffectEvent::Running { scope, .. }
+            | EffectEvent::Report { scope, .. }
+            | EffectEvent::Unknown { scope, .. }
+            | EffectEvent::Cancel { scope, .. }
+            | EffectEvent::Reconcile { scope, .. } => vec![scope.mission.clone()],
+        };
+        self.check(grant, CoordinationPermission::Review, &missions)?;
+        let scope = match event {
+            EffectEvent::Reserve { intent, .. } => Some(&intent.scope),
+            EffectEvent::Dispatch { scope, .. } => Some(scope),
+            _ => None,
+        };
+        if let Some(scope) = scope {
+            let package = self
+                .packages
+                .iter()
+                .find(|p| {
+                    p.request().id == scope.package
+                        && p.request().revision == scope.package_revision
+                })
+                .ok_or(ProgramError::Missing)?;
+            let request = package.request();
+            if request.mission != scope.mission
+                || request.baseline != scope.baseline
+                || request.generation != scope.generation
+            {
+                return Err(ProgramError::Stale.into());
+            }
+            package.check(&self.state, package.bytes())?;
+        }
+        self.fixture_effects.apply(&self.state, event.clone())?;
         Ok(())
     }
     // Recompute original support requests after explicit validity mutations. Only

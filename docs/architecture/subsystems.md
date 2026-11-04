@@ -119,6 +119,13 @@ The existing history facade delegates to Storage with unchanged format semantics
 Declared non-impact, package preparation and simulation remain explicit bounded
 inputs; no competing scheduler, knowledge index or method authority is created.
 
+Stage 2A's [fixture effect extension](operational-foundations.md) retains that same
+Workflow journal and Core guard ownership. Fixture reservations and cumulative
+usage have one projection owner; G1's advisory capacity does not become a second
+resource ledger. Executor descriptors and exact input preparations are non-executing
+contracts consumed through this kernel. Storage selects a distinct fixture profile,
+with no implicit mutation of metadata-only collections.
+
 ## Harness and controlled execution
 
 Owns the single boundary for Cortex-initiated agent execution, actual host controls,

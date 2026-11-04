@@ -16,7 +16,7 @@ use std::{
 };
 use zeroize::Zeroizing;
 
-const HELP: &str = "Usage: cortex program inspect --store <ABSOLUTE-PATH> --program <ID> --key-fd <N> --max-bytes <N> --read-timeout-ms <N> [--json]\n\nRead-only Stage 1 metadata inspection. The inherited descriptor supplies exactly\n32 raw key bytes and EOF. No key argument, default lookup, recovery or execution.\nDeadlines are cooperative on a responsive local Linux filesystem, not hard I/O\npreemption. No live Git recapture or verification is implied.\nExit codes: 0 inspected, 2 invalid arguments, 3 store/key/refusal, 1 output failure.\n";
+const HELP: &str = "Usage: cortex program inspect --store <ABSOLUTE-PATH> --program <ID> --key-fd <N> --max-bytes <N> --read-timeout-ms <N> [--json]\n\nRead-only program metadata and Stage 2A fixture inspection. The inherited descriptor supplies exactly\n32 raw key bytes and EOF. No key argument, default lookup, recovery or execution.\nDeadlines are cooperative on a responsive local Linux filesystem, not hard I/O\npreemption. No live Git recapture or verification is implied.\nExit codes: 0 inspected, 2 invalid arguments, 3 store/key/refusal, 1 output failure.\n";
 fn error(out: &mut impl Write, json_output: bool, kind: &str) -> Result<u8, io::Error> {
     if json_output {
         serde_json::to_writer(&mut *out,&json!({"schema":"cortex.program.v1","status":"REFUSED","reason":kind,"execution_authority":"UNAVAILABLE"})).map_err(io::Error::other)?;
@@ -88,7 +88,26 @@ fn view(k: &CoordinationKernel) -> Value {
     let streams:Vec<_>=d.workstreams().iter().map(|w|json!({"id":w.id.as_str(),"responsibility":w.responsibility,"missions":w.missions.iter().map(|m|m.as_str()).collect::<Vec<_>>()})).collect();
     let packages:Vec<_>=k.packages().iter().map(|p|json!({"id":p.request().id.as_str(),"revision":p.request().revision.get(),"mission":p.request().mission.as_str(),"bytes":p.bytes().len(),"current_structural_correspondence":p.check(k.state(),p.bytes()).is_ok(),"submitted":false})).collect();
     let decisions:Vec<_>=k.decisions().iter().map(|d|json!({"operation":d.operation.as_str(),"edge":d.edge.as_str(),"baseline":d.baseline.get(),"historically_released":d.released,"findings":d.findings.iter().map(|p|json!({"predicate":p.predicate().as_str(),"disposition":format!("{:?}",p.disposition()),"reasons":p.reasons().iter().map(|r|format!("{r:?}")).collect::<Vec<_>>()})).collect::<Vec<_>>()})).collect();
-    json!({"schema":"cortex.program.v1","status":"INSPECTED","program":d.id().as_str(),"objective":d.outcome().objective(),"acceptance":d.outcome().acceptance(),"baseline":d.revision().get(),"retained_baselines":k.state().definitions().len(),"journal_revision":k.revision(),"trust":"CALLER_ASSERTIONS_SINGLE_LOCAL_OPERATOR","execution_authority":"UNAVAILABLE","live_candidate_verification":"NOT_RUN","workstreams":streams,"missions":missions,"edges":edges,"attempts":attempts,"support_decisions":decisions,"packages":packages,"resource_reservations":[],"integration":"NOT_SUPPORTED","owner_decisions_required":["Stage 2 effect, host, resource, privacy and authority qualification","Protected integration approval"]})
+    let fixtures = fixture_view(k);
+    json!({"schema":"cortex.program.v1","fixture_projection":fixtures,"status":"INSPECTED","program":d.id().as_str(),"objective":d.outcome().objective(),"acceptance":d.outcome().acceptance(),"baseline":d.revision().get(),"retained_baselines":k.state().definitions().len(),"journal_revision":k.revision(),"trust":"CALLER_ASSERTIONS_SINGLE_LOCAL_OPERATOR","execution_authority":"UNAVAILABLE","live_candidate_verification":"NOT_RUN","workstreams":streams,"missions":missions,"edges":edges,"attempts":attempts,"support_decisions":decisions,"packages":packages,"resource_reservations":[],"integration":"NOT_SUPPORTED","owner_decisions_required":["Stage 2 effect, host, resource, privacy and authority qualification","Protected integration approval"]})
+}
+fn fixture_view(k: &CoordinationKernel) -> Value {
+    let projection = k.fixture_effects();
+    let effects: Vec<_> = projection.effects().iter().map(|e| {
+        let scope = &e.intent.scope;
+        let grant = projection.grants().iter().find(|g| g.id == e.intent.grant).expect("validated effect grant");
+        let package_current = k.packages().iter().find(|p| p.request().id == scope.package && p.request().revision == scope.package_revision).is_some_and(|p| p.check(k.state(),p.bytes()).is_ok());
+        json!({"id":e.intent.id.as_str(),"mission":scope.mission.as_str(),"attempt":scope.attempt.as_str(),"baseline":scope.baseline.get(),"generation":scope.generation.get(),"candidate":scope.candidate.commit().as_str(),"status":format!("{:?}",e.status),"pending":e.pending(),"cancellation_requested":e.cancellation_requested,"reported_outcome":e.report.map(|r| format!("{r:?}")),"reconciled":e.reconciliation.is_some(),"retry_depth":e.retries,"grant":grant.id.as_str(),"grant_revoked":projection.revoked().contains(&grant.id),"grant_expired_at_observed_tick":projection.last_tick() >= grant.expires_before,"baseline_current":scope.baseline == k.state().definition().revision(),"package_current":package_current,"reservation":e.intent.demand.iter().map(|d|json!({"resource":format!("{:?}",d.resource),"quantity":d.amount})).collect::<Vec<_>>(),"observation_kind":"CONTROLLED_FIXTURE","authorized":false,"real_dispatched":false})
+    }).collect();
+    let mut dimensions = std::collections::BTreeSet::new();
+    for policy in projection.policies() {
+        for capacity in &policy.capacities {
+            dimensions.insert(capacity.resource);
+        }
+    }
+    let accounting: Vec<_> = dimensions.into_iter().map(|r|json!({"resource":format!("{r:?}"),"fixture_accounted":projection.accounted(r).ok()})).collect();
+    let prepared: Vec<_> = k.prepared_inputs().iter().map(|(id,p)|json!({"operation":id.as_str(),"package":p.package().request().id.as_str(),"package_revision":p.package().request().revision.get(),"executor":p.descriptor().identity().name(),"executor_version":p.descriptor().identity().version(),"bytes":p.bytes().len(),"current_structural_correspondence":p.check(k.state(),p.descriptor(),p.requirements(),p.bytes()).is_ok(),"submitted":false})).collect();
+    json!({"schema":"cortex.fixture-effects.v1","mode":"CONTROLLED_FIXTURE_ONLY","real_execution_supported":false,"logical_tick":projection.last_tick(),"clock":"CALLER_ASSERTION","policies":projection.policies().len(),"proposed_grants":projection.grants().len(),"revoked_grants":projection.revoked().iter().map(|id|id.as_str()).collect::<Vec<_>>(),"effects":effects,"accounting":accounting,"prepared_inputs":prepared})
 }
 /// Run explicit inspection; errors do not include keys, supplied paths or raw SQL.
 pub fn run(args: impl Iterator<Item = OsString>, out: &mut impl Write) -> Result<u8, io::Error> {
@@ -225,6 +244,21 @@ pub fn run(args: impl Iterator<Item = OsString>, out: &mut impl Write) -> Result
                 m["dependency_ready"],
                 m["eligible"],
                 m["blockers"]
+            )?;
+        }
+        for effect in value["fixture_projection"]["effects"]
+            .as_array()
+            .expect("array")
+        {
+            writeln!(
+                out,
+                "Fixture effect {}: {} pending={} cancellation_requested={} grant_revoked={} package_current={} (no real dispatch)",
+                effect["id"].as_str().expect("ID"),
+                effect["status"].as_str().expect("status"),
+                effect["pending"],
+                effect["cancellation_requested"],
+                effect["grant_revoked"],
+                effect["package_current"]
             )?;
         }
         for a in value["attempts"].as_array().expect("array") {

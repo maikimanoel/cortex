@@ -80,6 +80,13 @@ read-only human/JSON program inspection. No runtime, worker dispatch or protecte
 merge command is supplied. The [bounded sequencing exception](docs/product/roadmap.md#gpe-b-stage-1-sequencing-exception)
 preserves all broader milestone, operational authority and host qualification gates.
 
+The separately authorized [Stage 2A foundations](docs/architecture/operational-foundations.md)
+add fixture-only operational grants, resource admission, uncertain effect lifecycle,
+explicit encrypted program format 2, executor capability negotiation and exact
+transport-input preparation. The existing read-only program command distinguishes
+fixture records from real effects. There is still no executor dispatch, real host
+qualification or protected merge command; Stage 2B decisions remain pending.
+
 The bounded [native method inspector](docs/architecture/engineering-methods.md#native-method-inspection-p0)
 adds immutable `cortex_core::methods` definitions and advisory
 `cortex_evidence::methods::inspect_method` qualification views. Its two unassessed

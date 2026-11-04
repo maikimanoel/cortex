@@ -64,6 +64,22 @@ only in an explicit hypothetical resource vector. The scoped decisions are
 recorded in DEC-004/005/007/012; Stage 2+ remains separately gated. The canonical
 sequence is the [GPE-B roadmap exception](roadmap.md#gpe-b-stage-1-sequencing-exception).
 
+## Owner-approved GPE-B Stage 2A boundary
+
+The [operational foundations](../architecture/operational-foundations.md) extend
+CAP-CORE-003 with fixture policy/grant correspondence; CAP-WFL-001/004 with bounded
+intent, reservation, uncertainty and reconciliation projections; CAP-MEM-001 and
+CAP-SEC-002 with explicitly selected encrypted fixture format 2; CAP-HRN-001/002
+and CAP-CTX-002 with non-executing capability/input contracts; and CAP-CLI-004 with
+read-only fixture diagnostics. Existing program/Evidence ownership is preserved.
+
+Resource quantities, logical time and reported support remain supplied assertions.
+No real executor, authenticated operational principal, host denial/revocation,
+provider disclosure, consequential release or integration is supplied. All 36
+capability statuses retain their complete contracts. Stage 2B remains gated by
+DEC-004/005/006/007/012 and actual qualification; source tests alone are not evidence
+of execution. The [roadmap](roadmap.md#gpe-b-stage-2a-sequencing-exception) owns sequence.
+
 ## A. Core, task contracts, and operational authority
 
 ### CAP-CORE-001
