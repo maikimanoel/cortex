@@ -7,6 +7,43 @@ Capability requirements remain in [the catalog](../product/capability-catalog.md
 [foundation decision](../architecture/0001-foundation.md). Record a new ADR when
 an actual consequential choice is authorized and made.
 
+## GPE-B Stage 1 scoped owner resolutions
+
+The owner approved GPE-B charter revision 1 and decisions D1–D5 for the finite
+[Stage 1 kernel](../architecture/program-kernel.md). This is separate from the
+previous G1/A-1/P0 advisory exceptions. The broader decisions below remain OPEN
+where their existing scope remains unresolved.
+
+- **DEC-004:** one trusted local operator, explicit metadata only, encrypted from
+  the first stored record, caller-supplied key and location, manual bounded
+  retention, no automatic raw traces, backups/exports/sync or provider disclosure.
+  CLI reads an explicit inherited key descriptor with a finite deadline. Broader
+  executor traces, source disclosure, provider retention and shared access remain open.
+- **DEC-005:** positive finite caller-selected program counts, encoded bytes and
+  read deadlines; no universal operational budget or scheduling weights. Development
+  verification uses one Cargo invocation, at most two build jobs and two test
+  threads. These configuration caps are not hard total-host enforcement. Actual
+  executor/CI/model budgets and verification reserves still require selection.
+- **DEC-007:** separate versioned encrypted program/Evidence schema; expected-state
+  transactional admission and exact uncertain-commit reconciliation; extract
+  `cortex-storage` with actual history/program consumers and preserve the CLI
+  history facade and history format 1. No migration or general stable API promise.
+  Operational effect records/retry protocols remain a later decision.
+- **DEC-012:** owner retains baseline/exception and consequential acceptance;
+  coordinator may implement, test and repair inside the accepted finite scope.
+  Local metadata grants trust explicit operator invocation and exact correspondence;
+  they are not authenticated multi-user or effectful permission. Method references
+  remain explicit proposals; adoption/trusted blocking and reviewer qualification
+  are not inferred. The Stage 1 sequencing exception completes no milestone.
+- **DEC-006 remains open for the operational path:** installed tools and simulated
+  limits do not qualify actual transport, host denials, descendants or revocation.
+
+Scoped source branches/commits, local verification and sanitized source-only PRs
+with existing included-capacity CI are allowed. Protected merges, paid services,
+security-setting changes, destructive resource operations and Stage 2+ execution
+are not delegated. Routine implementation/repair within the envelope does not need
+per-increment approval. A new consequential boundary needs only its missing decision.
+
 ## DEC-001
 
 **Open-source license — resolved by the owner.** Cortex uses the standard

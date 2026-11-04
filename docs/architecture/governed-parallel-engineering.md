@@ -1,6 +1,6 @@
 # Native governed parallel engineering
 
-Status: **CAP-WFL-004 PLANNED; bounded G1 preview implemented**. Contract revision:
+Status: **CAP-WFL-004 PLANNED; bounded G1 and GPE-B Stage 1 implemented**. Contract revision:
 **NGE-1**, with the owner-approved G1 implementation decisions below. G1 model tests
 have local execution evidence; operational acceptance remains NOT_RUN.
 This is the single design contract for Cortex's native Rust parallel-engineering
@@ -19,14 +19,23 @@ executor, not the planner, permission authority, workflow record owner or integr
 Existing Git, OS and approved encrypted-storage mechanisms remain infrastructure;
 this contract does not replace cryptography, inference or those mechanisms.
 
+The separately approved [GPE-B Stage 1 kernel](program-kernel.md) now composes
+G1/A-1 with persistent local metadata, guarded claims, explicit-source packages,
+resource simulations and read-only inspection. Its grant/capture inputs remain
+single-operator assertions; it supplies no operational worker or integration
+authority. The [roadmap exception](../product/roadmap.md#gpe-b-stage-1-sequencing-exception)
+preserves NGE-R01–R16 and all later real-host, effect and independent-acceptance gates.
+
 ## Present implementation and first boundary
 
-The inspected workspace has three crates: std-only `cortex-core` (contracts,
-binding, temporal records and immutable reference knowledge), `cortex-evidence`
-(Core-dependent observations/assessments) and `cortex-cli` (Git/JSON capture,
-explicit encrypted history and existing commands). Their dependency direction is
-CLI -> Evidence -> Core, with CLI also consuming Core. There is no native runner,
-mission scheduler, general policy enforcement or authoritative method selector.
+The inspected workspace has four crates: std-only `cortex-core` (contracts,
+binding, temporal records, immutable reference knowledge and program metadata),
+`cortex-evidence` (Core-dependent observations/assessments and coordination
+admission), `cortex-storage` (shared encrypted history/program infrastructure),
+and `cortex-cli` (Git/lexical capture, history facade and inspection commands).
+Dependencies flow CLI -> Storage -> Evidence -> Core, with consumers also using
+Core/Evidence directly. There is no native runner, operational mission scheduler,
+general permission enforcement or authoritative method selector.
 Current [binding](candidate-binding.md), [evidence](unified-evidence.md),
 [knowledge](knowledge-references.md) and [history](temporal-records.md) APIs retain
 only their delivered bounded meanings. Manual parallel development is external
@@ -35,9 +44,10 @@ practice, not native implementation or measured acceleration.
 The first bounded code slice, [G1](#g1-in-memory-readiness-projection), implements a
 pure in-memory graph/event-to-decision operation. Its outputs describe readiness
 under supplied facts; they neither authenticate those facts nor authorize effects.
-Production Evidence integration, durable execution and host/process control are
+Operational Evidence authority, durable execution and host/process control are
 subsequent gates. Milestone 003 stays IN_PROGRESS; 004 and CAP-WFL-004 stay PLANNED.
-The owner separately authorized only this no-I/O G1 implementation, not dispatch.
+G1's original authorization was limited to no-I/O projection; the separate GPE-B
+Stage 1 exception adds only its documented bounded metadata consumers, not dispatch.
 
 For material decisions in every NGE-R01–R16 requirement, retain the NGE contract
 revision, relevant mission/graph/artifact revisions, actual candidate contexts,

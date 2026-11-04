@@ -364,9 +364,11 @@ declared storage guarantees, not source authenticity or permanent future retenti
 ### Core, encoding and concurrency boundaries
 
 Core remains the deterministic admission/query authority, independent of I/O,
-database types and serialization dependencies. Start with a cohesive infrastructure
-module in the existing CLI library, consuming Core; no new crate, backend trait
-framework, storage-neutral DTO authority or CLI command is required by this contract.
+database types and serialization dependencies. The initial slice used a cohesive infrastructure module in the CLI library,
+consuming Core. The separately approved [GPE-B extraction](program-kernel.md) now
+places that implementation in `cortex-storage` for its actual history/program
+consumers, preserving the `cortex_cli::history_store` facade and format 1. No
+backend trait framework or storage-neutral DTO authority is introduced.
 Its private decoding representation must reconstruct validated Core values rather
 than duplicate temporal-policy decisions. Evidence is not stored or reassessed here.
 
@@ -377,7 +379,7 @@ policy covers those potentially private bytes.
 
 The Linux library exposes `HistoryStore::create/open/load/admit/reconcile/remove`
 and explicit `resume_removal`, `StoreKey`, `StoreId`, `Access`, typed completion
-outcomes and removal requests. See [the implementation](../../crates/cortex-cli/src/history_store/mod.rs)
+outcomes and removal requests. See [the implementation](../../crates/cortex-storage/src/history_store/mod.rs)
 and its Rustdoc example. No live connection or key is retained in a store handle.
 
 Private format 1 uses bounded JSON projections, strict fields/schema/tags and
@@ -445,7 +447,7 @@ interchangeable backend framework or public persistence schema follows.
 
 ### Persistence acceptance and remaining scope
 
-[Storage tests](../../crates/cortex-cli/src/history_store/tests.rs) and
+[Storage tests](../../crates/cortex-storage/src/history_store/tests.rs) and
 [real-Git integration tests](../../crates/cortex-cli/tests/history_store.rs) exercise
 these mechanisms alongside existing Core/002 regressions. Candidate-scoped outcomes
 and counts belong in the external handoff. The table specifies the oracle, not a
@@ -483,13 +485,13 @@ active store descriptors do not establish exhaustive RAM or host-file coverage.
 
 ### Storage failure qualification
 
-[Fault tests](../../crates/cortex-cli/src/history_store/fault_tests.rs) qualify the
+[Fault tests](../../crates/cortex-storage/src/history_store/fault_tests.rs) qualify the
 existing adapter using isolated synthetic stores and fresh processes. No production
 fault API, new backend, dependency or unsafe Rust is introduced.
 
 - Child-only `RLIMIT_FSIZE` with ignored `SIGXFSZ` produces observed native short
   writes followed by kernel EFBIG in journal creation and removal-intent recording.
-- A small [test-only C shim](../../crates/cortex-cli/tests/fixtures/storage_fault.c),
+- A small [test-only C shim](../../crates/cortex-storage/tests/fixtures/storage_fault.c),
   compiled with warnings denied, injects EIO before selected libc write, sync or
   unlink calls for one exact fixture path. This is native-library return injection,
   not a kernel/device failure. Parent tests require a positive fault-hit trace and

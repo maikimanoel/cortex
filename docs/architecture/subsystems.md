@@ -110,6 +110,15 @@ consumes explicit caller facts without effects; it cannot authenticate reviews o
 release operational work. Its immutable graph and retained in-memory notifications
 are not a durable Workflow record or an additional Evidence store.
 
+The approved [GPE-B Stage 1](program-kernel.md) adds one replayable non-effectful
+coordination boundary: `cortex_core::program` owns validated baseline/plan/claim
+contracts, `cortex_evidence::program` owns their composition with actual Evidence
+support, `cortex-storage` supplies transactional encrypted admission and reconstruction,
+and CLI projects the resulting state. Storage owns no policy or validity judgment.
+The existing history facade delegates to Storage with unchanged format semantics.
+Declared non-impact, package preparation and simulation remain explicit bounded
+inputs; no competing scheduler, knowledge index or method authority is created.
+
 ## Harness and controlled execution
 
 Owns the single boundary for Cortex-initiated agent execution, actual host controls,
