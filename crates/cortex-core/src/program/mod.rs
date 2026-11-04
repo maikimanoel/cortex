@@ -14,6 +14,7 @@ pub mod context;
 pub mod executor;
 pub mod operational;
 pub mod scheduling;
+pub mod supervision;
 
 macro_rules! id {
     ($name:ident, $doc:literal) => {

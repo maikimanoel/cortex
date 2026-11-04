@@ -61,6 +61,35 @@ consumers. Read-only metadata and synthetic observations cannot qualify a real h
 Scoped development, local verification/repair and sanitized source-only PRs with
 existing included CI are allowed; Stage 2B execution and protected merges are not.
 
+## GPE-B Stage 2B scoped authorization
+
+The owner accepts native runtime implementation, one canonical Workflow effect
+journal, candidate-bound grants, fail-closed resource accounting and independent
+technical acceptance. The [supervised-fixture profile](../architecture/supervised-fixtures.md)
+selects explicit encrypted program format 3, exact process inputs/observations and
+a serialized fresh-dispatch callback for trusted provider-free development fixtures.
+No replay launches a process; missing outcomes remain uncertain without blind retry.
+Metadata/history format 1 and pure fixture format 2 retain their boundaries.
+
+DEC-004 accepts minimal disclosure and bounded encrypted fixture records, with
+no automatic raw traces, session adoption or export. DEC-005 requires explicit
+limits and verification reserves without selecting universal runtime numbers.
+DEC-006 selects Linux x86_64 and Codex CLI 0.166.0 as initial qualification targets,
+not qualified support. DEC-007 accepts the single durable effect lifecycle and
+explicit profile separation. DEC-012 preserves owner baseline/exception/method
+authority, confined grant/revocation semantics and actual independent review.
+P0 remains advisory. None of these scoped choices establishes authenticated
+multi-user authority or a hostile same-user sandbox.
+
+Read-only host inspection, controlled local development fixtures, original Rust,
+scoped branches/commits, local verification/repair and source-only PR/CI delivery
+are authorized. Live Codex/provider execution, unapproved host effect experiments,
+unqualified isolation activation, spending and protected integration are not.
+Numeric live quotas/reserves, provider disclosure, credential mediation, retention
+and applicable host qualification remain unresolved for their actual consumers.
+The [roadmap exception](../product/roadmap.md#gpe-b-stage-2b-sequencing-exception)
+does not complete any broader milestone or capability.
+
 ## DEC-001
 
 **Open-source license — resolved by the owner.** Cortex uses the standard

@@ -877,6 +877,7 @@ fn command_write(c: &Command) -> Result<V, ProgramStoreError> {
     Ok(match c {
         Command::PrepareExecutorInput(request) => json!(["executor-input-v1", request.write()?]),
         Command::FixtureEffect(event) => json!(["fixture-effect-v1", event.write()?]),
+        Command::SupervisedEffect(event) => json!(["supervised-effect-v1", event.write()?]),
         Command::Notify(n) => json!(["notify", n.write()?]),
         Command::Observe(r) => json!(["observe", r.write()?]),
         Command::Assess(a) => json!(["assess", a.write()?]),
@@ -922,6 +923,7 @@ fn command_read(v: &V, k: &CoordinationKernel) -> Result<Command, ProgramStoreEr
         "claim",
         "package",
         "fixture-effect-v1",
+        "supervised-effect-v1",
         "executor-input-v1",
     ]
     .contains(&tag)
@@ -930,6 +932,7 @@ fn command_read(v: &V, k: &CoordinationKernel) -> Result<Command, ProgramStoreEr
         return Ok(match tag {
             "executor-input-v1" => Command::PrepareExecutorInput(read(&a[1])?),
             "fixture-effect-v1" => Command::FixtureEffect(read(&a[1])?),
+            "supervised-effect-v1" => Command::SupervisedEffect(read(&a[1])?),
             "notify" => Command::Notify(read(&a[1])?),
             "observe" => Command::Observe(read(&a[1])?),
             "assess" => Command::Assess(read(&a[1])?),
@@ -1054,3 +1057,4 @@ pub(super) fn decode_operation(
 mod operational;
 
 mod executor;
+mod supervision;

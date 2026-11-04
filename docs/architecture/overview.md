@@ -16,6 +16,7 @@ The Cortex foundation contains these actual crates:
 | `cortex-core` | Foundation contracts, candidate/task binding, canonical temporal records, immutable knowledge projections, G1 and metadata-only program contracts | Standard library only |
 | `cortex-evidence` | Legacy evidence plus unified result/applicability/validity, versioned context, redacted inspection and evidence-backed non-effectful program admission | `cortex-core` |
 | `cortex-storage` | Shared explicit encrypted lifecycle, compatible history and separate replayable program/Evidence codecs | Core/Evidence, existing JSON/SQLCipher bindings; OpenSSL 3 build prerequisite |
+| `cortex-harness` | Native supervision of explicitly granted trusted local process fixtures; no AI executor or isolation backend | Core/Evidence/Storage and existing JSON |
 | `cortex-cli` | Existing commands, Git/lexical knowledge acquisition, history facade and read-only program inspection | Core/Evidence/Storage and JSON; local Git/util-linux |
 
 The accepted [0001 foundation decision](0001-foundation.md) is authoritative for
@@ -57,6 +58,14 @@ and executor capability contracts; Evidence's existing kernel owns the complete
 journal; Storage supplies explicit fixture format 2; CLI exposes fixture-only
 projections. Metadata format 1 and history format 1 retain their old boundaries.
 No operational host or permission path is activated.
+
+The separately authorized [Stage 2B supervised fixtures](supervised-fixtures.md)
+add a real provider-free process consumer under an explicit trusted development
+profile. Harness owns bounded process I/O and direct-child supervision; Storage
+serializes fresh dispatch with the existing journal, and Core/Evidence still own
+guards and state. Live AI execution, hostile isolation and protected integration
+remain unavailable. The new crate's actual consumers and alternatives are documented
+at that boundary; it creates no second scheduler, effect store or authority.
 
 ## Logical areas and dependency direction
 

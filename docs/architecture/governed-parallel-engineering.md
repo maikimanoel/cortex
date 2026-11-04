@@ -28,14 +28,17 @@ preserves NGE-R01–R16 and all later real-host, effect and independent-acceptan
 
 ## Present implementation and first boundary
 
-The inspected workspace has four crates: std-only `cortex-core` (contracts,
+The inspected workspace has five crates: std-only `cortex-core` (contracts,
 binding, temporal records, immutable reference knowledge and program metadata),
 `cortex-evidence` (Core-dependent observations/assessments and coordination
 admission), `cortex-storage` (shared encrypted history/program infrastructure),
-and `cortex-cli` (Git/lexical capture, history facade and inspection commands).
+`cortex-harness` (trusted provider-free process supervision), and `cortex-cli`
+(Git/lexical capture, history facade and inspection commands).
 Dependencies flow CLI -> Storage -> Evidence -> Core, with consumers also using
-Core/Evidence directly. There is no native runner, operational mission scheduler,
-general permission enforcement or authoritative method selector.
+Core/Evidence directly. Harness consumes Storage/Evidence/Core. Its
+[Stage 2B trusted-fixture profile](supervised-fixtures.md) is a bounded native
+process consumer, not a live AI runner, operational mission scheduler, general
+permission enforcement or authoritative method selector.
 Current [binding](candidate-binding.md), [evidence](unified-evidence.md),
 [knowledge](knowledge-references.md) and [history](temporal-records.md) APIs retain
 only their delivered bounded meanings. Manual parallel development is external

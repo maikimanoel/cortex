@@ -20,8 +20,8 @@ includes no binary release, package publication or stable API commitment.
 `cortex inspect` observes repositories; `cortex check` evaluates committed-HEAD
 equality with explicit task/revision and candidate-bound evidence. Help/version
 remain available. The libraries retain foundation APIs and independently represent
-assessment result, applicability and contextual evidence validity. There are no agents,
-task runners, providers, network services, background workers or telemetry. A bounded
+assessment result, applicability and contextual evidence validity. There are no AI agents,
+general task runners, providers, network services, background workers or telemetry. A bounded
 Linux library adapter now persists explicitly submitted canonical history through
 SQLCipher; it adds no storage command or automatic collection.
 
@@ -85,7 +85,14 @@ add fixture-only operational grants, resource admission, uncertain effect lifecy
 explicit encrypted program format 2, executor capability negotiation and exact
 transport-input preparation. The existing read-only program command distinguishes
 fixture records from real effects. There is still no executor dispatch, real host
-qualification or protected merge command; Stage 2B decisions remain pending.
+qualification or protected merge command; live execution decisions remain pending.
+
+The separately authorized [Stage 2B native Harness](docs/architecture/supervised-fixtures.md)
+supervises explicitly granted, trusted provider-free process fixtures through an
+encrypted format 3 journal. It adds exact process specifications, commit-before-launch,
+bounded transport, cancellation and unknown-outcome records. Replay and CLI inspection
+never launch work. This is a library development profile, not a live Codex adapter,
+sandbox or hard host resource guarantee. Live execution decisions remain pending.
 
 The bounded [native method inspector](docs/architecture/engineering-methods.md#native-method-inspection-p0)
 adds immutable `cortex_core::methods` definitions and advisory
@@ -188,10 +195,12 @@ these are not sandbox or hard real-time guarantees.
 | `cortex-core` | Foundation contracts, typed candidate/task binding, canonical temporal records, immutable knowledge projections, G1 and metadata-only program contracts |
 | `cortex-evidence` | Legacy reports plus unified candidate-bound result, applicability, validity, redacted inspection and evidence-backed program admission |
 | `cortex-storage` | Explicit encrypted history/program persistence, exact reconstruction and reconciliation |
+| `cortex-harness` | Store-gated native trusted process-fixture supervision and bounded observations |
 | `cortex-cli` | Existing commands, bounded Git/knowledge acquisition, history facade and read-only program inspection |
 
 The production direction is CLI -> Storage -> Evidence -> Core, with consumers
 also using Core/Evidence directly.
+Harness consumes Storage/Evidence/Core and has no CLI dependency or separate journal.
 The inspection
 adapter supplies actual observations to Core's binding boundary. Foundation
 `TaskContract`, `CandidateId` and evidence APIs retain their meanings. A binding
