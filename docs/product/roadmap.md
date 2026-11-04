@@ -305,6 +305,40 @@ host/budget/adoption policy remains open at its original execution boundary.
 Review and use of this advisory model cannot provision workers or release real
 operations. No external orchestrator is selected.
 
+### GPE-B Stage 1 sequencing exception
+
+The owner-approved GPE-B/1 charter and D1–D5 authorize a finite persistent
+coordination kernel before full 003 exits. It uses delivered 002 identities,
+bounded 003 storage and G1/A-1/P0 within their actual contracts. This exception
+adds explicit local metadata persistence, declared dependency validity,
+explicit-source instruction preparation, scheduling simulations and CLI inspection;
+it does not complete or relax Milestones 003–006 or their capability statuses.
+See the [kernel contract](../architecture/program-kernel.md).
+
+The five responsibility workstreams release meaningful intermediate artifacts:
+W1 contracts/storage/claims (C1, S1, O1), W2 support/invalidation (D1, V1), W3
+simulation (Q1), W4 packages/explicit method proposals (P1, K1), W5 inspection and
+kernel recovery fixtures (I1, F1-kernel). Their construction dependencies are:
+C1 -> D1; C1+D1 -> S1; S1 -> O1; D1+S1 -> V1; C1+D1 -> Q1;
+C1 -> P1 -> K1; C1+D1+P1+S1 -> I1;
+O1+V1+I1+Q1+K1 -> F1-kernel. Independent preparation need not wait for an entire
+producer workstream to finish. These construction edges are not operational grants.
+
+The accepted 27-increment program retains subsequent E1, AUTH1, host qualification,
+R1/T1/J1 contract and live increments, connected operational acceptance and a
+separate Stage 4 admission. Only the Stage 1 artifacts above are implemented in
+this exception. Full program/milestone acceptance is not inferred from them.
+Stage-1-accepted also requires the external protected review/integration and owner
+acceptance boundary; an unmerged PR is not an integrated outcome.
+
+Stage 2/3 can pull forward only the selected path's applicable 004-A/B/C/D/E and
+006-A/B/C prerequisites after separate decisions and qualification. Actual Core
+authority, Workflow effect records, privacy/resource limits and effective host
+controls must precede dispatch; advisory exceptions do not authorize those effects.
+Unrelated retrieval, portable exchange, broad profiles, evolution and portability
+remain in sequence. Independent operational acceptance and a finite owner-approved
+roadmap program must precede Cortex developing Cortex through the new runtime.
+
 ## 005: governed evolution and evaluation
 
 CAP-EVL-002 evaluates defect-learning and rule changes against missed defects,

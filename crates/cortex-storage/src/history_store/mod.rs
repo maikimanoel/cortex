@@ -8,7 +8,7 @@
 //! The caller supplies an actual observation, record and secret through library
 //! arguments; neither a key CLI flag nor a default storage location exists:
 //! ```no_run
-//! use cortex_cli::history_store::{Access, HistoryStore, StoreKey};
+//! use cortex_storage::history_store::{Access, HistoryStore, StoreKey};
 //! use cortex_core::{binding::CandidateObservation, temporal::{CanonicalRecord, CanonicalHistory}};
 //! fn persist(path: &std::path::Path, key: &StoreKey, subject: CandidateObservation,
 //!            record: CanonicalRecord) -> Result<CanonicalHistory, Box<dyn std::error::Error>> {
@@ -18,8 +18,8 @@
 //! }
 //! ```
 
-mod codec;
-mod location;
+pub(crate) mod codec;
+pub(crate) mod location;
 
 use cortex_core::{binding::CandidateObservation, temporal::*};
 use location::Location;
@@ -90,7 +90,7 @@ pub struct StoreError {
     engine: Option<i32>,
 }
 impl StoreError {
-    fn new(kind: ErrorKind) -> Self {
+    pub(crate) fn new(kind: ErrorKind) -> Self {
         Self {
             kind,
             domain: None,
@@ -133,7 +133,7 @@ impl From<std::io::Error> for StoreError {
         error
     }
 }
-fn sql(e: rusqlite::Error) -> StoreError {
+pub(crate) fn sql(e: rusqlite::Error) -> StoreError {
     use rusqlite::ErrorCode;
     let mut error = StoreError::new(match e.sqlite_error_code() {
         Some(ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked) => ErrorKind::Busy,
@@ -569,12 +569,17 @@ enum Stage {
     RemovalFile,
 }
 
-fn connect(location: &Location, key: &StoreKey, access: Access) -> Result<Connection, StoreError> {
+pub(crate) fn connect(
+    location: &Location,
+    key: &StoreKey,
+    access: Access,
+) -> Result<Connection, StoreError> {
     location.files()?;
     location.check_database()?;
     if access == Access::Recover
-        && std::os::unix::fs::MetadataExt::mode(&fs::metadata(location.path().join(DATABASE))?)
-            & 0o200
+        && std::os::unix::fs::MetadataExt::mode(&fs::metadata(
+            location.path().join(location.database()),
+        )?) & 0o200
             == 0
     {
         return Err(StoreError::new(ErrorKind::Permission));
@@ -588,7 +593,8 @@ fn connect(location: &Location, key: &StoreKey, access: Access) -> Result<Connec
             Access::ReadOnly => OpenFlags::SQLITE_OPEN_READ_ONLY,
             Access::Recover => OpenFlags::SQLITE_OPEN_READ_WRITE,
         };
-    let c = Connection::open_with_flags(location.path().join(DATABASE), flags).map_err(sql)?;
+    let c = Connection::open_with_flags(location.path().join(location.database()), flags)
+        .map_err(sql)?;
     // Only hex digits from a fixed-size raw key enter this statement. rusqlite's
     // pragma helper reads pragma_pragma_list and must not run before keying.
     c.execute_batch("PRAGMA cipher_log_level=NONE;")

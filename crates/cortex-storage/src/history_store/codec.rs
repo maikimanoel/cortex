@@ -259,7 +259,7 @@ struct Context {
     basis: Option<Basis>,
 }
 
-pub(super) fn encode_context(c: &CandidateObservation) -> Result<Zeroizing<Vec<u8>>, StoreError> {
+pub(crate) fn encode_context(c: &CandidateObservation) -> Result<Zeroizing<Vec<u8>>, StoreError> {
     let contract = c.contract();
     let state = c.state();
     encode(
@@ -296,7 +296,7 @@ pub(super) fn encode_context(c: &CandidateObservation) -> Result<Zeroizing<Vec<u
     )
 }
 
-pub(super) fn decode_context(b: &[u8]) -> Result<CandidateObservation, StoreError> {
+pub(crate) fn decode_context(b: &[u8]) -> Result<CandidateObservation, StoreError> {
     let c: Context = decode(b, MAX_BYTES)?;
     if c.platform != "linux-bytes-v1" {
         return Err(StoreError::new(ErrorKind::Unsupported));

@@ -61,7 +61,7 @@ owners. Its first Rust slice, `cortex_core::parallel`, implements a bounded,
 non-effectful in-memory readiness projection over caller-supplied assertions.
 It reports per-edge release/hold/refusal and mission eligibility with causal
 invalidation; it authenticates no Evidence and grants no execution permission.
-There is no scheduler or agent launcher. The Evidence-owned
+There is no operational scheduler or agent launcher. The Evidence-owned
 `cortex_evidence::readiness::inspect_support` additionally evaluates actual unified
 records for exact edge predicates, under caller-declared criterion correspondence.
 It preserves inspection-driven invalidation and returns advisory findings only;
@@ -69,6 +69,16 @@ it does not authenticate execution, construct a coordinator review or release an
 edge. See the [support boundary](docs/architecture/unified-evidence.md#dependency-support-inspection-a-1). The
 [roadmap](docs/product/roadmap.md#native-parallel-delivery-sequence) records the
 separately scoped G1/A-1 preview exceptions and full execution prerequisites.
+
+The separately owner-approved [GPE-B Stage 1 kernel](docs/architecture/program-kernel.md)
+adds native program/mission baselines, exclusive metadata claims, Evidence-backed
+non-effectful dependency decisions, encrypted replay/recovery, deterministic
+explicit-source packages and resource simulations. `cortex-storage` owns the
+shared local encrypted infrastructure; `cortex_cli::history_store` remains a
+compatible facade. `cortex program inspect --help` describes explicit keyed,
+read-only human/JSON program inspection. No runtime, worker dispatch or protected
+merge command is supplied. The [bounded sequencing exception](docs/product/roadmap.md#gpe-b-stage-1-sequencing-exception)
+preserves all broader milestone, operational authority and host qualification gates.
 
 The bounded [native method inspector](docs/architecture/engineering-methods.md#native-method-inspection-p0)
 adds immutable `cortex_core::methods` definitions and advisory
@@ -168,11 +178,13 @@ these are not sandbox or hard real-time guarantees.
 
 | Crate | Current responsibility |
 | --- | --- |
-| `cortex-core` | Foundation contracts, typed candidate/task binding, canonical temporal records, immutable knowledge projections and advisory G1 readiness |
-| `cortex-evidence` | Legacy reports plus unified candidate-bound result, applicability, validity and redacted library inspection |
-| `cortex-cli` | Existing commands, bounded Git inspection, knowledge acquisition and encrypted history infrastructure |
+| `cortex-core` | Foundation contracts, typed candidate/task binding, canonical temporal records, immutable knowledge projections, G1 and metadata-only program contracts |
+| `cortex-evidence` | Legacy reports plus unified candidate-bound result, applicability, validity, redacted inspection and evidence-backed program admission |
+| `cortex-storage` | Explicit encrypted history/program persistence, exact reconstruction and reconciliation |
+| `cortex-cli` | Existing commands, bounded Git/knowledge acquisition, history facade and read-only program inspection |
 
-The production direction is CLI -> Evidence -> Core, with CLI also using Core.
+The production direction is CLI -> Storage -> Evidence -> Core, with consumers
+also using Core/Evidence directly.
 The inspection
 adapter supplies actual observations to Core's binding boundary. Foundation
 `TaskContract`, `CandidateId` and evidence APIs retain their meanings. A binding
@@ -241,6 +253,7 @@ cargo run --locked --offline -p cortex-cli -- --help
 cargo run --locked --offline -p cortex-cli -- --version
 cargo run --locked --offline -p cortex-cli -- inspect
 cargo run --locked --offline -p cortex-cli -- check --help
+cargo run --locked --offline -p cortex-cli -- program --help
 git diff --check
 git diff --cached --check
 git status --short

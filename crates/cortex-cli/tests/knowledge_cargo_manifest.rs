@@ -141,7 +141,7 @@ fn committed_real_root_and_crate_styles_have_literal_spans_and_external_targets(
             assert_eq!(
                 target(
                     &g,
-                    "/k:target/k:cfg(target_os = \"linux\")/k:dependencies/k:rusqlite/k:version"
+                    "/k:target/k:cfg(target_os = \"linux\")/k:dependencies/k:serde/k:version"
                 ),
                 outside()
             );

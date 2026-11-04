@@ -42,6 +42,28 @@ apply across future capability changes; each subsystem owns its implementation
 and CLI/delivery coordinates the documented contributor path. These requirements
 do not enlarge any delivered Milestone 002 contract.
 
+## Owner-approved GPE-B Stage 1 boundary
+
+The [persistent coordination kernel](../architecture/program-kernel.md) implements
+an explicitly authorized bounded path under the existing capability owners below.
+It introduces no capability ID and changes no full capability status. Candidate
+verification is separate from feature status; the referenced tests are mechanisms,
+not a record that a particular candidate passed.
+
+| Existing responsibility | Stage 1 bounded implementation | Still outside this boundary |
+| --- | --- | --- |
+| CAP-CORE-003 | Immutable accepted program/mission baselines, exact metadata grants, plans, attempts and claims | Authenticated/effective operational permission, host fencing |
+| CAP-WFL-001 / CAP-MEM-001 / CAP-SEC-002 | Separate encrypted program/Evidence journal, transactional expected-version admission, replay and uncertain metadata-commit reconciliation | External effect intent/dispatch/retry protocol, broader privacy/retention policies |
+| CAP-WFL-004 / CAP-EVD-003 | G1/A-1-backed non-effectful per-consumer decisions, amendments, declared non-impact and retained causal invalidation | Trusted operational release, actual worker scheduling, protected integration |
+| CAP-WFL-002 / CAP-CTX-001 / CAP-CTX-002 | Exact explicit-source instruction packages and contextual method proposals | General retrieval/portable context, automatic qualification/adoption, executor translation/submission |
+| CAP-CLI-004 | Explicit keyed read-only human/program JSON inspection | TUI, dispatch, automatic recovery, native merge authority |
+
+The single local operator supplies approval/capture/qualification assertions;
+none is authenticated by persistence. Simulation reserves verification capacity
+only in an explicit hypothetical resource vector. The scoped decisions are
+recorded in DEC-004/005/007/012; Stage 2+ remains separately gated. The canonical
+sequence is the [GPE-B roadmap exception](roadmap.md#gpe-b-stage-1-sequencing-exception).
+
 ## A. Core, task contracts, and operational authority
 
 ### CAP-CORE-001
@@ -478,7 +500,7 @@ exercise partitions, exact boundaries, fallback, cutoffs and bounded output.
 [Stateful replay conformance](../../crates/cortex-cli/tests/history_replay_conformance.rs)
 compares interleaved encrypted admissions/rejections and reloads with Core and literal
 order/query expectations; discarded confirmed receipts model lost application acknowledgement.
-[Storage tests](../../crates/cortex-cli/src/history_store/tests.rs)
+[Storage tests](../../crates/cortex-storage/src/history_store/tests.rs)
 and [real-Git consumers](../../crates/cortex-cli/tests/history_store.rs) cover encrypted
 restart, temporal preservation, crash/reconciliation, contention, corruption,
 capacity and whole-store removal. [Fault qualification](../architecture/temporal-records.md#storage-failure-qualification)
@@ -687,7 +709,7 @@ confirmed externally after a lost response cannot trigger a blind non-idempotent
 retry. Changed candidates or missing current authority block unsafe resumption.
 **Verification:** NOT_RUN; transition/property tests,
 deterministic replay and crash/fault injection with declared budgets.
-**Decisions:** DEC-005/007; durability/effect protocol not selected.
+**Decisions:** DEC-005/007; the bounded GPE-B metadata store is selected above; operational effect protocol remains unselected.
 
 ### CAP-WFL-002
 
@@ -1023,7 +1045,7 @@ historical cutoffs and controlled copies. The initial local-operator profile is
 approved; broader privacy policy remains open. Completion must state observed scope and residual copies, not imply
 universal erasure or fabricate missing predecessor history.
 **Bounded implementation/verification:** The [storage decision](../architecture/0002-durable-history.md)
-and [tests](../../crates/cortex-cli/src/history_store/tests.rs) cover caller-keyed
+and [tests](../../crates/cortex-storage/src/history_store/tests.rs) cover caller-keyed
 SQLCipher, no plaintext fallback, confidential sentinels, diagnostics, explicit
 whole-collection removal and interrupted-removal resume. No automatic capture,
 copies or restoration. Completion covers managed live files, not forensic erasure.

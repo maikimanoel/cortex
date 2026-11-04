@@ -34,6 +34,12 @@ not authenticate source authors or cover every bundled/native vulnerability.
 
 ## Boundary and format
 
+Subsequent placement note: the separately approved [GPE-B Stage 1](program-kernel.md)
+extracts this implementation into `cortex-storage` while preserving the
+`cortex_cli::history_store` facade, history format 1 and the decisions below.
+The separate program schema does not extend or reinterpret canonical history.
+
+
 `cortex_cli::history_store` is Linux infrastructure. Core remains std-only; the
 only Core extension explicitly borrows `ComparisonBasis::material()` for lossless
 encoding, while Debug remains redacted. Evidence and existing commands are unchanged.

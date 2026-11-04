@@ -13,9 +13,10 @@ The Cortex foundation contains these actual crates:
 
 | Crate | Current responsibility | Dependency |
 | --- | --- | --- |
-| `cortex-core` | Foundation contracts, candidate/task binding, canonical temporal records, immutable knowledge projections and advisory G1 readiness | Standard library only |
-| `cortex-evidence` | Legacy evidence plus unified result/applicability/validity, versioned context and redacted inspection | `cortex-core` |
-| `cortex-cli` | Existing commands, Git/JSON knowledge acquisition and explicit encrypted-history library adapter | Core/Evidence, JSON/codec and SQLCipher binding; local Git/util-linux and OpenSSL 3 build prerequisites |
+| `cortex-core` | Foundation contracts, candidate/task binding, canonical temporal records, immutable knowledge projections, G1 and metadata-only program contracts | Standard library only |
+| `cortex-evidence` | Legacy evidence plus unified result/applicability/validity, versioned context, redacted inspection and evidence-backed non-effectful program admission | `cortex-core` |
+| `cortex-storage` | Shared explicit encrypted lifecycle, compatible history and separate replayable program/Evidence codecs | Core/Evidence, existing JSON/SQLCipher bindings; OpenSSL 3 build prerequisite |
+| `cortex-cli` | Existing commands, Git/lexical knowledge acquisition, history facade and read-only program inspection | Core/Evidence/Storage and JSON; local Git/util-linux |
 
 The accepted [0001 foundation decision](0001-foundation.md) is authoritative for
 those bounded design choices. Rust 1.99.1, edition 2024,
@@ -28,7 +29,7 @@ Core performs no filesystem/process/clock access. [002-C unified evidence](unifi
 consumes those observations programmatically, preserving legacy semantics. It adds
 independent result/applicability/contextual-validity and caller-reported time;
 [002-D CLI integration](cli-check.md) now composes one committed-HEAD criterion.
-Policy enforcement, durable workflows,
+Operational policy enforcement, effectful durable workflows,
 full knowledge indexing and agent harnesses remain planned. The first
 [003-A slice](temporal-records.md) adds in-memory requirement/decision history
 without changing the binding or evidence models.
@@ -43,6 +44,12 @@ Its [additive source-set interface](knowledge-references.md#additive-source-set-
 captures explicitly selected files as one bound batch and projects cross-document
 references without changing original per-source targets. Single-source APIs and
 all authority/evidence boundaries retain their meanings.
+
+The [GPE-B Stage 1 kernel](program-kernel.md) composes Core's program contracts,
+Evidence's support decisions and Storage's transactions. Its deterministic
+packages and resource simulations grant no execution authority. History format 1
+and existing CLI check JSON remain unchanged. No runtime crate or model dependency
+is introduced; later runtime extraction requires its actual authorized consumers.
 
 ## Logical areas and dependency direction
 

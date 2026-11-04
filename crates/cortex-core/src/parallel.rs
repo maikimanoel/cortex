@@ -1330,7 +1330,20 @@ impl ReadinessProjection {
         // Only derived state is drafted; immutable graph/history payloads are not cloned.
         let mut draft = self.state.clone();
         self.reduce(&mut draft, &notification)?;
-        recompute(&self.graph, &mut draft)?;
+        // Re-evaluate only missions whose inputs or incoming edge decisions changed.
+        // A capacity observation affects all missions; information-only reports do not.
+        for i in 0..self.graph.missions.len() {
+            let mission = self.graph.missions[i].id();
+            let changed = self.state.capacity != draft.capacity
+                || self.state.missions[i] != draft.missions[i]
+                || self.graph.edges.iter().enumerate().any(|(j, e)| {
+                    &e.consumer == mission
+                        && self.state.edges[j].decision != draft.edges[j].decision
+                });
+            if changed {
+                recompute_mission(&self.graph, &mut draft, i)?;
+            }
+        }
         let mut changed_edges = reserved(self.graph.edges.len())?;
         let mut changed_missions = reserved(self.graph.missions.len())?;
         for (i, edge) in self.graph.edges.iter().enumerate() {
@@ -1567,49 +1580,58 @@ impl ReadinessProjection {
 }
 
 fn recompute(graph: &DependencyGraph, state: &mut ProjectionState) -> Result<(), ReadinessError> {
-    for (i, m) in graph.missions.iter().enumerate() {
-        let mut blockers = reserved(
-            graph
-                .edges
-                .iter()
-                .filter(|edge| edge.consumer == *m.id())
-                .count()
-                .checked_add(5)
-                .ok_or(ReadinessError::Limit(LimitKind::Edges))?,
-        )?;
-        let s = &state.missions[i];
-        if s.status != MissionStatus::Pending {
-            blockers.push(MissionBlocker::NotPending);
-        }
-        match s.preconditions {
-            None => blockers.push(MissionBlocker::PreconditionsUnknown),
-            Some(false) => blockers.push(MissionBlocker::PreconditionsUnmet),
-            Some(true) => {}
-        }
-        let context = m.context.available();
-        if !context {
-            blockers.push(MissionBlocker::MissingContext);
-        }
-        if !s.coverage_known {
-            blockers.push(MissionBlocker::UnknownCoverage);
-        }
-        let mut dependencies = context && s.coverage_known;
-        for (j, edge) in graph.edges.iter().enumerate() {
-            if edge.consumer == *m.id()
-                && !matches!(state.edges[j].decision, EdgeDecision::Released { .. })
-            {
-                dependencies = false;
-                blockers.push(MissionBlocker::Dependency(edge.id.clone()));
-            }
-        }
-        match state.capacity {
-            None => blockers.push(MissionBlocker::CapacityUnknown),
-            Some(0) => blockers.push(MissionBlocker::NoCapacity),
-            Some(_) => {}
-        }
-        state.missions[i].dependency_ready = dependencies;
-        state.missions[i].blockers = blockers;
+    for i in 0..graph.missions.len() {
+        recompute_mission(graph, state, i)?;
     }
+    Ok(())
+}
+fn recompute_mission(
+    graph: &DependencyGraph,
+    state: &mut ProjectionState,
+    i: usize,
+) -> Result<(), ReadinessError> {
+    let m = &graph.missions[i];
+    let mut blockers = reserved(
+        graph
+            .edges
+            .iter()
+            .filter(|edge| edge.consumer == *m.id())
+            .count()
+            .checked_add(5)
+            .ok_or(ReadinessError::Limit(LimitKind::Edges))?,
+    )?;
+    let s = &state.missions[i];
+    if s.status != MissionStatus::Pending {
+        blockers.push(MissionBlocker::NotPending);
+    }
+    match s.preconditions {
+        None => blockers.push(MissionBlocker::PreconditionsUnknown),
+        Some(false) => blockers.push(MissionBlocker::PreconditionsUnmet),
+        Some(true) => {}
+    }
+    let context = m.context.available();
+    if !context {
+        blockers.push(MissionBlocker::MissingContext);
+    }
+    if !s.coverage_known {
+        blockers.push(MissionBlocker::UnknownCoverage);
+    }
+    let mut dependencies = context && s.coverage_known;
+    for (j, edge) in graph.edges.iter().enumerate() {
+        if edge.consumer == *m.id()
+            && !matches!(state.edges[j].decision, EdgeDecision::Released { .. })
+        {
+            dependencies = false;
+            blockers.push(MissionBlocker::Dependency(edge.id.clone()));
+        }
+    }
+    match state.capacity {
+        None => blockers.push(MissionBlocker::CapacityUnknown),
+        Some(0) => blockers.push(MissionBlocker::NoCapacity),
+        Some(_) => {}
+    }
+    state.missions[i].dependency_ready = dependencies;
+    state.missions[i].blockers = blockers;
     Ok(())
 }
 
