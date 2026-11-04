@@ -378,6 +378,18 @@ dependent use. A trusted fixture's behavior is not an OS denial guarantee.
 H1/X1's full real-executor acceptance, F1-host, live R1/T1, J1 integration and
 Stage 3/4 retain their remaining gates. No canonical milestone state advances.
 
+### Bounded provider-free host qualification follow-up
+
+After accepted Stage 2B fixture integration, the owner authorizes the
+[host qualification and hardening extension](../architecture/host-qualification.md)
+under the retained Host-plan, E1/AUTH1, T1-contract, H1 and F1-host responsibilities.
+Read-only preflight and independent transport/source verification may advance
+without waiting for unavailable host delegation. Actual synthetic denial/resource
+probes require their own observed containment and selected finite campaign limits.
+No host-wide policy change, escalation, live provider, protected merge or full
+operational release is authorized. The original 27-artifact graph and all milestone
+states remain unchanged; source delivery cannot stand in for H1/F1-host acceptance.
+
 ## 005: governed evolution and evaluation
 
 CAP-EVL-002 evaluates defect-learning and rule changes against missed defects,

@@ -439,18 +439,35 @@ struct Framing {
     bytes: Vec<u8>,
     records: u64,
     malformed: bool,
+    record_limit: Option<u64>,
 }
 impl Framing {
+    fn valid(&self) -> bool {
+        if self.record_limit.is_some() {
+            // The extended transport validates JSON syntax without constructing
+            // a semantic tree. Historical fixtures keep their original parser.
+            serde_json::from_slice::<&serde_json::value::RawValue>(&self.bytes).is_ok()
+        } else {
+            serde_json::from_slice::<serde_json::Value>(&self.bytes).is_ok()
+        }
+    }
+    fn record(&mut self) -> Result<(), InterruptionReason> {
+        self.records = self
+            .records
+            .checked_add(1)
+            .ok_or(InterruptionReason::EventLimit)?;
+        if self.record_limit.is_some_and(|max| self.records > max) {
+            return Err(InterruptionReason::EventLimit);
+        }
+        Ok(())
+    }
     fn finish(&mut self) -> Result<(), InterruptionReason> {
         if !self.bytes.is_empty() {
-            if serde_json::from_slice::<serde_json::Value>(&self.bytes).is_err() {
+            if !self.valid() {
                 self.malformed = true;
                 return Err(InterruptionReason::MalformedOutput);
             }
-            self.records = self
-                .records
-                .checked_add(1)
-                .ok_or(InterruptionReason::OutputLimit)?;
+            self.record()?;
             self.bytes.clear();
         }
         Ok(())
@@ -458,16 +475,11 @@ impl Framing {
     fn feed(&mut self, input: &[u8], max: u64) -> Result<(), InterruptionReason> {
         for byte in input {
             if *byte == b'\n' {
-                if self.bytes.is_empty()
-                    || serde_json::from_slice::<serde_json::Value>(&self.bytes).is_err()
-                {
+                if self.bytes.is_empty() || !self.valid() {
                     self.malformed = true;
                     return Err(InterruptionReason::MalformedOutput);
                 }
-                self.records = self
-                    .records
-                    .checked_add(1)
-                    .ok_or(InterruptionReason::OutputLimit)?;
+                self.record()?;
                 self.bytes.clear();
             } else {
                 if self.bytes.len() as u64 >= max {
@@ -487,12 +499,17 @@ fn capture(
     limit: u64,
     framing: Option<&mut Framing>,
     frame: u64,
+    stream_limit: Option<(u64, InterruptionReason)>,
 ) -> Result<bool, InterruptionReason> {
     let used = count
         .checked_add(other)
         .ok_or(InterruptionReason::OutputLimit)?;
-    let size = usize::try_from(limit.saturating_sub(used).saturating_add(1).min(8192))
-        .map_err(|_| InterruptionReason::OutputLimit)?;
+    let remaining = limit.saturating_sub(used).saturating_add(1).min(
+        stream_limit.map_or(u64::MAX, |(max, _)| {
+            max.saturating_sub(*count).saturating_add(1)
+        }),
+    );
+    let size = usize::try_from(remaining.min(8192)).map_err(|_| InterruptionReason::OutputLimit)?;
     let mut bytes = [0_u8; 8192];
     match stream.read(&mut bytes[..size]) {
         Ok(0) => Ok(true),
@@ -502,6 +519,11 @@ fn capture(
                 .ok_or(InterruptionReason::OutputLimit)?;
             if count.checked_add(other).is_none_or(|n| n > limit) {
                 return Err(InterruptionReason::OutputLimit);
+            }
+            if let Some((max, cause)) = stream_limit
+                && *count > max
+            {
+                return Err(cause);
             }
             if let Some(framing) = framing {
                 framing.feed(&bytes[..n], frame)?;
@@ -537,21 +559,52 @@ fn supervise(
         bytes: vec![],
         records: 0,
         malformed: false,
+        record_limit: limits.transport.as_ref().map(|t| t.records),
     };
+    let mut buffers_usable = true;
+    if let Some(transport) = &limits.transport {
+        let reserve = usize::try_from(limits.frame_bytes)
+            .ok()
+            .and_then(|n| framing.bytes.try_reserve_exact(n).ok());
+        let buffers = (prepared.input.capacity() as u64)
+            .checked_add(framing.bytes.capacity() as u64)
+            .and_then(|n| n.checked_add(8192));
+        if reserve.is_none() || buffers.is_none_or(|n| n > transport.buffer_bytes) {
+            buffers_usable = false;
+            reason.get_or_insert(InterruptionReason::BufferLimit);
+        }
+    }
     let mut out_eof = false;
     let mut err_eof = false;
-    let mut out_failed = false;
-    let mut err_failed = false;
+    // If the selected buffer allocation could not be honored, do not enter a
+    // capture path that could grow an unreserved frame buffer during cleanup.
+    let mut out_failed = !buffers_usable;
+    let mut err_failed = out_failed;
     let mut in_closed = false;
     let mut next_authority = 0_u64;
     let mut cleanup_end = None;
+    let mut last_progress = 0_u64;
+    let mut first_record = None;
     loop {
         let ms = elapsed(running.start);
+        let transport_deadline = |ms: u64, first_record: Option<u64>, last_progress: u64| {
+            limits.transport.as_ref().and_then(|t| {
+                if first_record.is_none_or(|first| first >= t.startup_ms) && ms >= t.startup_ms {
+                    Some(InterruptionReason::StartupTimeout)
+                } else if ms.saturating_sub(last_progress) >= t.idle_ms {
+                    Some(InterruptionReason::IdleTimeout)
+                } else {
+                    None
+                }
+            })
+        };
         if reason.is_none() {
             if cancel.load(Ordering::Acquire) {
                 reason = Some(InterruptionReason::Cancelled);
             } else if ms >= limits.wall_ms {
                 reason = Some(InterruptionReason::Timeout);
+            } else if let Some(cause) = transport_deadline(ms, first_record, last_progress) {
+                reason = Some(cause);
             } else if ms >= next_authority {
                 if let Err(e) = authority(ms) {
                     reason = Some(e);
@@ -562,6 +615,10 @@ fn supervise(
         if reason.is_none() && elapsed(running.start) >= limits.wall_ms {
             reason = Some(InterruptionReason::Timeout);
         }
+        if reason.is_none() {
+            reason = transport_deadline(elapsed(running.start), first_record, last_progress);
+        }
+        let previous_counts = (result.input_bytes, result.stdout_bytes, result.stderr_bytes);
         if reason.is_none() && !in_closed {
             match running
                 .stdin
@@ -594,6 +651,10 @@ fn supervise(
                 limits.output_bytes,
                 Some(&mut framing),
                 limits.frame_bytes,
+                limits
+                    .transport
+                    .as_ref()
+                    .map(|t| (t.stdout_bytes, InterruptionReason::StdoutLimit)),
             ) {
                 Ok(v) => out_eof = v,
                 Err(e) => {
@@ -610,6 +671,10 @@ fn supervise(
                 limits.output_bytes,
                 None,
                 limits.frame_bytes,
+                limits
+                    .transport
+                    .as_ref()
+                    .map(|t| (t.stderr_bytes, InterruptionReason::StderrLimit)),
             ) {
                 Ok(v) => err_eof = v,
                 Err(e) => {
@@ -622,6 +687,20 @@ fn supervise(
             reason.get_or_insert(error);
             framing.bytes.clear();
         }
+        let observed_ms = elapsed(running.start);
+        if first_record.is_none() && framing.records > 0 {
+            first_record = Some(observed_ms);
+        }
+        if reason.is_none() {
+            reason = if observed_ms >= limits.wall_ms {
+                Some(InterruptionReason::Timeout)
+            } else {
+                transport_deadline(observed_ms, first_record, last_progress)
+            };
+        }
+        if previous_counts != (result.input_bytes, result.stdout_bytes, result.stderr_bytes) {
+            last_progress = observed_ms;
+        }
         if running.child.poll().is_err() {
             reason.get_or_insert(InterruptionReason::Io);
         }
@@ -633,6 +712,9 @@ fn supervise(
         if running.child.reaped.is_some() && out_eof && err_eof {
             if result.input_bytes < spec.input_len {
                 reason.get_or_insert(InterruptionReason::InputClosed);
+            }
+            if limits.transport.is_some() && framing.records == 0 {
+                reason.get_or_insert(InterruptionReason::StartupIncomplete);
             }
             // Recheck canonical authority at the observed completion boundary.
             if reason.is_none()
@@ -772,6 +854,12 @@ fn launch_after_commit(
         .check_supervised_current(current.state(), effect, scope, tick)
         .is_err()
         || elapsed(start) >= prepared.spec.limits.wall_ms
+        || prepared
+            .spec
+            .limits
+            .transport
+            .as_ref()
+            .is_some_and(|t| elapsed(start) >= t.startup_ms)
         || cancel.load(Ordering::Acquire)
     {
         // Every branch precedes spawn, so absence is observed rather than inferred

@@ -73,6 +73,7 @@ fn pin(root: &Temp, mode: &str, input: Vec<u8>) -> PinnedFixture {
             executable_bytes: 16_000_000,
             arguments: 2,
             argument_bytes: 4096,
+            transport: None,
         },
     };
     let executable =
@@ -324,6 +325,7 @@ fn framing_enforces_exact_frame_boundary_without_retaining_diagnostics() {
         bytes: vec![],
         records: 0,
         malformed: false,
+        record_limit: None,
     };
     framing.feed(b"{}\n", 2).unwrap();
     assert_eq!(framing.records, 1);
@@ -335,6 +337,223 @@ fn framing_enforces_exact_frame_boundary_without_retaining_diagnostics() {
     assert!(framing.malformed);
     let display = format!("{}", HarnessError::Unsupported(Control::Network));
     assert!(!display.contains("private-malformed-payload"));
+}
+
+fn bounded_transport() -> TransportLimits {
+    TransportLimits {
+        startup_ms: 150,
+        idle_ms: 150,
+        stdout_bytes: 1024,
+        stderr_bytes: 1024,
+        records: 8,
+        buffer_bytes: 16_384,
+    }
+}
+
+#[test]
+fn distinct_startup_idle_and_progress_deadlines_preserve_valid_neighbors() {
+    for (mode, startup, idle, expected) in [
+        (
+            "delayed-record",
+            60,
+            150,
+            Some(InterruptionReason::StartupTimeout),
+        ),
+        (
+            "idle-after-record",
+            150,
+            60,
+            Some(InterruptionReason::IdleTimeout),
+        ),
+        (
+            "no-record",
+            150,
+            150,
+            Some(InterruptionReason::StartupIncomplete),
+        ),
+        ("paced-records", 150, 150, None),
+    ] {
+        let root = Temp::new();
+        let mut pin = pin(&root, mode, b"input".to_vec());
+        let mut limits = bounded_transport();
+        limits.startup_ms = startup;
+        limits.idle_ms = idle;
+        pin.spec.limits.transport = Some(limits);
+        let result = run(&pin, |_| Ok(()));
+        match expected {
+            Some(reason) => {
+                assert_eq!(result.completion, ProcessCompletion::Interrupted { reason })
+            }
+            None => {
+                assert_eq!(
+                    result.outcome(&pin.spec),
+                    Some(cortex_core::program::operational::EffectOutcome::Succeeded)
+                );
+                assert_eq!(result.structured_records, 4);
+                assert!(result.elapsed_ms >= 60);
+            }
+        }
+        assert_eq!(
+            result.quiescence,
+            Quiescence::DirectChildReapedStreamsClosed
+        );
+    }
+}
+
+#[test]
+fn independent_stream_and_event_limits_cannot_borrow_each_others_allowance() {
+    for (mode, stdout, stderr, records, expected) in [
+        (
+            "two-records",
+            3,
+            1024,
+            8,
+            Some(InterruptionReason::StdoutLimit),
+        ),
+        ("stderr", 1024, 0, 8, Some(InterruptionReason::StderrLimit)),
+        (
+            "two-records",
+            1024,
+            1024,
+            1,
+            Some(InterruptionReason::EventLimit),
+        ),
+        (
+            "two-eof-records",
+            1024,
+            1024,
+            1,
+            Some(InterruptionReason::EventLimit),
+        ),
+        ("one-record", 3, 0, 1, None),
+    ] {
+        let root = Temp::new();
+        let mut pin = pin(&root, mode, b"input".to_vec());
+        let mut limits = bounded_transport();
+        limits.stdout_bytes = stdout;
+        limits.stderr_bytes = stderr;
+        limits.records = records;
+        pin.spec.limits.transport = Some(limits);
+        let result = run(&pin, |_| Ok(()));
+        match expected {
+            Some(reason) => {
+                assert_eq!(result.completion, ProcessCompletion::Interrupted { reason })
+            }
+            None => assert_eq!(
+                result.outcome(&pin.spec),
+                Some(cortex_core::program::operational::EffectOutcome::Succeeded)
+            ),
+        }
+        assert!(result.stdout_bytes <= stdout + 1);
+        assert!(result.stderr_bytes <= stderr + 1);
+    }
+}
+
+#[test]
+fn transport_buffers_refuse_insufficient_capacity_and_accept_exact_bound() {
+    let root = Temp::new();
+    let mut pin = pin(&root, "one-record", b"input".to_vec());
+    let mut limits = bounded_transport();
+    let required = pin.input.capacity() as u64 + pin.spec.limits.frame_bytes + 8192;
+    limits.buffer_bytes = required - 1;
+    pin.spec.limits.transport = Some(limits.clone());
+    let result = run(&pin, |_| Ok(()));
+    assert_eq!(
+        result.completion,
+        ProcessCompletion::Interrupted {
+            reason: InterruptionReason::BufferLimit
+        }
+    );
+    limits.buffer_bytes = required;
+    pin.spec.limits.transport = Some(limits);
+    let neighbor = run(&pin, |_| Ok(()));
+    assert_eq!(
+        neighbor.outcome(&pin.spec),
+        Some(cortex_core::program::operational::EffectOutcome::Succeeded)
+    );
+}
+
+#[test]
+fn earlier_interruption_cannot_mask_failed_transport_buffer_guard() {
+    let root = Temp::new();
+    let marker = root.0.join("queued");
+    let mut pin = pin(&root, "prefill-output", b"input".to_vec());
+    pin.spec.args.push(marker.to_string_lossy().into_owned());
+    let mut limits = bounded_transport();
+    // Controlled guard failure, not an attempted host memory-exhaustion probe.
+    limits.buffer_bytes = 1;
+    pin.spec.limits.transport = Some(limits);
+    let running = spawn(&pin, Instant::now()).unwrap();
+    let deadline = Instant::now() + Duration::from_millis(150);
+    while !marker.exists() && Instant::now() < deadline {
+        thread::sleep(POLL);
+    }
+    assert!(marker.exists());
+    let result = supervise(
+        running,
+        &pin,
+        &ids(),
+        &AtomicBool::new(false),
+        |_| Ok(()),
+        Some(InterruptionReason::AuthorityUnknown),
+    );
+    assert_eq!(
+        result.completion,
+        ProcessCompletion::Interrupted {
+            reason: InterruptionReason::AuthorityUnknown
+        }
+    );
+    assert_eq!(result.stdout_bytes, 0);
+    assert_eq!(result.stderr_bytes, 0);
+    assert_eq!(result.structured_records, 0);
+    assert_eq!(result.quiescence, Quiescence::Unknown);
+}
+
+#[test]
+fn legacy_framing_retains_its_original_number_and_nesting_grammar() {
+    let deep = format!("{}0{}\n", "[".repeat(128), "]".repeat(128));
+    for input in [b"1e999\n".as_slice(), deep.as_bytes()] {
+        let mut legacy = Framing {
+            bytes: vec![],
+            records: 0,
+            malformed: false,
+            record_limit: None,
+        };
+        assert_eq!(
+            legacy.feed(input, 1024),
+            Err(InterruptionReason::MalformedOutput)
+        );
+        // The selected extension validates lexical JSON without asserting a
+        // finite native number representation or constructing a Value tree.
+        let mut extended = Framing {
+            bytes: vec![],
+            records: 0,
+            malformed: false,
+            record_limit: Some(1),
+        };
+        extended.feed(input, 1024).unwrap();
+        assert_eq!(extended.records, 1);
+    }
+}
+
+#[test]
+fn authority_read_delay_cannot_refresh_idle_or_startup_deadlines() {
+    let root = Temp::new();
+    let mut pin = pin(&root, "delayed-record", b"input".to_vec());
+    let mut limits = bounded_transport();
+    limits.startup_ms = 60;
+    pin.spec.limits.transport = Some(limits);
+    let result = run(&pin, |_| {
+        thread::sleep(Duration::from_millis(80));
+        Ok(())
+    });
+    assert_eq!(
+        result.completion,
+        ProcessCompletion::Interrupted {
+            reason: InterruptionReason::StartupTimeout
+        }
+    );
+    assert_eq!(result.input_bytes, 0);
 }
 
 #[path = "../../cortex-evidence/tests/support/program.rs"]
@@ -351,6 +570,9 @@ struct DurableFixture {
     scope: EffectScope,
 }
 fn durable(mode: &str) -> DurableFixture {
+    durable_with_transport(mode, None)
+}
+fn durable_with_transport(mode: &str, transport: Option<TransportLimits>) -> DurableFixture {
     let root = Temp::new();
     let repo = root.0.join("repo");
     fs::create_dir(&repo).unwrap();
@@ -365,6 +587,7 @@ fn durable(mode: &str) -> DurableFixture {
     }
     spec.limits.executable_bytes = 16_000_000;
     spec.limits.argument_bytes = 4096;
+    spec.limits.transport = transport;
     let pin = inspect_fixture(
         &spec,
         &kernel.prepared_inputs()[0].1,
@@ -392,6 +615,94 @@ fn durable(mode: &str) -> DurableFixture {
         dispatch,
         scope,
     }
+}
+
+#[test]
+fn exact_transport_extension_roundtrips_and_replay_does_not_start_another_child() {
+    let transport = TransportLimits {
+        startup_ms: 800,
+        idle_ms: 800,
+        stdout_bytes: 900,
+        stderr_bytes: 100,
+        records: 8,
+        buffer_bytes: 16_384,
+    };
+    let f = durable_with_transport("count", Some(transport.clone()));
+    let reopened = ProgramStore::open(
+        &f.root.0.join("store"),
+        &f.key,
+        Access::ReadOnly,
+        ReadLimits::new(16_000_000, Duration::from_millis(200)).unwrap(),
+    )
+    .unwrap();
+    let before = reopened.load(&f.key, Access::ReadOnly).unwrap();
+    assert_eq!(
+        before.fixture_effects().effects()[0]
+            .process_spec
+            .as_ref()
+            .unwrap()
+            .limits
+            .transport,
+        Some(transport)
+    );
+    let result = execute_fixture(
+        &f.store,
+        &f.key,
+        f.dispatch.clone(),
+        ids(),
+        &f.pin,
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    assert!(result.recorded.is_some(), "{:?}", result.recording_failure);
+    assert_eq!(
+        result.observation.unwrap().outcome(&f.pin.spec),
+        Some(cortex_core::program::operational::EffectOutcome::Succeeded)
+    );
+    let replay = execute_fixture(
+        &f.store,
+        &f.key,
+        f.dispatch.clone(),
+        ids(),
+        &f.pin,
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    assert!(replay.dispatch.duplicate);
+    assert!(replay.observation.is_none());
+    assert_eq!(
+        fs::read(f.root.0.join("launch-count")).unwrap(),
+        b"started\n"
+    );
+}
+
+#[test]
+fn changed_transport_contract_cannot_reuse_an_exact_pin() {
+    let f = durable_with_transport(
+        "count",
+        Some(TransportLimits {
+            startup_ms: 800,
+            idle_ms: 800,
+            stdout_bytes: 900,
+            stderr_bytes: 100,
+            records: 8,
+            buffer_bytes: 16_384,
+        }),
+    );
+    let mut altered = f.pin;
+    altered.spec.limits.transport.as_mut().unwrap().records = 9;
+    assert!(matches!(
+        execute_fixture(
+            &f.store,
+            &f.key,
+            f.dispatch,
+            ids(),
+            &altered,
+            &AtomicBool::new(false)
+        ),
+        Err(HarnessError::TargetChanged)
+    ));
+    assert!(!f.root.0.join("launch-count").exists());
 }
 #[test]
 fn canonical_public_dispatch_captures_identity_and_replay_never_relaunches() {
@@ -693,6 +1004,42 @@ fn a_deadline_consumed_before_the_post_commit_launch_boundary_starts_no_child() 
     let kernel = f.store.load(&f.key, Access::ReadOnly).unwrap();
     let old = Instant::now()
         .checked_sub(Duration::from_millis(f.pin.spec.limits.wall_ms))
+        .unwrap();
+    let outcome = launch_after_commit(
+        &f.pin,
+        &kernel,
+        &support::intent(&f.scope).id,
+        &f.scope,
+        3,
+        old,
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    assert!(outcome.is_none());
+    assert!(!f.root.0.join("launch-count").exists());
+    assert_eq!(
+        kernel.fixture_effects().effects()[0].status,
+        cortex_core::program::operational::EffectStatus::DispatchUncertain
+    );
+}
+
+#[test]
+fn consumed_startup_deadline_does_not_borrow_the_remaining_wall_budget() {
+    let f = durable_with_transport(
+        "count",
+        Some(TransportLimits {
+            startup_ms: 50,
+            idle_ms: 800,
+            stdout_bytes: 900,
+            stderr_bytes: 100,
+            records: 8,
+            buffer_bytes: 16_384,
+        }),
+    );
+    f.store.admit(&f.key, f.dispatch.clone()).unwrap();
+    let kernel = f.store.load(&f.key, Access::ReadOnly).unwrap();
+    let old = Instant::now()
+        .checked_sub(Duration::from_millis(50))
         .unwrap();
     let outcome = launch_after_commit(
         &f.pin,

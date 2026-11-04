@@ -21,6 +21,50 @@ fn stored(f: &Temp) -> (ProgramStore, CoordinationKernel, EffectScope, ProcessSp
 }
 
 #[test]
+fn encrypted_transport_extension_reopens_exactly_and_changed_reuse_is_rejected() {
+    let f = Temp::new();
+    let (mut k, scope, mut spec) = supervised_fixture::configured_kernel(None);
+    spec.limits.transport = Some(TransportLimits {
+        startup_ms: 200,
+        idle_ms: 100,
+        stdout_bytes: 900,
+        stderr_bytes: 100,
+        records: 8,
+        buffer_bytes: 16384,
+    });
+    supervised_fixture::prepare(&mut k, &scope, &spec);
+    let s =
+        ProgramStore::create_supervised_fixture(&f.store(), &key(), k.initial().clone(), limits())
+            .unwrap();
+    for op in k.operations() {
+        s.admit(&key(), op.clone()).unwrap();
+    }
+    let reopened = ProgramStore::open(&f.store(), &key(), Access::ReadOnly, limits()).unwrap();
+    let replay = reopened.load(&key(), Access::ReadOnly).unwrap();
+    assert!(replay.fixture_effects().effects()[0].process_spec.as_ref() == Some(&spec));
+    let before = snapshot(&f);
+    let mut changed = k.operations().last().unwrap().clone();
+    if let Input::SupervisedEffect(e) = &mut changed.command {
+        if let EffectEvent::PrepareProcess { spec, .. } = e.as_mut() {
+            spec.limits.transport.as_mut().unwrap().records = 9;
+        } else {
+            panic!("expected exact process preparation");
+        }
+    } else {
+        panic!("expected supervised input");
+    }
+    let failure = s.admit(&key(), changed).unwrap_err();
+    assert_eq!(failure.completion, Completion::Rejected);
+    assert_eq!(snapshot(&f), before);
+    let bytes = fs::read(f.store().join("program.db")).unwrap();
+    assert!(
+        !bytes
+            .windows(b"process-spec".len())
+            .any(|part| part == b"process-spec")
+    );
+}
+
+#[test]
 fn supervised_profile_roundtrips_encrypted_contracts_and_old_formats_refuse() {
     let f = Temp::new();
     let (s, mut k, scope, spec) = stored(&f);
