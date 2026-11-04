@@ -249,15 +249,7 @@ impl ProgramStore {
             .file_name()
             .ok_or_else(|| StoreError::new(ErrorKind::InvalidLocation))?;
         let target = parent.join(name);
-        for mission in kernel.initial().graph().missions() {
-            let repo = mission.context().contract().candidate().repository();
-            for root in [repo.root(), repo.git_dir(), repo.common_dir()] {
-                let root = root.canonicalize().unwrap_or_else(|_| root.to_owned());
-                if target.starts_with(root) {
-                    return Err(StoreError::new(ErrorKind::InvalidLocation).into());
-                }
-            }
-        }
+        check_source_exclusion(&target, kernel.initial())?;
         let roots: Vec<_> = kernel
             .initial()
             .graph()
@@ -313,7 +305,7 @@ impl ProgramStore {
         location.ready()?;
         budget.check()?;
         let conn = history_store::connect(&location, key, Access::ReadOnly)?;
-        load(&conn, &mut budget)
+        load(&conn, &location, &mut budget)
     }
     /// Open existing data; read-only refuses journals rather than recovering.
     pub fn open(
@@ -328,7 +320,7 @@ impl ProgramStore {
         location.ready()?;
         budget.check()?;
         let conn = history_store::connect(&location, key, access)?;
-        let (id, _) = load(&conn, &mut budget)?;
+        let (id, _) = load(&conn, &location, &mut budget)?;
         Ok(Self {
             location,
             id,
@@ -351,7 +343,7 @@ impl ProgramStore {
         self.location.ready()?;
         budget.check()?;
         let conn = history_store::connect(&self.location, key, access)?;
-        let (id, kernel) = load(&conn, &mut budget)?;
+        let (id, kernel) = load(&conn, &self.location, &mut budget)?;
         if id != self.id {
             return Err(ProgramStoreError::TargetChanged);
         }
@@ -382,18 +374,25 @@ impl ProgramStore {
             .map_err(|e| AdmissionFailure::rejected(sql(e)))?;
         let mut validation =
             || -> Result<(KernelReceipt, Zeroizing<Vec<u8>>), ProgramStoreError> {
-                let (id, mut k) = load(&tx, &mut budget)?;
+                let (id, k) = load(&tx, &self.location, &mut budget)?;
                 if id != self.id {
                     return Err(ProgramStoreError::TargetChanged);
                 }
                 let encoded = codec::operation(&input, k.initial().limits().bytes)?;
-                let receipt = k.admit(input.clone())?;
+                let mut draft = k.clone();
+                let receipt = draft.admit(input.clone())?;
+                // Historical duplicates were already decoded by load. New inputs
+                // must also reconstruct before any write can be acknowledged.
                 if !receipt.duplicate {
+                    if codec::decode_operation(&encoded, &k)? != input {
+                        return Err(ProgramStoreError::Corrupt);
+                    }
                     budget.add(encoded.len())?;
                     if budget.used > k.initial().limits().bytes {
                         return Err(ProgramStoreError::Capacity);
                     }
                 }
+                check_source_exclusion(self.location.path(), draft.state().definition())?;
                 Ok((receipt, encoded))
             };
         let (receipt, encoded) = match validation() {
@@ -605,6 +604,7 @@ fn identity(c: &Connection, max: usize) -> Result<(StoreId, Vec<u8>), ProgramSto
 }
 fn load(
     c: &Connection,
+    location: &Location,
     budget: &mut Budget,
 ) -> Result<(StoreId, CoordinationKernel), ProgramStoreError> {
     budget.check()?;
@@ -617,6 +617,7 @@ fn load(
     let (id, initial) = identity(c, budget.limits.bytes)?;
     budget.add(initial.len())?;
     let definition = codec::decode_definition(&initial, budget.limits.bytes)?;
+    check_source_exclusion(location.path(), &definition)?;
     let mut kernel = CoordinationKernel::new(definition).map_err(|_| ProgramStoreError::Corrupt)?;
     let mut statement = c
         .prepare("SELECT ordinal,operation,payload FROM program_inputs ORDER BY ordinal")
@@ -640,6 +641,10 @@ fn load(
             return Err(ProgramStoreError::Capacity);
         }
         let input = codec::decode_operation(bytes, &kernel)?;
+        let amendment = matches!(
+            input.command,
+            cortex_evidence::program::Command::Amend { .. }
+        );
         if row
             .get_ref(1)
             .map_err(sql)?
@@ -655,9 +660,28 @@ fn load(
         if result.duplicate {
             return Err(ProgramStoreError::Corrupt);
         }
+        if amendment {
+            check_source_exclusion(location.path(), kernel.state().definition())?;
+        }
     }
     budget.check()?;
     Ok((id, kernel))
+}
+
+fn check_source_exclusion(
+    target: &Path,
+    definition: &ProgramDefinition,
+) -> Result<(), ProgramStoreError> {
+    for mission in definition.graph().missions() {
+        let repo = mission.context().contract().candidate().repository();
+        for root in [repo.root(), repo.git_dir(), repo.common_dir()] {
+            let resolved = root.canonicalize().unwrap_or_else(|_| root.to_owned());
+            if target.starts_with(resolved) {
+                return Err(StoreError::new(ErrorKind::InvalidLocation).into());
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

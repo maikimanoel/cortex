@@ -848,6 +848,8 @@ fn release_read(v: &V, k: &CoordinationKernel) -> Result<ReleaseInput, ProgramSt
     let snapshot = EdgeScopeSnapshot::capture(k.state().readiness(), &read(&s[1])?)
         .map_err(|_| bad())?
         .with_historical_cursor(read(&s[5])?)
+        .map_err(|_| bad())?
+        .with_original_scopes(read(&s[2])?, read(&s[3])?)
         .map_err(|_| bad())?;
     if scope(&snapshot)? != a[0] {
         return Err(bad());

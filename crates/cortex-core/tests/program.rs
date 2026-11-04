@@ -5,6 +5,156 @@ use cortex_core::{parallel::*, program::context::*, program::scheduling::*, prog
 use fixture::*;
 
 #[test]
+fn handoff_refuses_conflicting_grants_before_changing_either_attempt() {
+    let mut state = ProgramState::new(definition()).unwrap();
+    state
+        .claim(&grant(1, "operator"), attempt("old", "A", "operator"))
+        .unwrap();
+    let before = state.attempts().to_vec();
+    let notifications = state.readiness().notifications().len();
+    let mut sender = grant(1, "operator");
+    sender.id = GrantId::new("new-handoff-grant").unwrap();
+    let mut recipient = grant(1, "recipient");
+    recipient.id = sender.id.clone();
+    assert_eq!(
+        state.handoff(
+            &sender,
+            &recipient,
+            &AttemptId::new("old").unwrap(),
+            attempt("new", "A", "recipient")
+        ),
+        Err(ProgramError::IdentityConflict)
+    );
+    assert!(state.attempts() == before);
+    assert_eq!(state.readiness().notifications().len(), notifications);
+    recipient.id = GrantId::new("distinct-recipient-grant").unwrap();
+    state
+        .handoff(
+            &sender,
+            &recipient,
+            &AttemptId::new("old").unwrap(),
+            attempt("new", "A", "recipient"),
+        )
+        .unwrap();
+    assert_eq!(state.attempts()[0].status, AttemptStatus::HandedOver);
+    assert_eq!(state.attempts()[1].status, AttemptStatus::Claimed);
+}
+
+#[test]
+fn amendment_cannot_reuse_any_retained_mission_contract_revision_for_changed_contents() {
+    use cortex_core::{TaskContract, binding::CandidateBindingContract};
+    let mut state = ProgramState::new(definition()).unwrap();
+    let changed = |baseline: u64, revision: u64| {
+        with_contracts(&definition_revision(baseline, false), |c| {
+            if c.task().id() != &task("A") {
+                return c.clone();
+            }
+            CandidateBindingContract::new(
+                TaskContract::new(task("A"), "Changed accepted objective", "Changed criterion")
+                    .unwrap(),
+                rev(revision),
+                c.candidate().clone(),
+            )
+        })
+    };
+    assert_eq!(
+        state.amend(&grant(1, "operator"), changed(2, 1)),
+        Err(ProgramError::IdentityConflict)
+    );
+    assert_eq!(state.definitions().len(), 1);
+    state.amend(&grant(1, "operator"), changed(2, 2)).unwrap();
+    assert_eq!(
+        state.amend(&grant(2, "operator"), changed(3, 1)),
+        Err(ProgramError::IdentityConflict)
+    );
+    assert_eq!(state.definitions().len(), 2);
+    // Re-selecting the exact historical contract in an explicitly new baseline is valid.
+    state
+        .amend(&grant(2, "operator"), definition_revision(3, false))
+        .unwrap();
+    assert_eq!(state.definitions().len(), 3);
+}
+
+#[test]
+fn amendment_cannot_alias_historical_artifact_revisions() {
+    let changed = |baseline, revision, commit: &str| {
+        let definition = definition_revision(baseline, false);
+        let artifact = ArtifactReference::new(
+            ArtifactId::new("A").unwrap(),
+            rev(revision),
+            candidate(commit),
+        );
+        let edges = definition
+            .graph()
+            .edges()
+            .iter()
+            .map(|edge| {
+                if edge.requirement().artifact().id() != artifact.id() {
+                    return edge.clone();
+                }
+                DependencyEdge::new(
+                    edge.id().clone(),
+                    edge.producer().clone(),
+                    edge.consumer().clone(),
+                    ArtifactRequirement::new(
+                        artifact.clone(),
+                        edge.requirement().kind(),
+                        edge.requirement().level(),
+                        edge.requirement().predicates().to_vec(),
+                    )
+                    .unwrap(),
+                )
+            })
+            .collect();
+        let graph = DependencyGraph::new(
+            definition.graph().reference().clone(),
+            definition.graph().missions().to_vec(),
+            edges,
+            definition.graph().limits(),
+        )
+        .unwrap();
+        let mut increments = definition.increments().to_vec();
+        for increment in &mut increments {
+            for value in &mut increment.artifacts {
+                if value.id() == artifact.id() {
+                    *value = artifact.clone();
+                }
+            }
+        }
+        ProgramDefinition::new(
+            definition.id().clone(),
+            definition.outcome().clone(),
+            definition.revision(),
+            definition.predecessor(),
+            definition.approval().clone(),
+            graph,
+            definition.workstreams().to_vec(),
+            increments,
+            definition.limits(),
+        )
+        .unwrap()
+    };
+    let mut state = ProgramState::new(definition()).unwrap();
+    assert_eq!(
+        state.amend(&grant(1, "operator"), changed(2, 1, "9")),
+        Err(ProgramError::IdentityConflict)
+    );
+    assert_eq!(state.definitions().len(), 1);
+    state
+        .amend(&grant(1, "operator"), changed(2, 2, "9"))
+        .unwrap();
+    assert_eq!(
+        state.amend(&grant(2, "operator"), changed(3, 1, "9")),
+        Err(ProgramError::IdentityConflict)
+    );
+    assert_eq!(state.definitions().len(), 2);
+    state
+        .amend(&grant(2, "operator"), changed(3, 1, "a"))
+        .unwrap();
+    assert_eq!(state.definitions().len(), 3);
+}
+
+#[test]
 fn exclusive_claims_unknown_reconciliation_and_handoff() {
     let mut s = ProgramState::new(definition()).unwrap();
     s.claim(&grant(1, "operator"), attempt("one", "A", "operator"))

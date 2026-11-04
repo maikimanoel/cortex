@@ -54,8 +54,10 @@ explicitly; a passing count is not a general correctness or security guarantee.
 - `cortex-core`: deterministic task/candidate contracts and binding; no Git or CLI.
 - `cortex-evidence`: observations and assessments, including independent result,
   applicability and validity; depends on Core.
+- `cortex-storage`: explicit encrypted history/program persistence and replay;
+  depends on Core and Evidence, preserving the CLI history compatibility facade.
 - `cortex-cli`: command parsing, bounded Git observation, task-to-evidence
-  integration and encrypted history infrastructure; depends on Core and Evidence.
+  integration and read-only program inspection; depends on Core, Evidence and Storage.
 
 Start with the [architecture overview](docs/architecture/overview.md),
 [subsystem ownership](docs/architecture/subsystems.md),

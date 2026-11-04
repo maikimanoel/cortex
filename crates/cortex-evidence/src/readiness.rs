@@ -217,6 +217,21 @@ impl EdgeScopeSnapshot {
         self.cursor = cursor;
         Ok(self)
     }
+    /// Restore original mission-scope representations only when they equal the
+    /// captured scopes under Core's identity comparison. This preserves accepted
+    /// path spellings during input replay without changing semantic correspondence.
+    pub fn with_original_scopes(
+        mut self,
+        producer: MissionScope,
+        consumer: MissionScope,
+    ) -> Result<Self, SupportInputError> {
+        if self.producer != producer || self.consumer != consumer {
+            return Err(SupportInputError::ContextChanged);
+        }
+        self.producer = producer;
+        self.consumer = consumer;
+        Ok(self)
+    }
     /// Exact graph identity and revision.
     pub fn graph(&self) -> &GraphReference {
         &self.graph

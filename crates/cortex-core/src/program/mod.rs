@@ -711,6 +711,9 @@ impl ProgramState {
         old: &AttemptId,
         new: Attempt,
     ) -> Result<(), ProgramError> {
+        if from.id == to.id && from != to {
+            return Err(ProgramError::IdentityConflict);
+        }
         let mut draft = self.clone();
         let a = draft
             .attempts
@@ -784,6 +787,34 @@ impl ProgramState {
             })
         {
             return Err(ProgramError::Structure);
+        }
+        for mission in next.graph.missions() {
+            let contract = mission.context().contract();
+            if self.definitions.iter().any(|definition| {
+                definition.graph.missions().iter().any(|previous| {
+                    let prior = previous.context().contract();
+                    prior.task().id() == contract.task().id()
+                        && prior.revision() == contract.revision()
+                        && prior != contract
+                })
+            }) {
+                return Err(ProgramError::IdentityConflict);
+            }
+        }
+        for edge in next.graph.edges() {
+            let artifact = edge.requirement().artifact();
+            if self.definitions.iter().any(|definition| {
+                definition.graph.edges().iter().any(|previous| {
+                    let prior = previous.requirement().artifact();
+                    prior.id() == artifact.id()
+                        && (previous.producer() != edge.producer()
+                            || (prior.revision() == artifact.revision()
+                                && (prior != artifact
+                                    || previous.requirement().kind() != edge.requirement().kind())))
+                })
+            }) {
+                return Err(ProgramError::IdentityConflict);
+            }
         }
         let mut affected: BTreeSet<String> = BTreeSet::new();
         if old.outcome != next.outcome {

@@ -73,6 +73,11 @@ transitive closure are reset. Unchanged components replay their original inputs;
 explicit non-impact must name exactly the unaffected complement. Unknown declared
 coverage cannot establish non-impact. This is reasoning over declared contracts,
 not automatic semantic impact discovery or live source verification.
+An amendment cannot reuse any retained task/revision identity for different
+objectives, acceptance criteria or candidate requirements, even after an intervening
+baseline. An exact historical contract may be selected by a new accepted baseline.
+G1's artifact alias rules also apply across retained baselines: an artifact ID
+keeps its producer, and its revision cannot acquire a different candidate or kind.
 
 `CoordinationGrant` binds the claimed operator, exact program/baseline, mission
 scope and metadata permissions. Changed reuse of a grant identity is refused.
@@ -80,6 +85,8 @@ The trusted local caller supplies these assertions; neither signatures nor a
 multi-user permission service are implemented. A grant covering an invalidation
 root must also cover every mission whose projected state changes. The accepted
 baseline remains separate from mutable plans and external text.
+Sender and recipient grants in one handoff must also agree when they share an ID;
+the check precedes any change to either attempt.
 
 Claims serialize ownership of the same mission/increment or any shared declared
 semantic resource. Claiming marks the G1 mission active, without running it or
@@ -125,6 +132,9 @@ validated definition and ordinal, operation identity and complete canonical inpu
 bytes for each subsequent admission. Derived projections are rebuilt through
 Core/Evidence, never deserialized as trusted acceptance state. Canonical encoding
 rejects changed/extra fields, malformed revisions and conflicting identities.
+New inputs must reconstruct through the same codec before an append is acknowledged.
+Domain-equal path spellings retain their original bytes in frozen support scopes;
+replay does not replace them with a different equivalent representation.
 
 The lifecycle lock spans opening, exact incarnation checking, reconstruction,
 Core/Evidence validation and an IMMEDIATE transaction append. A confirmed receipt
@@ -145,7 +155,9 @@ blocked kernel I/O is not preempted. All claims assume the stated responsive loc
 filesystem profile.
 
 Stores must be explicit private directories outside declared source repository
-roots and Git metadata. Keys are caller-supplied raw 32-byte values; length/nonzero
+roots and Git metadata. Exclusion is checked at creation, on proposed amendments
+and against every retained baseline during reconstruction, including relocated
+stores. Keys are caller-supplied raw 32-byte values; length/nonzero
 validation does not establish entropy. Data is encrypted from the first record.
 No default key, key recovery, raw trace capture, automatic backup, sync, export,
 provider disclosure or retention eviction is supplied. Manual whole-store removal

@@ -50,6 +50,43 @@ pub fn capture(c: &CandidateBindingContract, n: u64) -> CandidateObservation {
 pub fn definition() -> ProgramDefinition {
     definition_revision(1, false)
 }
+pub fn with_contracts(
+    definition: &ProgramDefinition,
+    replace: impl Fn(&CandidateBindingContract) -> CandidateBindingContract,
+) -> ProgramDefinition {
+    let missions = definition
+        .graph()
+        .missions()
+        .iter()
+        .map(|mission| {
+            let contract = replace(mission.context().contract());
+            Mission::new(
+                MissionContext::new(contract.clone(), Some(capture(&contract, 1))).unwrap(),
+                mission.kind(),
+                mission.coverage(),
+            )
+        })
+        .collect();
+    let graph = DependencyGraph::new(
+        definition.graph().reference().clone(),
+        missions,
+        definition.graph().edges().to_vec(),
+        definition.graph().limits(),
+    )
+    .unwrap();
+    ProgramDefinition::new(
+        definition.id().clone(),
+        definition.outcome().clone(),
+        definition.revision(),
+        definition.predecessor(),
+        definition.approval().clone(),
+        graph,
+        definition.workstreams().to_vec(),
+        definition.increments().to_vec(),
+        definition.limits(),
+    )
+    .unwrap()
+}
 pub fn definition_revision(n: u64, change_a: bool) -> ProgramDefinition {
     let missions: Vec<_> = [
         ("A", "a"),

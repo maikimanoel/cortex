@@ -6,6 +6,56 @@ use cortex_evidence::{program::*, unified::*};
 use fixture::*;
 
 #[test]
+fn conflicting_grants_within_one_handoff_cannot_enter_the_journal() {
+    let mut kernel = CoordinationKernel::new(definition()).unwrap();
+    admit(
+        &mut kernel,
+        "claim",
+        Command::Claim(attempt("old", "A", "operator")),
+    );
+    let before = kernel.operations().to_vec();
+    let mut sender = grant(1, "operator");
+    sender.id = GrantId::new("fresh-shared-id").unwrap();
+    let mut recipient = grant(1, "recipient");
+    recipient.id = sender.id.clone();
+    let input = Operation {
+        id: OperationId::new("handoff").unwrap(),
+        expected: kernel.revision(),
+        grant: sender,
+        command: Command::Handoff {
+            old: AttemptId::new("old").unwrap(),
+            recipient,
+            next: attempt("new", "A", "recipient"),
+        },
+    };
+    assert!(kernel.admit(input).is_err());
+    assert!(kernel.operations() == before);
+    assert_eq!(kernel.state().attempts()[0].status, AttemptStatus::Claimed);
+}
+
+#[test]
+fn restoring_original_scope_representation_cannot_change_semantic_identity() {
+    let kernel = initialized();
+    let scope = cortex_evidence::readiness::EdgeScopeSnapshot::capture(
+        kernel.state().readiness(),
+        &EdgeId::new("AB").unwrap(),
+    )
+    .unwrap();
+    assert!(
+        scope
+            .clone()
+            .with_original_scopes(scope.producer().clone(), scope.consumer().clone())
+            .is_ok()
+    );
+    assert!(
+        scope
+            .clone()
+            .with_original_scopes(scope.consumer().clone(), scope.producer().clone())
+            .is_err()
+    );
+}
+
+#[test]
 fn intermediate_release_fan_out_fan_in_and_no_mission_completion() {
     let mut k = initialized();
     admit(

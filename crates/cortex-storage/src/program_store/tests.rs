@@ -2,6 +2,7 @@
 use super::*;
 #[path = "../../../cortex-evidence/tests/support/program.rs"]
 mod fixture;
+use cortex_core::binding::{CandidateBindingContract, CandidateRequirement, RepositoryIdentity};
 use cortex_core::program::*;
 use cortex_evidence::program::Command as Input;
 use fixture::*;
@@ -78,6 +79,193 @@ fn store_kernel(f: &Temp, k: &CoordinationKernel) -> ProgramStore {
         s.admit(&key(), o.clone()).unwrap();
     }
     s
+}
+
+#[test]
+fn amendment_checks_each_declared_source_root_before_appending() {
+    let f = Temp::new();
+    let store = create(&f);
+    let original = store.load(&key(), Access::ReadOnly).unwrap();
+    let before = snapshot(&f);
+    let alias = f.0.join("source-alias");
+    std::os::unix::fs::symlink(&f.0, &alias).unwrap();
+    for (which, root) in [
+        (0, f.0.clone()),
+        (1, f.0.clone()),
+        (2, f.0.clone()),
+        (0, alias),
+    ] {
+        let next = with_contracts(&definition_revision(2, false), |contract| {
+            let repo = contract.candidate().repository();
+            let mut roots = [
+                repo.root().to_owned(),
+                repo.git_dir().to_owned(),
+                repo.common_dir().to_owned(),
+            ];
+            roots[which] = root.clone();
+            CandidateBindingContract::new(
+                contract.task().clone(),
+                rev(2),
+                CandidateRequirement::new(
+                    RepositoryIdentity::new(roots[0].clone(), roots[1].clone(), roots[2].clone())
+                        .unwrap(),
+                    contract.candidate().commit().clone(),
+                    contract.candidate().worktree(),
+                ),
+            )
+        });
+        let input = operation(
+            &original,
+            "source-amendment",
+            Input::Amend {
+                next: Box::new(next),
+                non_impact: cortex_evidence::program::NonImpact {
+                    missions: vec![],
+                    basis: source("all-mission-contracts-changed"),
+                },
+            },
+        );
+        let failure = store.admit(&key(), input).unwrap_err();
+        assert_eq!(failure.completion, Completion::Rejected);
+        assert!(
+            matches!(failure.error, ProgramStoreError::Storage(e) if e.kind() == ErrorKind::InvalidLocation)
+        );
+        assert_eq!(snapshot(&f), before);
+        assert_eq!(store.load(&key(), Access::ReadOnly).unwrap().revision(), 0);
+    }
+    let neighbor = with_contracts(&definition_revision(2, false), |contract| {
+        let root = f.0.join("independent-source");
+        CandidateBindingContract::new(
+            contract.task().clone(),
+            rev(2),
+            CandidateRequirement::new(
+                RepositoryIdentity::new(root.clone(), root.join(".git"), root.join(".git"))
+                    .unwrap(),
+                contract.candidate().commit().clone(),
+                contract.candidate().worktree(),
+            ),
+        )
+    });
+    store
+        .admit(
+            &key(),
+            operation(
+                &original,
+                "source-amendment",
+                Input::Amend {
+                    next: Box::new(neighbor),
+                    non_impact: cortex_evidence::program::NonImpact {
+                        missions: vec![],
+                        basis: source("all-mission-contracts-changed"),
+                    },
+                },
+            ),
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .load(&key(), Access::ReadOnly)
+            .unwrap()
+            .state()
+            .definitions()
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn moved_store_inside_declared_source_is_refused_without_inspection_writes() {
+    let source_root = Temp::new();
+    let outside = Temp::new();
+    let definition = with_contracts(&definition(), |contract| {
+        CandidateBindingContract::new(
+            contract.task().clone(),
+            contract.revision(),
+            CandidateRequirement::new(
+                RepositoryIdentity::new(
+                    source_root.0.clone(),
+                    source_root.0.join(".git"),
+                    source_root.0.join(".git"),
+                )
+                .unwrap(),
+                contract.candidate().commit().clone(),
+                contract.candidate().worktree(),
+            ),
+        )
+    });
+    ProgramStore::create(&outside.store(), &key(), definition, limits()).unwrap();
+    fs::create_dir(source_root.store()).unwrap();
+    fs::set_permissions(source_root.store(), fs::Permissions::from_mode(0o700)).unwrap();
+    for name in [".lock", "program.db"] {
+        fs::copy(outside.store().join(name), source_root.store().join(name)).unwrap();
+    }
+    let before = snapshot(&source_root);
+    assert!(ProgramStore::open(&source_root.store(), &key(), Access::ReadOnly, limits()).is_err());
+    assert!(ProgramStore::inspect(&source_root.store(), &key(), limits()).is_err());
+    assert_eq!(snapshot(&source_root), before);
+    assert!(ProgramStore::inspect(&outside.store(), &key(), limits()).is_ok());
+}
+
+#[test]
+fn equivalent_scope_path_spellings_replay_exact_bytes_and_historical_duplicates() {
+    for suffix in ["/", "//"] {
+        let original = definition();
+        let equivalent = with_contracts(&original, |contract| {
+            let repo = contract.candidate().repository();
+            let spelling = |p: &Path| PathBuf::from(format!("{}{suffix}", p.display()));
+            CandidateBindingContract::new(
+                contract.task().clone(),
+                contract.revision(),
+                CandidateRequirement::new(
+                    RepositoryIdentity::new(
+                        spelling(repo.root()),
+                        spelling(repo.git_dir()),
+                        spelling(repo.common_dir()),
+                    )
+                    .unwrap(),
+                    contract.candidate().commit().clone(),
+                    contract.candidate().worktree(),
+                ),
+            )
+        });
+        assert!(original.graph().missions() == equivalent.graph().missions());
+        let mut kernel = CoordinationKernel::new(equivalent).unwrap();
+        let release = prepare_release(&mut kernel, "AB", true);
+        admit(&mut kernel, "release", Input::Release(Box::new(release)));
+        let f = Temp::new();
+        let store = ProgramStore::create(&f.store(), &key(), original, limits()).unwrap();
+        for operation in kernel.operations() {
+            store.admit(&key(), operation.clone()).unwrap();
+        }
+        let loaded = store.load(&key(), Access::ReadOnly).unwrap();
+        assert!(loaded.operations() == kernel.operations());
+        for (loaded, original) in loaded.operations().iter().zip(kernel.operations()) {
+            assert_eq!(
+                codec::operation(loaded, 16_000_000).unwrap().as_slice(),
+                codec::operation(original, 16_000_000).unwrap().as_slice()
+            );
+        }
+        let historical = kernel.operations().last().unwrap().clone();
+        store
+            .admit(
+                &key(),
+                operation(
+                    &loaded,
+                    "amend",
+                    Input::Amend {
+                        next: Box::new(definition_revision(2, true)),
+                        non_impact: cortex_evidence::program::NonImpact {
+                            missions: vec![task("D"), task("E")],
+                            basis: source("unchanged-components"),
+                        },
+                    },
+                ),
+            )
+            .unwrap();
+        let before = snapshot(&f);
+        assert!(store.admit(&key(), historical).unwrap().duplicate);
+        assert_eq!(snapshot(&f), before);
+    }
 }
 
 #[test]
