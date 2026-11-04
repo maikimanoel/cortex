@@ -223,6 +223,7 @@ fn finite_descendant_retaining_streams_is_unknown_then_owned_fixture_finishes() 
     pin.spec.limits.wall_ms = 30;
     pin.spec.limits.cleanup_ms = 30;
     let result = run(&pin, |_| Ok(()));
+    assert_eq!(result.input_bytes, pin.spec.input_len);
     assert_eq!(result.quiescence, Quiescence::Unknown);
     assert_eq!(
         result.completion,
@@ -231,6 +232,9 @@ fn finite_descendant_retaining_streams_is_unknown_then_owned_fixture_finishes() 
         }
     );
     let pid = fs::read_to_string(marker).unwrap().parse::<u32>().unwrap();
+    observe_finite_descendant_finished(pid);
+}
+fn observe_finite_descendant_finished(pid: u32) {
     thread::sleep(Duration::from_millis(350));
     // A briefly unreaped orphan zombie is no longer a running escaped fixture.
     if let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) {
@@ -240,6 +244,55 @@ fn finite_descendant_retaining_streams_is_unknown_then_owned_fixture_finishes() 
         );
     }
 }
+
+#[test]
+fn descendant_fixture_requires_complete_exact_input_and_eof_before_spawning() {
+    let root = Temp::new();
+    let mut pin = pin(&root, "descendant", b"input".to_vec());
+    let marker = root.0.join("child-pid");
+    let ready = root.0.join("awaiting-input");
+    pin.spec.args.extend([
+        marker.to_string_lossy().into_owned(),
+        ready.to_string_lossy().into_owned(),
+    ]);
+    pin.spec.limits.arguments = 3;
+    let mut running = spawn(&pin, Instant::now()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while !ready.exists() {
+        assert!(
+            running.child.poll().unwrap().is_none(),
+            "fixture exited before input readiness"
+        );
+        assert!(
+            Instant::now() < deadline,
+            "fixture never reached input readiness"
+        );
+        thread::sleep(POLL);
+    }
+    assert_eq!(fs::read(ready).unwrap(), b"awaiting-input-eof");
+    running.stdin.write_all(b"in").unwrap();
+    // Exercise a delayed, incomplete package: neither a partial read nor time
+    // passing may let the fixture spawn its descendant before EOF.
+    thread::sleep(Duration::from_millis(40));
+    assert!(running.child.poll().unwrap().is_none());
+    assert!(!marker.exists());
+    running.stdin.write_all(b"put").unwrap();
+    thread::sleep(Duration::from_millis(40));
+    assert!(running.child.poll().unwrap().is_none());
+    assert!(!marker.exists());
+    running.stdin.shutdown(Shutdown::Write).unwrap();
+    while running.child.poll().unwrap().is_none() {
+        assert!(
+            Instant::now() < deadline,
+            "fixture did not finish after exact input and EOF"
+        );
+        thread::sleep(POLL);
+    }
+    assert!(running.child.reaped.unwrap().success());
+    let pid = fs::read_to_string(marker).unwrap().parse::<u32>().unwrap();
+    observe_finite_descendant_finished(pid);
+}
+
 #[test]
 fn executable_replacement_symlinks_and_changed_bytes_refuse_pin_reuse() {
     let root = Temp::new();

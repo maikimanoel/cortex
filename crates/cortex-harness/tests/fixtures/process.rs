@@ -15,18 +15,15 @@ fn main() {
         thread::sleep(Duration::from_millis(250));
         return;
     }
-    if mode == "descendant" {
-        let child = Command::new(std::env::current_exe().unwrap())
-            .arg("retain")
-            .env_clear()
-            .stdin(Stdio::null())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .unwrap();
-        std::fs::write(args.next().unwrap(), child.id().to_string()).unwrap();
-        return;
-    }
+    let descendant_marker = if mode == "descendant" {
+        let marker = args.next().unwrap();
+        if let Some(ready) = args.next() {
+            std::fs::write(ready, b"awaiting-input-eof").unwrap();
+        }
+        Some(marker)
+    } else {
+        None
+    };
     if mode == "count" {
         use std::fs::OpenOptions;
         OpenOptions::new()
@@ -48,6 +45,22 @@ fn main() {
     }
     let mut input = Vec::new();
     std::io::stdin().read_to_end(&mut input).unwrap();
+    if let Some(marker) = descendant_marker {
+        // The stream-retention scenario begins only after the entire explicit
+        // package and EOF have arrived. Early parent exit would instead exercise
+        // the supervisor's truthful InputClosed path.
+        assert_eq!(input, b"input");
+        let child = Command::new(std::env::current_exe().unwrap())
+            .arg("retain")
+            .env_clear()
+            .stdin(Stdio::null())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap();
+        std::fs::write(marker, child.id().to_string()).unwrap();
+        return;
+    }
     match mode.as_str() {
         "malformed" => print!("private-malformed-payload\n"),
         "partial" => print!("{{\"incomplete\":"),
