@@ -556,6 +556,10 @@ fn process_child() {
     std::io::stdin().read_exact(&mut bytes).unwrap();
     let key = StoreKey::new(&bytes).unwrap();
     let s = ProgramStore::open(&root.join("store"), &key, Access::Recover, limits()).unwrap();
+    if mode.starts_with("supervised-") {
+        supervised::process_child(&root, &s, &key, &mode);
+        return;
+    }
     if mode.starts_with("effect-") {
         operational::process_child(&root, &s, &key, &mode);
         return;
@@ -975,3 +979,4 @@ fn failed_skipped_and_unknown_original_evidence_survives_storage() {
 }
 
 mod operational;
+mod supervised;

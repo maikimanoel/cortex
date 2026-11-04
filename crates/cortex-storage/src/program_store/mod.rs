@@ -43,21 +43,33 @@ pub enum ProgramProfile {
     MetadataV1,
     /// Stage 2A controlled effect fixtures; never real dispatch authorization.
     FixturesV2,
+    /// Explicit Stage 2B trusted local process fixtures; never an AI executor grant.
+    SupervisedFixturesV3,
 }
 impl ProgramProfile {
     fn format(self) -> i64 {
         match self {
             Self::MetadataV1 => 1,
             Self::FixturesV2 => 2,
+            Self::SupervisedFixturesV3 => 3,
         }
     }
     fn policy(self) -> &'static str {
         match self {
             Self::MetadataV1 => "local-operator-program-metadata-v1",
             Self::FixturesV2 => "local-operator-program-fixtures-v2",
+            Self::SupervisedFixturesV3 => "local-operator-program-supervised-fixtures-v3",
         }
     }
     fn check(self, input: &Operation) -> Result<(), ProgramStoreError> {
+        use cortex_evidence::program::Command;
+        if matches!(input.command, Command::SupervisedEffect(_))
+            && self != Self::SupervisedFixturesV3
+            || matches!(input.command, Command::FixtureEffect(_))
+                && self == Self::SupervisedFixturesV3
+        {
+            return Err(ProgramStoreError::Unsupported);
+        }
         if self == Self::MetadataV1
             && matches!(
                 input.command,
@@ -68,6 +80,12 @@ impl ProgramProfile {
             Err(ProgramStoreError::Unsupported)
         } else {
             Ok(())
+        }
+    }
+    fn kernel(self, initial: ProgramDefinition) -> Result<CoordinationKernel, KernelError> {
+        match self {
+            Self::SupervisedFixturesV3 => CoordinationKernel::new_supervised_fixture(initial),
+            _ => CoordinationKernel::new(initial),
         }
     }
 }
@@ -282,6 +300,23 @@ impl ProgramStore {
     ) -> Result<Self, ProgramStoreError> {
         Self::create_profile(path, key, initial, limits, ProgramProfile::FixturesV2)
     }
+    /// Create a separate explicit journal for supervised trusted local fixtures.
+    /// Neither creation nor replay launches a process or activates a host backend.
+    /// Metadata/history format 1 and pure fixture format 2 are never upgraded.
+    pub fn create_supervised_fixture(
+        path: &Path,
+        key: &StoreKey,
+        initial: ProgramDefinition,
+        limits: ReadLimits,
+    ) -> Result<Self, ProgramStoreError> {
+        Self::create_profile(
+            path,
+            key,
+            initial,
+            limits,
+            ProgramProfile::SupervisedFixturesV3,
+        )
+    }
     fn create_profile(
         path: &Path,
         key: &StoreKey,
@@ -289,7 +324,7 @@ impl ProgramStore {
         limits: ReadLimits,
         profile: ProgramProfile,
     ) -> Result<Self, ProgramStoreError> {
-        let kernel = CoordinationKernel::new(initial)?;
+        let kernel = profile.kernel(initial)?;
         let bytes = codec::definition(kernel.initial())?;
         let mut budget = Budget::new(limits);
         budget.add(bytes.len())?;
@@ -391,6 +426,11 @@ impl ProgramStore {
     pub fn profile(&self) -> ProgramProfile {
         self.profile
     }
+    /// Selected cooperative reconstruction/lock limits. Supervisors must account
+    /// for these limits separately from child deadlines; they cannot preempt I/O.
+    pub fn read_limits(&self) -> ReadLimits {
+        self.limits
+    }
     /// Exact expected store incarnation, independent of program/candidate identity.
     pub fn id(&self) -> StoreId {
         self.id
@@ -422,8 +462,48 @@ impl ProgramStore {
         &self,
         key: &StoreKey,
         input: Operation,
-        mut observe: impl FnMut(Stage, &Connection),
+        observe: impl FnMut(Stage, &Connection),
     ) -> Result<Receipt, AdmissionFailure> {
+        self.admit_coordinated(key, input, observe, |_| ())
+            .map(|(receipt, _)| receipt)
+    }
+    /// Commit a new supervised fixture dispatch before invoking its launch boundary.
+    /// The lifecycle lock remains held through the short callback, preventing a
+    /// cooperating admission from changing the grant between commit and launch.
+    /// Exact duplicate inputs return `None` and NEVER invoke the callback. Failed
+    /// or uncertain commits also never invoke it. A crash after commit retains
+    /// dispatch uncertainty; reopening or retrying this method does not relaunch.
+    ///
+    /// The callback belongs to the trusted local supervisor, must not reenter this
+    /// store or wait for process completion, and is not a sandbox. It receives the
+    /// exact validated post-admission projection for final correspondence checks.
+    /// Its result is an observation, not an atomic external-effect commit. A panic,
+    /// lost reply or later storage failure leaves the durable uncertainty intact.
+    /// Responsive filesystem and cooperative-lock assumptions remain unchanged.
+    pub fn dispatch_fixture<R>(
+        &self,
+        key: &StoreKey,
+        input: Operation,
+        launch: impl FnOnce(&CoordinationKernel) -> R,
+    ) -> Result<(Receipt, Option<R>), AdmissionFailure> {
+        if self.profile != ProgramProfile::SupervisedFixturesV3
+            || !matches!(
+                &input.command,
+                cortex_evidence::program::Command::SupervisedEffect(event)
+                if matches!(**event, cortex_core::program::operational::EffectEvent::Dispatch { .. })
+            )
+        {
+            return Err(AdmissionFailure::rejected(ProgramStoreError::Unsupported));
+        }
+        self.admit_coordinated(key, input, |_, _| {}, launch)
+    }
+    fn admit_coordinated<R>(
+        &self,
+        key: &StoreKey,
+        input: Operation,
+        mut observe: impl FnMut(Stage, &Connection),
+        launch: impl FnOnce(&CoordinationKernel) -> R,
+    ) -> Result<(Receipt, Option<R>), AdmissionFailure> {
         let mut budget = Budget::new(self.limits);
         let _lock = self
             .location
@@ -437,7 +517,7 @@ impl ProgramStore {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|e| AdmissionFailure::rejected(sql(e)))?;
         let mut validation =
-            || -> Result<(KernelReceipt, Zeroizing<Vec<u8>>), ProgramStoreError> {
+            || -> Result<(KernelReceipt, Zeroizing<Vec<u8>>, CoordinationKernel), ProgramStoreError> {
                 let (id, k, profile) = load(&tx, &self.location, &mut budget)?;
                 if id != self.id || profile != self.profile {
                     return Err(ProgramStoreError::TargetChanged);
@@ -458,9 +538,9 @@ impl ProgramStore {
                     }
                 }
                 check_source_exclusion(self.location.path(), draft.state().definition())?;
-                Ok((receipt, encoded))
+                Ok((receipt, encoded, draft))
             };
-        let (receipt, encoded) = match validation() {
+        let (receipt, encoded, draft) = match validation() {
             Ok(v) => v,
             Err(error) => {
                 return Err(AdmissionFailure {
@@ -478,11 +558,14 @@ impl ProgramStore {
                 completion: Completion::Indeterminate,
                 error: sql(e),
             })?;
-            return Ok(Receipt {
-                store: self.id,
-                ordinal: receipt.ordinal,
-                duplicate: true,
-            });
+            return Ok((
+                Receipt {
+                    store: self.id,
+                    ordinal: receipt.ordinal,
+                    duplicate: true,
+                },
+                None,
+            ));
         }
         observe(Stage::BeforeWrite, &tx);
         let ordinal = i64::try_from(receipt.ordinal)
@@ -516,11 +599,16 @@ impl ProgramStore {
             error: sql(e),
         })?;
         observe(Stage::AfterCommit, &conn);
-        Ok(Receipt {
+        budget.check().map_err(|error| AdmissionFailure {
+            completion: Completion::Indeterminate,
+            error,
+        })?;
+        let receipt = Receipt {
             store: self.id,
             ordinal: receipt.ordinal,
             duplicate: false,
-        })
+        };
+        Ok((receipt, Some(launch(&draft))))
     }
     /// Reconcile an uncertain input with exact initial contract and predecessor.
     /// Any error, including a missing store, remains unresolved rather than absent.
@@ -672,10 +760,14 @@ fn identity(
             },
         )
         .map_err(|_| ProgramStoreError::Corrupt)?;
-    let profile = [ProgramProfile::MetadataV1, ProgramProfile::FixturesV2]
-        .into_iter()
-        .find(|p| p.format() == format && p.policy() == policy)
-        .ok_or(ProgramStoreError::Unsupported)?;
+    let profile = [
+        ProgramProfile::MetadataV1,
+        ProgramProfile::FixturesV2,
+        ProgramProfile::SupervisedFixturesV3,
+    ]
+    .into_iter()
+    .find(|p| p.format() == format && p.policy() == policy)
+    .ok_or(ProgramStoreError::Unsupported)?;
     Ok((
         StoreId::from_bytes(id.try_into().map_err(|_| ProgramStoreError::Corrupt)?),
         initial,
@@ -698,7 +790,9 @@ fn load(
     budget.add(initial.len())?;
     let definition = codec::decode_definition(&initial, budget.limits.bytes)?;
     check_source_exclusion(location.path(), &definition)?;
-    let mut kernel = CoordinationKernel::new(definition).map_err(|_| ProgramStoreError::Corrupt)?;
+    let mut kernel = profile
+        .kernel(definition)
+        .map_err(|_| ProgramStoreError::Corrupt)?;
     let mut statement = c
         .prepare("SELECT ordinal,operation,payload FROM program_inputs ORDER BY ordinal")
         .map_err(sql)?;

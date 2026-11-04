@@ -129,3 +129,8 @@ DEC-007 requires the real effect/reconciliation protocol; DEC-012 requires real
 principals, grant/revocation, method/reviewer and integration policy. Read-only
 installed-tool observations establish only their observed metadata. Stage 2B and
 protected merges require separate owner authority.
+
+The subsequent owner-approved [Stage 2B supervised-fixture slice](supervised-fixtures.md)
+extends these contracts for trusted provider-free development processes. It uses
+explicit format 3 and the same projection/journal owners; format 2 never silently
+acquires launch authority. Live executor and host qualification gates remain open.

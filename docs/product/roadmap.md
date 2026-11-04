@@ -357,6 +357,27 @@ retain their original dependencies. DEC-004/005/006/007/012 must be resolved for
 actual dependent operations. Passing fixtures does not satisfy those gates or
 advance any canonical milestone state. There is no automatic Stage 2B activation.
 
+### GPE-B Stage 2B sequencing exception
+
+After accepted Stage 2A, the owner authorizes native runtime implementation and
+provider-free development fixtures before broader 003/004 exits. The
+[supervised-fixture contract](../architecture/supervised-fixtures.md) adds bounded
+E1/AUTH1 process contracts and same-journal recovery, T1 exact fixture transport,
+the native Harness's trusted direct-child consumer, and I1 inspection. These reuse
+the accepted Stage 1/2A prerequisites; independently reviewable contracts and
+fixtures may advance without entire-workstream barriers. The original 27-increment
+graph and its full operational dependencies remain intact.
+
+This grant permits scoped Rust changes, bounded local tests/fault injection,
+independent review/repair, sanitized source-only PRs and existing included CI.
+It does not authorize Codex/provider invocation, live governed AI workers,
+unapproved real-host experiments, unqualified backend activation or protected
+merges. Hard isolation, actual operational budgets/reserves, provider disclosure,
+credential mediation and retention must be selected and qualified before their
+dependent use. A trusted fixture's behavior is not an OS denial guarantee.
+H1/X1's full real-executor acceptance, F1-host, live R1/T1, J1 integration and
+Stage 3/4 retain their remaining gates. No canonical milestone state advances.
+
 ## 005: governed evolution and evaluation
 
 CAP-EVL-002 evaluates defect-learning and rule changes against missed defects,

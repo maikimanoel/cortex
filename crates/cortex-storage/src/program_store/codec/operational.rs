@@ -7,7 +7,7 @@ use cortex_core::program::{
 
 identifiers!(EffectId);
 symbols!(Resource;Workers,Builds,Tests,CpuMillis,RamBytes,DiskBytes,TimeMillis,OutputBytes,CiJobs,ModelTokens);
-symbols!(EffectMode;ControlledFixture,ExternalExecutor);
+symbols!(EffectMode;ControlledFixture,SupervisedFixture,ExternalExecutor);
 symbols!(EffectOutcome;Succeeded,Failed,Interrupted);
 impl Wire for u32 {
     fn write(&self) -> Result<V, ProgramStoreError> {
@@ -59,6 +59,30 @@ impl Wire for EffectEvent {
                 json!(["revoke", grant.write()?, at, basis.write()?])
             }
             Self::Reserve { intent, at } => json!(["reserve", intent.write()?, at]),
+            Self::PrepareProcess {
+                effect,
+                scope,
+                at,
+                spec,
+            } => json!([
+                "prepare-process-v1",
+                effect.write()?,
+                scope.write()?,
+                at,
+                spec.write()?
+            ]),
+            Self::ProcessObserved {
+                effect,
+                scope,
+                at,
+                observation,
+            } => json!([
+                "process-observed-v1",
+                effect.write()?,
+                scope.write()?,
+                at,
+                observation.write()?
+            ]),
             Self::Dispatch {
                 effect,
                 scope,
@@ -193,6 +217,24 @@ impl Wire for EffectEvent {
                         at,
                         basis,
                     },
+                }
+            }
+            "prepare-process-v1" => {
+                let a = arr(v, 5)?;
+                Self::PrepareProcess {
+                    effect: read(&a[1])?,
+                    scope: read(&a[2])?,
+                    at: read(&a[3])?,
+                    spec: Box::new(read(&a[4])?),
+                }
+            }
+            "process-observed-v1" => {
+                let a = arr(v, 5)?;
+                Self::ProcessObserved {
+                    effect: read(&a[1])?,
+                    scope: read(&a[2])?,
+                    at: read(&a[3])?,
+                    observation: read(&a[4])?,
                 }
             }
             "report" => {

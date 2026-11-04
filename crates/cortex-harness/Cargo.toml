@@ -1,0 +1,17 @@
+[package]
+name = "cortex-harness"
+description = "Native bounded supervision of explicitly governed trusted Cortex fixtures"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+cortex-core = { path = "../cortex-core" }
+cortex-evidence = { path = "../cortex-evidence" }
+cortex-storage = { path = "../cortex-storage" }
+serde_json = { version = "1.0.154", features = ["raw_value"] }
+
+[lints]
+workspace = true

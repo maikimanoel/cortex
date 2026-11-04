@@ -1,4 +1,4 @@
-//! Evidence-backed Stage 1 coordination, with a replayable source-input journal.
+//! Evidence-backed coordination, with one replayable source-input journal.
 //!
 //! This is the canonical non-effectful admission boundary. It composes G1/A-1,
 //! never upgrades caller assertions to authenticated observations, and never
@@ -159,7 +159,8 @@ pub struct ExecutorInputRequest {
     /// Explicit input byte bound, no greater than the program envelope.
     pub max_bytes: usize,
 }
-/// Canonical admitted command families. No real external-effect command exists.
+/// Canonical admitted inputs. Only a separately qualified durable dispatch boundary
+/// may perform a supervised fixture effect; kernel admission and replay never do.
 #[derive(Clone, PartialEq, Eq)]
 pub enum Command {
     /// Informational G1 input; raw Review and Status are prohibited here.
@@ -214,6 +215,8 @@ pub enum Command {
     Package(PackageRequest),
     /// Controlled fixture input only; never dispatches or creates real authority.
     FixtureEffect(Box<EffectEvent>),
+    /// Explicit trusted development-process profile; replay itself never dispatches.
+    SupervisedEffect(Box<EffectEvent>),
     /// Retain exact proposed transport input without submission or authority.
     PrepareExecutorInput(Box<ExecutorInputRequest>),
 }
@@ -289,6 +292,14 @@ impl CoordinationKernel {
             prepared_inputs: vec![],
         })
     }
+    /// Construct the explicit supervised-development-fixture interpretation.
+    /// Its process inputs remain within this same canonical journal; no executor
+    /// is invoked by construction, admission, inspection or replay.
+    pub fn new_supervised_fixture(initial: ProgramDefinition) -> Result<Self, KernelError> {
+        let mut kernel = Self::new(initial)?;
+        kernel.fixture_effects = OperationalProjection::new_supervised_fixture();
+        Ok(kernel)
+    }
     /// Initial immutable input, used for exact reconstruction.
     pub fn initial(&self) -> &ProgramDefinition {
         &self.initial
@@ -313,7 +324,8 @@ impl CoordinationKernel {
     pub fn packages(&self) -> &[InstructionPackage] {
         &self.packages
     }
-    /// Reconstructed controlled fixtures, separate from real effects and Evidence.
+    /// The selected fixture projection. Its explicit mode separates simulations
+    /// from trusted supervised process records; neither is an Evidence assessment.
     pub fn fixture_effects(&self) -> &OperationalProjection {
         &self.fixture_effects
     }
@@ -565,7 +577,18 @@ impl CoordinationKernel {
                     return Err(ProgramError::Structure.into());
                 }
             }
-            Command::FixtureEffect(event) => self.fixture_event(g, event)?,
+            Command::FixtureEffect(event) => {
+                if self.fixture_effects.mode() != EffectMode::ControlledFixture {
+                    return Err(ProgramError::EffectUnavailable.into());
+                }
+                self.fixture_event(g, event)?;
+            }
+            Command::SupervisedEffect(event) => {
+                if self.fixture_effects.mode() != EffectMode::SupervisedFixture {
+                    return Err(ProgramError::EffectUnavailable.into());
+                }
+                self.fixture_event(g, event)?;
+            }
             Command::PrepareExecutorInput(request) => {
                 for (_, previous) in &self.prepared_inputs {
                     if (previous.descriptor().reference() == request.descriptor.reference()
@@ -639,6 +662,8 @@ impl CoordinationKernel {
                     .clone(),
             ],
             EffectEvent::Dispatch { scope, .. }
+            | EffectEvent::PrepareProcess { scope, .. }
+            | EffectEvent::ProcessObserved { scope, .. }
             | EffectEvent::Running { scope, .. }
             | EffectEvent::Report { scope, .. }
             | EffectEvent::Unknown { scope, .. }
@@ -648,7 +673,9 @@ impl CoordinationKernel {
         self.check(grant, CoordinationPermission::Review, &missions)?;
         let scope = match event {
             EffectEvent::Reserve { intent, .. } => Some(&intent.scope),
-            EffectEvent::Dispatch { scope, .. } => Some(scope),
+            EffectEvent::Dispatch { scope, .. } | EffectEvent::PrepareProcess { scope, .. } => {
+                Some(scope)
+            }
             _ => None,
         };
         if let Some(scope) = scope {
@@ -668,6 +695,48 @@ impl CoordinationKernel {
                 return Err(ProgramError::Stale.into());
             }
             package.check(&self.state, package.bytes())?;
+        }
+        let process = match event {
+            EffectEvent::PrepareProcess { scope, spec, .. } => Some((scope, spec.as_ref())),
+            EffectEvent::Dispatch { effect, scope, .. }
+                if self.fixture_effects.mode() == EffectMode::SupervisedFixture =>
+            {
+                Some((
+                    scope,
+                    self.fixture_effects
+                        .process_spec(effect)
+                        .ok_or(ProgramError::Missing)?,
+                ))
+            }
+            _ => None,
+        };
+        if let Some((scope, spec)) = process {
+            let prepared = self
+                .prepared_inputs
+                .iter()
+                .find(|(id, _)| id == &spec.prepared_input)
+                .map(|(_, input)| input)
+                .ok_or(ProgramError::Missing)?;
+            let request = prepared.package().request();
+            if request.id != scope.package
+                || request.revision != scope.package_revision
+                || request.mission != scope.mission
+                || request.baseline != scope.baseline
+                || request.generation != scope.generation
+                || prepared.bytes().len() as u64 != spec.input_len
+                || prepared.descriptor().identity().executable() != &spec.executable_identity
+                || prepared.descriptor().identity().host() != &spec.host
+                || prepared.requirements().reference() != &spec.profile
+                || spec.cwd != scope.candidate.repository().root()
+            {
+                return Err(ProgramError::Stale.into());
+            }
+            prepared.check(
+                &self.state,
+                prepared.descriptor(),
+                prepared.requirements(),
+                prepared.bytes(),
+            )?;
         }
         self.fixture_effects.apply(&self.state, event.clone())?;
         Ok(())

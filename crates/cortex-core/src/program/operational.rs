@@ -1,9 +1,11 @@
-//! Stage 2A controlled-fixture operational contracts and deterministic projection.
+//! Controlled and explicitly supervised fixture contracts with one projection.
 //!
-//! These records model intent, uncertainty and resource accounting; they cannot
-//! authorize or dispatch a process. All authority, time and enforcement references
-//! remain caller assertions. The Workflow journal owns retention and replay.
+//! These records model intent, uncertainty and resource accounting without I/O.
+//! Supervised fixtures additionally require the selected durable journal and host
+//! boundary. Authority, time and enforcement references remain caller assertions;
+//! no general executor permission follows. Workflow owns retention and replay.
 
+use super::supervision::*;
 use super::{
     scheduling::{Capacity, Demand, Resource},
     *,
@@ -29,11 +31,14 @@ impl fmt::Debug for EffectId {
         f.write_str("EffectId([redacted])")
     }
 }
-/// Only controlled fixtures are supported. Declaring an external executor fails.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Explicit fixture profiles; declaring a real external executor still fails.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EffectMode {
     /// No real executor or external operation is represented by this profile.
+    #[default]
     ControlledFixture,
+    /// Explicit trusted, provider-free owned development process profile.
+    SupervisedFixture,
     /// Reserved refusal case; no implementation or authority is supplied.
     ExternalExecutor,
 }
@@ -56,7 +61,7 @@ pub struct Policy {
     pub capacities: Vec<Capacity>,
     /// Dimensions consumed across settled effects instead of released on completion.
     pub cumulative: Vec<Resource>,
-    /// Maximum retained effects under this exact policy, positive and program-bounded.
+    /// Maximum total retained effects across policies, positive and program-bounded.
     pub max_effects: usize,
     /// Maximum additional attempts in a proven-absent retry chain; zero disables retry.
     pub max_retries: u32,
@@ -81,7 +86,7 @@ pub struct EffectScope {
     /// Exact stored package revision.
     pub package_revision: ContractRevision,
 }
-/// A proposed operational grant checked only inside the controlled fixture model.
+/// Explicit local grant assertion checked within the selected fixture profile.
 #[derive(Clone, PartialEq, Eq)]
 pub struct OperationalGrant {
     /// Immutable grant identity; changed reuse fails.
@@ -152,11 +157,13 @@ pub enum EffectStatus {
 pub enum Reconciliation {
     /// Exact fixture inspection establishes no dispatch/effect occurred.
     Absent,
-    /// A caller-reported terminal result with complete bounded fixture usage.
+    /// A terminal result with complete fixture usage; supervised measured overruns
+    /// remain charged when explicitly settling a quiescent failure/interruption.
     Observed {
         /// Result being reconciled; cannot rewrite a retained contradictory report.
         outcome: EffectOutcome,
-        /// Known nonnegative usage for every policy dimension, bounded by reservation.
+        /// Known nonnegative usage for every dimension. Pure fixture usage is
+        /// bounded by reservation; supervised usage must match captured quantities.
         usage: Vec<Demand>,
     },
 }
@@ -193,6 +200,28 @@ pub enum EffectEvent {
         at: u64,
         /// Explicit fixture dispatch-intent reference.
         basis: SourceReference,
+    },
+    /// Bind one immutable process specification before a supervised dispatch.
+    PrepareProcess {
+        /// Exact retained effect identity.
+        effect: EffectId,
+        /// Exact current effect scope.
+        scope: EffectScope,
+        /// Controller logical millisecond tick.
+        at: u64,
+        /// Complete finite process specification, never executable instructions.
+        spec: Box<ProcessSpec>,
+    },
+    /// Append a captured process observation; this performs no process operation.
+    ProcessObserved {
+        /// Exact retained effect identity.
+        effect: EffectId,
+        /// Exact historical scope, retained even after revocation or amendment.
+        scope: EffectScope,
+        /// Controller logical millisecond tick.
+        at: u64,
+        /// Immutable observation, distinct from a consequential assessment.
+        observation: ProcessObservation,
     },
     /// Retain fixture running observation without creating completion evidence.
     Running {
@@ -274,6 +303,13 @@ pub struct EffectRecord {
     pub cancellation_requested: bool,
     /// Number of prior effects in this retry chain.
     pub retries: u32,
+    /// Exact process contract, present only in the explicitly supervised profile.
+    pub process_spec: Option<ProcessSpec>,
+    /// Original captured process observations; none is overwritten by recovery.
+    pub process_observations: Vec<ProcessObservation>,
+    /// Durable prelaunch tick; a fresh controller may map it to elapsed milliseconds.
+    /// Replay cannot create a new clock origin or reattach to a retained PID.
+    pub dispatch_at: Option<u64>,
 }
 /// Typed, private-input-safe refusal from the deterministic fixture model.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -322,6 +358,7 @@ impl Error for OperationalError {
 /// Rebuildable fixture projection; never an operational authority or effect store.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct OperationalProjection {
+    mode: EffectMode,
     policies: Vec<Policy>,
     grants: Vec<OperationalGrant>,
     revoked: Vec<GrantId>,
@@ -334,6 +371,56 @@ impl OperationalProjection {
     /// Construct an empty projection with no policy, grant or operation authority.
     pub fn new() -> Self {
         Self::default()
+    }
+    /// Select the explicit trusted development-process profile. This still
+    /// performs no I/O and cannot supply a launch permit without its journal owner.
+    pub fn new_supervised_fixture() -> Self {
+        Self {
+            mode: EffectMode::SupervisedFixture,
+            ..Self::default()
+        }
+    }
+    /// Exact selected interpretation; it cannot change after construction.
+    pub fn mode(&self) -> EffectMode {
+        self.mode
+    }
+    /// Borrow the immutable process specification for an exact retained effect.
+    pub fn process_spec(&self, effect: &EffectId) -> Option<&ProcessSpec> {
+        self.effects
+            .iter()
+            .find(|e| &e.intent.id == effect)
+            .and_then(|e| e.process_spec.as_ref())
+    }
+    /// Recheck current scope, policy, revocation and logical millisecond expiry
+    /// for an already-dispatched owned fixture. This inspection grants no new
+    /// launch, assumes no process cleanup and never creates a restart clock origin.
+    pub fn check_supervised_current(
+        &self,
+        state: &ProgramState,
+        effect: &EffectId,
+        scope: &EffectScope,
+        at: u64,
+    ) -> Result<(), OperationalError> {
+        if self.mode != EffectMode::SupervisedFixture {
+            return Err(OperationalError::ExternalUnavailable);
+        }
+        if at < self.last_tick {
+            return Err(OperationalError::ClockRegression);
+        }
+        let i = self.effect_index(effect, scope)?;
+        let record = &self.effects[i];
+        if record.process_spec.is_none()
+            || record.dispatch_at.is_none()
+            || record.cancellation_requested
+            || !matches!(
+                record.status,
+                EffectStatus::DispatchUncertain | EffectStatus::Running
+            )
+            || at < record.dispatch_at.ok_or(ProgramError::Missing)?
+        {
+            return Err(OperationalError::GrantUnavailable);
+        }
+        self.check_grant(state, self.grant(&record.intent.grant)?, scope, at)
     }
     /// Retained exact policies; only the last is current for new reservations.
     pub fn policies(&self) -> &[Policy] {
@@ -374,13 +461,40 @@ impl OperationalProjection {
     pub fn accounted(&self, resource: Resource) -> Result<u64, OperationalError> {
         self.effects.iter().try_fold(0_u64, |sum, e| {
             let quantity = if e.pending() {
-                quantity(&e.intent.demand, resource)?
+                let reserved = quantity(&e.intent.demand, resource)?;
+                let observed = if self.mode == EffectMode::SupervisedFixture {
+                    match e.process_observations.last() {
+                        Some(o) if resource == Resource::TimeMillis => o.elapsed_ms,
+                        Some(o) if resource == Resource::OutputBytes => o
+                            .stdout_bytes
+                            .checked_add(o.stderr_bytes)
+                            .ok_or(ProgramError::Capacity)?,
+                        _ => 0,
+                    }
+                } else {
+                    0
+                };
+                // An overrun is an observation, not permission to spend more.
+                // Preserve the known debit instead of pretending a reservation capped it.
+                reserved.max(observed)
             } else {
                 match &e.reconciliation {
                     Some(Reconciliation::Observed { usage, .. })
                         if self.policy(&e.policy)?.cumulative.contains(&resource) =>
                     {
                         quantity(usage, resource)?
+                    }
+                    Some(Reconciliation::Absent)
+                        if self.mode == EffectMode::SupervisedFixture
+                            && resource == Resource::TimeMillis
+                            && self.policy(&e.policy)?.cumulative.contains(&resource) =>
+                    {
+                        // A measured pre-spawn refusal consumes controller time,
+                        // despite proving that no fixture child was started.
+                        e.process_observations
+                            .last()
+                            .ok_or(ProgramError::Missing)?
+                            .elapsed_ms
                     }
                     _ => 0,
                 }
@@ -437,7 +551,7 @@ impl OperationalProjection {
         Ok(super::scheduling::simulate(state, proposals, &capacities)?)
     }
     /// Atomically apply one explicit fixture event. This function has no I/O,
-    /// executor, process-control or real authority path. The composing journal
+    /// executor or process-control path. The composing journal
     /// handles immutable event IDs and exact replay before calling this reducer.
     pub fn apply(
         &mut self,
@@ -516,6 +630,9 @@ impl OperationalProjection {
         match event {
             EffectEvent::Policy(policy) => {
                 policy.validate(state)?;
+                if policy.mode != self.mode {
+                    return Err(OperationalError::ExternalUnavailable);
+                }
                 if self
                     .policies
                     .iter()
@@ -641,6 +758,9 @@ impl OperationalProjection {
                     observed_running: false,
                     cancellation_requested: false,
                     retries,
+                    process_spec: None,
+                    process_observations: Vec::new(),
+                    dispatch_at: None,
                 });
             }
             EffectEvent::Dispatch {
@@ -652,9 +772,78 @@ impl OperationalProjection {
                     return Err(ProgramError::Transition.into());
                 }
                 self.check_grant(state, self.grant(&record.intent.grant)?, scope, *at)?;
+                if self.mode == EffectMode::SupervisedFixture && record.process_spec.is_none() {
+                    return Err(ProgramError::Missing.into());
+                }
                 self.effects[i].status = EffectStatus::DispatchUncertain;
+                self.effects[i].dispatch_at = Some(*at);
+            }
+            EffectEvent::PrepareProcess {
+                effect,
+                scope,
+                at,
+                spec,
+            } => {
+                if self.mode != EffectMode::SupervisedFixture {
+                    return Err(OperationalError::ExternalUnavailable);
+                }
+                let i = self.effect_index(effect, scope)?;
+                let record = &self.effects[i];
+                if record.status != EffectStatus::Reserved || record.process_spec.is_some() {
+                    return Err(ProgramError::Transition.into());
+                }
+                let grant = self.grant(&record.intent.grant)?;
+                self.check_grant(state, grant, scope, *at)?;
+                spec.validate(state.definition().limits())?;
+                let policy = self.policy(&record.policy)?;
+                if spec.host != policy.host
+                    || spec.privacy != policy.privacy
+                    || spec.approval != grant.basis
+                {
+                    return Err(ProgramError::Authority.into());
+                }
+                if self
+                    .effects
+                    .iter()
+                    .filter_map(|e| e.process_spec.as_ref())
+                    .any(|p| p.reference == spec.reference)
+                {
+                    return Err(ProgramError::IdentityConflict.into());
+                }
+                let supported = BTreeSet::from([
+                    Resource::Workers,
+                    Resource::TimeMillis,
+                    Resource::OutputBytes,
+                ]);
+                if resource_set(&policy.capacities) != supported {
+                    return Err(ProgramError::EffectUnavailable.into());
+                }
+                if quantity(&record.intent.demand, Resource::Workers)? != 1
+                    || quantity(&record.intent.demand, Resource::TimeMillis)?
+                        < spec
+                            .limits
+                            .wall_ms
+                            .checked_add(spec.limits.cleanup_ms)
+                            .ok_or(ProgramError::Capacity)?
+                    || quantity(&record.intent.demand, Resource::OutputBytes)?
+                        < spec.limits.output_bytes
+                {
+                    return Err(ProgramError::Capacity.into());
+                }
+                self.effects[i].process_spec = Some(spec.as_ref().clone());
+            }
+            EffectEvent::ProcessObserved {
+                effect,
+                scope,
+                observation,
+                ..
+            } => {
+                self.process_observed(effect, scope, observation)?;
             }
             EffectEvent::Running { effect, scope, .. } => {
+                if self.mode == EffectMode::SupervisedFixture {
+                    return Err(ProgramError::EffectUnavailable.into());
+                }
                 let i = self.effect_index(effect, scope)?;
                 let record = &self.effects[i];
                 scope.check_current(state, &self.grant(&record.intent.grant)?.principal)?;
@@ -680,6 +869,9 @@ impl OperationalProjection {
                 outcome,
                 ..
             } => {
+                if self.mode == EffectMode::SupervisedFixture {
+                    return Err(ProgramError::EffectUnavailable.into());
+                }
                 let i = self.effect_index(effect, scope)?;
                 let record = &self.effects[i];
                 scope.check_current(state, &self.grant(&record.intent.grant)?.principal)?;
@@ -738,6 +930,9 @@ impl OperationalProjection {
                 ) {
                     return Err(ProgramError::Transition.into());
                 }
+                if self.mode == EffectMode::SupervisedFixture {
+                    self.check_process_reconciliation(record, resolution)?;
+                }
                 let status = match resolution {
                     Reconciliation::Absent => {
                         if record.observed_running || record.report.is_some() {
@@ -752,8 +947,9 @@ impl OperationalProjection {
                         let policy = self.policy(&record.policy)?;
                         validate_quantities(usage, &policy.capacities, true)?;
                         for d in usage {
-                            if quantity(usage, d.resource)?
-                                > quantity(&record.intent.demand, d.resource)?
+                            if self.mode == EffectMode::ControlledFixture
+                                && quantity(usage, d.resource)?
+                                    > quantity(&record.intent.demand, d.resource)?
                             {
                                 return Err(OperationalError::ResourceLimit(d.resource));
                             }
@@ -763,6 +959,139 @@ impl OperationalProjection {
                 };
                 self.effects[i].status = status;
                 self.effects[i].reconciliation = Some(resolution.clone());
+            }
+        }
+        Ok(())
+    }
+    fn process_observed(
+        &mut self,
+        effect: &EffectId,
+        scope: &EffectScope,
+        observation: &ProcessObservation,
+    ) -> Result<(), OperationalError> {
+        if self.mode != EffectMode::SupervisedFixture {
+            return Err(OperationalError::ExternalUnavailable);
+        }
+        let i = self.effect_index(effect, scope)?;
+        let record = &self.effects[i];
+        if !matches!(
+            record.status,
+            EffectStatus::DispatchUncertain
+                | EffectStatus::Running
+                | EffectStatus::Unknown
+                | EffectStatus::CancellationRequested
+        ) {
+            return Err(ProgramError::Transition.into());
+        }
+        let spec = record.process_spec.as_ref().ok_or(ProgramError::Missing)?;
+        observation.validate(spec)?;
+        if self
+            .effects
+            .iter()
+            .flat_map(|e| &e.process_observations)
+            .any(|o| o.id == observation.id)
+        {
+            return Err(ProgramError::IdentityConflict.into());
+        }
+        for prior in &record.process_observations {
+            if prior
+                .process
+                .as_ref()
+                .zip(observation.process.as_ref())
+                .is_some_and(|(a, b)| a != b)
+            {
+                return Err(ProgramError::Stale.into());
+            }
+            if matches!(
+                prior.completion,
+                ProcessCompletion::Exited { .. } | ProcessCompletion::Interrupted { .. }
+            ) && matches!(
+                observation.completion,
+                ProcessCompletion::Exited { .. } | ProcessCompletion::Interrupted { .. }
+            ) && prior.completion != observation.completion
+            {
+                return Err(ProgramError::IdentityConflict.into());
+            }
+        }
+        if let Some(prior) = record.process_observations.last()
+            && (observation.input_bytes < prior.input_bytes
+                || observation.stdout_bytes < prior.stdout_bytes
+                || observation.stderr_bytes < prior.stderr_bytes
+                || observation.structured_records < prior.structured_records
+                || observation.elapsed_ms < prior.elapsed_ms
+                || (prior.malformed_output && !observation.malformed_output))
+        {
+            return Err(ProgramError::Stale.into());
+        }
+        if observation.completion == ProcessCompletion::Spawned && record.observed_running {
+            return Err(ProgramError::Transition.into());
+        }
+        if observation.completion == ProcessCompletion::StartFailed
+            && (record.observed_running || record.report.is_some())
+        {
+            return Err(ProgramError::Transition.into());
+        }
+        let outcome = observation.outcome(spec);
+        if record.report.zip(outcome).is_some_and(|(a, b)| a != b) {
+            return Err(ProgramError::IdentityConflict.into());
+        }
+        let status = match observation.completion {
+            ProcessCompletion::Spawned if record.cancellation_requested => {
+                EffectStatus::CancellationRequested
+            }
+            ProcessCompletion::Spawned => EffectStatus::Running,
+            ProcessCompletion::StartFailed => EffectStatus::Reported,
+            ProcessCompletion::Unknown => EffectStatus::Unknown,
+            ProcessCompletion::Exited { .. } | ProcessCompletion::Interrupted { .. }
+                if observation.quiescence == Quiescence::DirectChildReapedStreamsClosed =>
+            {
+                EffectStatus::Reported
+            }
+            _ => EffectStatus::Unknown,
+        };
+        let record = &mut self.effects[i];
+        record.observed_running |= observation.process.is_some();
+        if let Some(outcome) = outcome {
+            record.report = Some(outcome);
+        }
+        record.status = status;
+        record.process_observations.push(observation.clone());
+        Ok(())
+    }
+    fn check_process_reconciliation(
+        &self,
+        record: &EffectRecord,
+        resolution: &Reconciliation,
+    ) -> Result<(), OperationalError> {
+        let spec = record.process_spec.as_ref().ok_or(ProgramError::Missing)?;
+        let observation = record
+            .process_observations
+            .last()
+            .ok_or(ProgramError::Missing)?;
+        match resolution {
+            Reconciliation::Absent => {
+                if observation.completion != ProcessCompletion::StartFailed
+                    || observation.quiescence != Quiescence::NoChildStarted
+                {
+                    return Err(ProgramError::Transition.into());
+                }
+            }
+            Reconciliation::Observed { outcome, usage } => {
+                if observation.quiescence != Quiescence::DirectChildReapedStreamsClosed
+                    || observation.outcome(spec) != Some(*outcome)
+                {
+                    return Err(ProgramError::Transition.into());
+                }
+                let output = observation
+                    .stdout_bytes
+                    .checked_add(observation.stderr_bytes)
+                    .ok_or(ProgramError::Capacity)?;
+                if quantity(usage, Resource::Workers)? != 1
+                    || quantity(usage, Resource::TimeMillis)? != observation.elapsed_ms
+                    || quantity(usage, Resource::OutputBytes)? != output
+                {
+                    return Err(ProgramError::Structure.into());
+                }
             }
         }
         Ok(())
@@ -791,7 +1120,9 @@ impl EffectEvent {
             | Self::Report { at, .. }
             | Self::Unknown { at, .. }
             | Self::Cancel { at, .. }
-            | Self::Reconcile { at, .. } => Some(*at),
+            | Self::Reconcile { at, .. }
+            | Self::PrepareProcess { at, .. }
+            | Self::ProcessObserved { at, .. } => Some(*at),
         }
     }
 }
@@ -855,7 +1186,7 @@ impl EffectScope {
 }
 impl Policy {
     fn validate(&self, state: &ProgramState) -> Result<(), OperationalError> {
-        if self.mode != EffectMode::ControlledFixture {
+        if self.mode == EffectMode::ExternalExecutor {
             return Err(OperationalError::ExternalUnavailable);
         }
         if self.program != *state.definition().id()

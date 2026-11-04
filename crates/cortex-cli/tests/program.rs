@@ -2,6 +2,8 @@
 //! GPE-B I1/O: real CLI output, key deadline and absence of recovery mutations.
 #[path = "../../cortex-evidence/tests/support/program.rs"]
 mod fixture;
+#[path = "../../cortex-evidence/tests/support/supervision.rs"]
+mod supervised_fixture;
 use cortex_core::program::*;
 use cortex_evidence::program::Command as Input;
 use cortex_storage::{
@@ -168,6 +170,215 @@ fn human_and_json_inspection_expose_causes_without_modifying_store() {
         s.load(&key(), Access::ReadOnly).unwrap().state().attempts()[0].status,
         AttemptStatus::Unknown
     );
+}
+
+#[test]
+fn supervised_inspection_preserves_unknown_and_cancellation_without_launch_or_private_spec() {
+    use cortex_core::program::{operational::*, supervision::*};
+    let f = Temp::new();
+    let (mut k, scope, mut spec) = supervised_fixture::configured_kernel(None);
+    spec.args = vec!["private-fixture-argument-sentinel".into()];
+    supervised_fixture::prepare(&mut k, &scope, &spec);
+    let input = supervised_fixture::dispatch_operation(&k, &scope);
+    k.admit(input).unwrap();
+    for (id, event) in [
+        (
+            "spawned",
+            EffectEvent::ProcessObserved {
+                effect: supervised_fixture::intent(&scope).id,
+                scope: scope.clone(),
+                at: 4,
+                observation: supervised_fixture::observation(
+                    &spec,
+                    1,
+                    ProcessCompletion::Spawned,
+                    Quiescence::Unknown,
+                ),
+            },
+        ),
+        (
+            "cancel",
+            EffectEvent::Cancel {
+                effect: supervised_fixture::intent(&scope).id,
+                scope: scope.clone(),
+                at: 5,
+                basis: source("operator-stop"),
+            },
+        ),
+        (
+            "unknown",
+            EffectEvent::ProcessObserved {
+                effect: supervised_fixture::intent(&scope).id,
+                scope: scope.clone(),
+                at: 6,
+                observation: supervised_fixture::observation(
+                    &spec,
+                    2,
+                    ProcessCompletion::Unknown,
+                    Quiescence::Unknown,
+                ),
+            },
+        ),
+    ] {
+        supervised_fixture::effect(&mut k, id, event);
+    }
+    let s =
+        ProgramStore::create_supervised_fixture(&f.store(), &key(), k.initial().clone(), limits())
+            .unwrap();
+    for op in k.operations() {
+        s.admit(&key(), op.clone()).unwrap();
+    }
+    let before = snapshot(&f);
+    let mut c = command(&f);
+    c.arg("--json");
+    let result = run(c, &[0x57; 32]);
+    assert!(result.status.success());
+    let text = String::from_utf8(result.stdout).unwrap();
+    assert!(!text.contains("private-fixture-argument-sentinel"));
+    assert!(!text.contains("/explicit/native-fixture"));
+    assert!(!text.contains("Bounded JSON-lines fixture output"));
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert!(value["fixture_projection"].is_null());
+    assert_eq!(
+        value["supervised_projection"]["schema"],
+        "cortex.supervised-fixtures.v1"
+    );
+    assert_eq!(value["live_executor_authority"], "UNAVAILABLE");
+    assert_eq!(
+        value["supervised_projection"]["isolation_backend_qualified"],
+        false
+    );
+    let effect = &value["supervised_projection"]["effects"][0];
+    assert_eq!(effect["status"], "Unknown");
+    assert_eq!(effect["pending_reconciliation"], true);
+    assert_eq!(effect["cancellation_requested"], true);
+    assert_eq!(effect["dispatch_intent_durable"], true);
+    assert_eq!(effect["observations"][1]["completion"]["kind"], "UNKNOWN");
+    assert_eq!(value["resource_reservations"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        value["resource_reservations"][0]["hard_host_reservation"],
+        "NOT_ESTABLISHED"
+    );
+    let human = run(command(&f), &[0x57; 32]);
+    assert!(human.status.success());
+    let human = String::from_utf8(human.stdout).unwrap();
+    assert!(human.contains("Supervised local fixture effect: Unknown"));
+    assert!(human.contains("no live executor or sandbox guarantee"));
+    assert_eq!(snapshot(&f), before);
+    assert_eq!(
+        s.load(&key(), Access::ReadOnly).unwrap().revision(),
+        k.revision()
+    );
+}
+
+#[test]
+fn supervised_reported_fixture_input_is_visible_without_implying_acceptance() {
+    use cortex_core::program::{operational::*, supervision::*};
+    let f = Temp::new();
+    let (mut k, scope, spec) = supervised_fixture::prepared_kernel(None);
+    let input = supervised_fixture::dispatch_operation(&k, &scope);
+    k.admit(input).unwrap();
+    for (n, completion, quiescence) in [
+        (1, ProcessCompletion::Spawned, Quiescence::Unknown),
+        (
+            2,
+            ProcessCompletion::Exited {
+                code: Some(0),
+                signal: None,
+            },
+            Quiescence::DirectChildReapedStreamsClosed,
+        ),
+    ] {
+        let observation = supervised_fixture::observation(&spec, n, completion, quiescence);
+        supervised_fixture::effect(
+            &mut k,
+            &format!("capture-{n}"),
+            EffectEvent::ProcessObserved {
+                effect: supervised_fixture::intent(&scope).id,
+                scope: scope.clone(),
+                at: 3 + n,
+                observation,
+            },
+        );
+    }
+    let s =
+        ProgramStore::create_supervised_fixture(&f.store(), &key(), k.initial().clone(), limits())
+            .unwrap();
+    for op in k.operations() {
+        s.admit(&key(), op.clone()).unwrap();
+    }
+    let before = snapshot(&f);
+    let mut c = command(&f);
+    c.arg("--json");
+    let output = run(c, &[0x57; 32]);
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["packages"][0]["submitted"], true);
+    assert_eq!(value["packages"][0]["provider_submission"], "NOT_SUPPORTED");
+    let effect = &value["supervised_projection"]["effects"][0];
+    assert_eq!(effect["status"], "Reported");
+    assert_eq!(effect["pending_reconciliation"], true);
+    assert_eq!(effect["mission_acceptance"], "NOT_INFERRED");
+    assert_eq!(effect["observations"][1]["raw_output_retained"], false);
+    assert_eq!(value["integration"], "NOT_SUPPORTED");
+    assert_eq!(snapshot(&f), before);
+    let last = k.fixture_effects().effects()[0]
+        .process_observations
+        .last()
+        .unwrap();
+    let usage = supervised_fixture::usage(last);
+    let reconciliation = operation(
+        &k,
+        "settle",
+        Input::SupervisedEffect(Box::new(EffectEvent::Reconcile {
+            effect: supervised_fixture::intent(&scope).id,
+            scope: scope.clone(),
+            at: 6,
+            resolution: Reconciliation::Observed {
+                outcome: EffectOutcome::Succeeded,
+                usage,
+            },
+            basis: source("explicit-exact-fixture-settlement"),
+        })),
+    );
+    s.admit(&key(), reconciliation).unwrap();
+    let before = snapshot(&f);
+    let mut c = command(&f);
+    c.arg("--json");
+    let output = run(c, &[0x57; 32]);
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        value["resource_reservations"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let accounting = value["supervised_projection"]["accounting"]
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        accounting
+            .iter()
+            .find(|a| a["resource"] == "TimeMillis")
+            .unwrap()["accounted"],
+        2
+    );
+    assert_eq!(
+        accounting
+            .iter()
+            .find(|a| a["resource"] == "OutputBytes")
+            .unwrap()["accounted"],
+        3
+    );
+    assert_eq!(
+        accounting
+            .iter()
+            .find(|a| a["resource"] == "Workers")
+            .unwrap()["accounted"],
+        0
+    );
+    assert_eq!(snapshot(&f), before);
 }
 #[test]
 fn wrong_key_program_and_short_or_long_key_are_safe_refusals() {

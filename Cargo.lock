@@ -43,6 +43,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "cortex-harness"
+version = "0.1.0"
+dependencies = [
+ "cortex-core",
+ "cortex-evidence",
+ "cortex-storage",
+ "serde_json",
+]
+
+[[package]]
 name = "cortex-storage"
 version = "0.1.0"
 dependencies = [

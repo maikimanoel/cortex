@@ -128,6 +128,13 @@ with no implicit mutation of metadata-only collections.
 
 ## Harness and controlled execution
 
+The authorized [Stage 2B implementation](supervised-fixtures.md) places trusted
+provider-free process supervision in `cortex-harness`. It consumes the existing
+Core guards, Evidence-owned Workflow journal and encrypted Storage dispatch
+boundary. Exact process observations return to that same journal; no independent
+effect ledger or acceptance path is created. This bounded direct-child development
+profile supplies no live AI adapter, hostile isolation or general host guarantee.
+
 Owns the single boundary for Cortex-initiated agent execution, actual host controls,
 agent/tool adapters, resource enforcement, interruption/cleanup and trace capture
 ([HRN](../product/capability-catalog.md#cap-hrn-001)). Receives core-authorized scoped

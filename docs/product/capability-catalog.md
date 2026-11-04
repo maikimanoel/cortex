@@ -80,6 +80,18 @@ capability statuses retain their complete contracts. Stage 2B remains gated by
 DEC-004/005/006/007/012 and actual qualification; source tests alone are not evidence
 of execution. The [roadmap](roadmap.md#gpe-b-stage-2a-sequencing-exception) owns sequence.
 
+## Owner-approved GPE-B Stage 2B boundary
+
+The [supervised-fixture slice](../architecture/supervised-fixtures.md) extends the
+same owners with exact process contracts, explicit encrypted profile 3, serialized
+commit-before-launch, native trusted local fixture supervision and read-only
+operational observations. This is provider-free development support, not qualified
+AI execution or effective isolation. Current grant checks and captured process
+observations do not create engineering acceptance. Full capability statuses and
+all 36 IDs remain unchanged. Live host/provider/resource decisions and protected
+integration remain gated; the [roadmap exception](roadmap.md#gpe-b-stage-2b-sequencing-exception)
+defines this bounded sequence.
+
 ## A. Core, task contracts, and operational authority
 
 ### CAP-CORE-001
