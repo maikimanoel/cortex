@@ -556,6 +556,10 @@ fn process_child() {
     std::io::stdin().read_exact(&mut bytes).unwrap();
     let key = StoreKey::new(&bytes).unwrap();
     let s = ProgramStore::open(&root.join("store"), &key, Access::Recover, limits()).unwrap();
+    if mode.starts_with("effect-") {
+        operational::process_child(&root, &s, &key, &mode);
+        return;
+    }
     if mode == "reopen" {
         let k = s.load(&key, Access::ReadOnly).unwrap();
         assert_eq!(k.state().attempts()[0].status, AttemptStatus::Unknown);
@@ -969,3 +973,5 @@ fn failed_skipped_and_unknown_original_evidence_survives_storage() {
     assert!(loaded.records() == k.records());
     assert!(loaded.records().iter().all(|r| r.assessment().is_none()));
 }
+
+mod operational;

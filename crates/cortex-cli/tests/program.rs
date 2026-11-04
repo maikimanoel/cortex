@@ -277,3 +277,95 @@ fn missing_required_limits_duplicates_and_effectful_commands_are_usage_errors() 
     assert!(o.status.success());
     assert!(String::from_utf8_lossy(&o.stdout).contains("read-timeout-ms"));
 }
+
+#[path = "../../cortex-evidence/tests/support/operational.rs"]
+mod operational_fixture;
+#[test]
+fn fixture_unknown_and_transport_preparation_are_explicit_and_inspection_has_no_effects() {
+    use cortex_core::program::operational::*;
+    let f = Temp::new();
+    let (mut k, scope) = operational_fixture::fixture_kernel();
+    operational_fixture::effect(
+        &mut k,
+        "reserve",
+        EffectEvent::Reserve {
+            intent: operational_fixture::intent(&scope, "fixture-effect"),
+            at: 1,
+        },
+    );
+    operational_fixture::effect(
+        &mut k,
+        "dispatch",
+        EffectEvent::Dispatch {
+            effect: EffectId::new("fixture-effect").unwrap(),
+            scope: scope.clone(),
+            at: 2,
+            basis: source("fixture-only"),
+        },
+    );
+    operational_fixture::effect(
+        &mut k,
+        "cancel",
+        EffectEvent::Cancel {
+            effect: EffectId::new("fixture-effect").unwrap(),
+            scope: scope.clone(),
+            at: 3,
+            basis: source("requested-cancellation"),
+        },
+    );
+    operational_fixture::effect(
+        &mut k,
+        "unknown",
+        EffectEvent::Unknown {
+            effect: EffectId::new("fixture-effect").unwrap(),
+            scope: scope.clone(),
+            at: 3,
+            basis: source("lost-reply"),
+        },
+    );
+    admit(
+        &mut k,
+        "prepare",
+        Input::PrepareExecutorInput(Box::new(operational_fixture::preparation(&scope))),
+    );
+    let store =
+        ProgramStore::create_fixture(&f.store(), &key(), k.initial().clone(), limits()).unwrap();
+    for operation in k.operations() {
+        store.admit(&key(), operation.clone()).unwrap();
+    }
+    let before = snapshot(&f);
+    let mut c = command(&f);
+    c.arg("--json");
+    let output = run(c, &[0x57; 32]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let view: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(view["execution_authority"], "UNAVAILABLE");
+    assert_eq!(view["resource_reservations"], serde_json::json!([]));
+    let fixtures = &view["fixture_projection"];
+    assert_eq!(fixtures["mode"], "CONTROLLED_FIXTURE_ONLY");
+    assert_eq!(fixtures["real_execution_supported"], false);
+    assert_eq!(fixtures["effects"][0]["status"], "Unknown");
+    assert_eq!(fixtures["effects"][0]["pending"], true);
+    assert_eq!(fixtures["effects"][0]["cancellation_requested"], true);
+    assert_eq!(fixtures["effects"][0]["authorized"], false);
+    assert_eq!(fixtures["effects"][0]["real_dispatched"], false);
+    assert_eq!(fixtures["prepared_inputs"][0]["submitted"], false);
+    assert!(
+        !String::from_utf8_lossy(&output.stdout).contains("Controlled fixture observation only")
+    );
+    let human = run(command(&f), &[0x57; 32]);
+    assert!(human.status.success());
+    assert!(
+        String::from_utf8_lossy(&human.stdout)
+            .contains("Fixture effect fixture-effect: Unknown pending=true")
+    );
+    assert_eq!(snapshot(&f), before);
+    assert_eq!(
+        store.load(&key(), Access::ReadOnly).unwrap().revision(),
+        k.revision()
+    );
+}

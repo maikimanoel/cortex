@@ -51,6 +51,13 @@ packages and resource simulations grant no execution authority. History format 1
 and existing CLI check JSON remain unchanged. No runtime crate or model dependency
 is introduced; later runtime extraction requires its actual authorized consumers.
 
+The [Stage 2A foundations](operational-foundations.md) reuse that composition for
+controlled effect fixtures. Core owns deterministic grants/resource/state guards
+and executor capability contracts; Evidence's existing kernel owns the complete
+journal; Storage supplies explicit fixture format 2; CLI exposes fixture-only
+projections. Metadata format 1 and history format 1 retain their old boundaries.
+No operational host or permission path is activated.
+
 ## Logical areas and dependency direction
 
 The future areas in [subsystems](subsystems.md) are responsibilities, not promises

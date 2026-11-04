@@ -875,6 +875,8 @@ fn release_read(v: &V, k: &CoordinationKernel) -> Result<ReleaseInput, ProgramSt
 }
 fn command_write(c: &Command) -> Result<V, ProgramStoreError> {
     Ok(match c {
+        Command::PrepareExecutorInput(request) => json!(["executor-input-v1", request.write()?]),
+        Command::FixtureEffect(event) => json!(["fixture-effect-v1", event.write()?]),
         Command::Notify(n) => json!(["notify", n.write()?]),
         Command::Observe(r) => json!(["observe", r.write()?]),
         Command::Assess(a) => json!(["assess", a.write()?]),
@@ -911,12 +913,23 @@ fn command_read(v: &V, k: &CoordinationKernel) -> Result<Command, ProgramStoreEr
     let a = v.as_array().ok_or_else(bad)?;
     let tag = a.first().and_then(V::as_str).ok_or_else(bad)?;
     if [
-        "notify", "observe", "assess", "examine", "release", "plan", "claim", "package",
+        "notify",
+        "observe",
+        "assess",
+        "examine",
+        "release",
+        "plan",
+        "claim",
+        "package",
+        "fixture-effect-v1",
+        "executor-input-v1",
     ]
     .contains(&tag)
     {
         let a = arr(v, 2)?;
         return Ok(match tag {
+            "executor-input-v1" => Command::PrepareExecutorInput(read(&a[1])?),
+            "fixture-effect-v1" => Command::FixtureEffect(read(&a[1])?),
             "notify" => Command::Notify(read(&a[1])?),
             "observe" => Command::Observe(read(&a[1])?),
             "assess" => Command::Assess(read(&a[1])?),
@@ -1037,3 +1050,7 @@ pub(super) fn decode_operation(
     }
     Ok(o)
 }
+
+mod operational;
+
+mod executor;

@@ -339,6 +339,24 @@ Unrelated retrieval, portable exchange, broad profiles, evolution and portabilit
 remain in sequence. Independent operational acceptance and a finite owner-approved
 roadmap program must precede Cortex developing Cortex through the new runtime.
 
+### GPE-B Stage 2A sequencing exception
+
+After accepted Stage 1, the owner authorizes the bounded
+[operational foundations](../architecture/operational-foundations.md) before broader
+003/004 exits: E1 fixture intent/recovery, AUTH1 fixture policy/resource admission,
+T1-contract capability/input preparation, read-only Host-plan preparation and I1
+inspection extensions. These use accepted C1/S1/O1, D1/V1, Q1 and P1/K1 contracts.
+Intermediate contract/test artifacts may advance independently; no entire-workstream
+completion barrier is introduced. The original 27-increment graph remains the basis.
+
+This exception permits controlled native fixtures and source-only PR delivery,
+not real AI workers, provider tests, unapproved operational effects, real host
+qualification experiments or protected merges. E1/AUTH1's operational acceptance,
+H1, X1, F1-host, live R1/T1, J1 integration and later connected operational acceptance
+retain their original dependencies. DEC-004/005/006/007/012 must be resolved for the
+actual dependent operations. Passing fixtures does not satisfy those gates or
+advance any canonical milestone state. There is no automatic Stage 2B activation.
+
 ## 005: governed evolution and evaluation
 
 CAP-EVL-002 evaluates defect-learning and rule changes against missed defects,

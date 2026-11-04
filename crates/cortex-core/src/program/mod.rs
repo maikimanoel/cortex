@@ -11,6 +11,8 @@ use crate::{
 use std::{collections::BTreeSet, error::Error, fmt};
 
 pub mod context;
+pub mod executor;
+pub mod operational;
 pub mod scheduling;
 
 macro_rules! id {

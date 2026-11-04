@@ -44,6 +44,23 @@ security-setting changes, destructive resource operations and Stage 2+ execution
 are not delegated. Routine implementation/repair within the envelope does not need
 per-increment approval. A new consequential boundary needs only its missing decision.
 
+## GPE-B Stage 2A scoped authorization
+
+The owner authorizes native operational foundation contracts, deterministic resource
+admission, bounded fixture effects/recovery, executor capability/input interfaces,
+read-only installed-tool/host observation and inspection extensions. The
+[foundation contract](../architecture/operational-foundations.md) selects explicit
+program fixture format 2 under the existing encrypted journal; metadata format 1
+and history format 1 remain compatible and do not implicitly acquire effect inputs.
+This is a bounded DEC-007 implementation choice for controlled fixtures only.
+
+No real grant, provider disclosure policy, executor budget, host denial/revocation
+matrix, operational effect retry protocol or protected integration delegation is
+selected by this authorization. DEC-004/005/006/007/012 remain open for those
+consumers. Read-only metadata and synthetic observations cannot qualify a real host.
+Scoped development, local verification/repair and sanitized source-only PRs with
+existing included CI are allowed; Stage 2B execution and protected merges are not.
+
 ## DEC-001
 
 **Open-source license — resolved by the owner.** Cortex uses the standard

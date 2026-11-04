@@ -36,8 +36,41 @@ use std::{
 };
 use zeroize::Zeroizing;
 
-const FORMAT: i64 = 1;
-const POLICY: &str = "local-operator-program-metadata-v1";
+/// Explicitly selected program journal contract. No implicit upgrade is performed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgramProfile {
+    /// Original Stage 1 metadata-only journal; fixture effect inputs are refused.
+    MetadataV1,
+    /// Stage 2A controlled effect fixtures; never real dispatch authorization.
+    FixturesV2,
+}
+impl ProgramProfile {
+    fn format(self) -> i64 {
+        match self {
+            Self::MetadataV1 => 1,
+            Self::FixturesV2 => 2,
+        }
+    }
+    fn policy(self) -> &'static str {
+        match self {
+            Self::MetadataV1 => "local-operator-program-metadata-v1",
+            Self::FixturesV2 => "local-operator-program-fixtures-v2",
+        }
+    }
+    fn check(self, input: &Operation) -> Result<(), ProgramStoreError> {
+        if self == Self::MetadataV1
+            && matches!(
+                input.command,
+                cortex_evidence::program::Command::FixtureEffect(_)
+                    | cortex_evidence::program::Command::PrepareExecutorInput(_)
+            )
+        {
+            Err(ProgramStoreError::Unsupported)
+        } else {
+            Ok(())
+        }
+    }
+}
 const META: &str = "CREATE TABLE program_meta(singleton INTEGER PRIMARY KEY CHECK(singleton=1), format INTEGER NOT NULL, instance BLOB NOT NULL, policy TEXT NOT NULL, initial BLOB NOT NULL)";
 const ENTRIES: &str = "CREATE TABLE program_inputs(ordinal INTEGER PRIMARY KEY, operation TEXT NOT NULL UNIQUE, payload BLOB NOT NULL)";
 
@@ -221,6 +254,7 @@ pub struct ProgramStore {
     location: Location,
     id: StoreId,
     limits: ReadLimits,
+    profile: ProgramProfile,
 }
 impl fmt::Debug for ProgramStore {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -235,6 +269,25 @@ impl ProgramStore {
         key: &StoreKey,
         initial: ProgramDefinition,
         limits: ReadLimits,
+    ) -> Result<Self, ProgramStoreError> {
+        Self::create_profile(path, key, initial, limits, ProgramProfile::MetadataV1)
+    }
+    /// Create a distinct controlled-fixture journal. This is not a real effect
+    /// store or runtime grant, and never changes an existing format 1 collection.
+    pub fn create_fixture(
+        path: &Path,
+        key: &StoreKey,
+        initial: ProgramDefinition,
+        limits: ReadLimits,
+    ) -> Result<Self, ProgramStoreError> {
+        Self::create_profile(path, key, initial, limits, ProgramProfile::FixturesV2)
+    }
+    fn create_profile(
+        path: &Path,
+        key: &StoreKey,
+        initial: ProgramDefinition,
+        limits: ReadLimits,
+        profile: ProgramProfile,
     ) -> Result<Self, ProgramStoreError> {
         let kernel = CoordinationKernel::new(initial)?;
         let bytes = codec::definition(kernel.initial())?;
@@ -278,7 +331,12 @@ impl ProgramStore {
         tx.execute_batch(ENTRIES).map_err(sql)?;
         tx.execute(
             "INSERT INTO program_meta VALUES(1,?1,?2,?3,?4)",
-            rusqlite::params![FORMAT, id.as_slice(), POLICY, bytes.as_slice()],
+            rusqlite::params![
+                profile.format(),
+                id.as_slice(),
+                profile.policy(),
+                bytes.as_slice()
+            ],
         )
         .map_err(sql)?;
         budget.check()?;
@@ -290,6 +348,7 @@ impl ProgramStore {
             location,
             id: StoreId::from_bytes(id),
             limits,
+            profile,
         })
     }
     /// Read one explicit store once under a single cooperative deadline. This
@@ -305,7 +364,7 @@ impl ProgramStore {
         location.ready()?;
         budget.check()?;
         let conn = history_store::connect(&location, key, Access::ReadOnly)?;
-        load(&conn, &location, &mut budget)
+        load(&conn, &location, &mut budget).map(|(id, kernel, _)| (id, kernel))
     }
     /// Open existing data; read-only refuses journals rather than recovering.
     pub fn open(
@@ -320,12 +379,17 @@ impl ProgramStore {
         location.ready()?;
         budget.check()?;
         let conn = history_store::connect(&location, key, access)?;
-        let (id, _) = load(&conn, &location, &mut budget)?;
+        let (id, _, profile) = load(&conn, &location, &mut budget)?;
         Ok(Self {
             location,
             id,
             limits,
+            profile,
         })
+    }
+    /// Persisted profile; matching source contracts do not upgrade its authority.
+    pub fn profile(&self) -> ProgramProfile {
+        self.profile
     }
     /// Exact expected store incarnation, independent of program/candidate identity.
     pub fn id(&self) -> StoreId {
@@ -343,8 +407,8 @@ impl ProgramStore {
         self.location.ready()?;
         budget.check()?;
         let conn = history_store::connect(&self.location, key, access)?;
-        let (id, kernel) = load(&conn, &self.location, &mut budget)?;
-        if id != self.id {
+        let (id, kernel, profile) = load(&conn, &self.location, &mut budget)?;
+        if id != self.id || profile != self.profile {
             return Err(ProgramStoreError::TargetChanged);
         }
         Ok(kernel)
@@ -374,10 +438,11 @@ impl ProgramStore {
             .map_err(|e| AdmissionFailure::rejected(sql(e)))?;
         let mut validation =
             || -> Result<(KernelReceipt, Zeroizing<Vec<u8>>), ProgramStoreError> {
-                let (id, k) = load(&tx, &self.location, &mut budget)?;
-                if id != self.id {
+                let (id, k, profile) = load(&tx, &self.location, &mut budget)?;
+                if id != self.id || profile != self.profile {
                     return Err(ProgramStoreError::TargetChanged);
                 }
+                profile.check(&input)?;
                 let encoded = codec::operation(&input, k.initial().limits().bytes)?;
                 let mut draft = k.clone();
                 let receipt = draft.admit(input.clone())?;
@@ -503,8 +568,8 @@ impl ProgramStore {
         }
         if self.location.database_exists()? {
             let conn = history_store::connect(&self.location, key, Access::Recover)?;
-            let (id, _) = identity(&conn, self.limits.bytes)?;
-            if id != self.id {
+            let (id, _, profile) = identity(&conn, self.limits.bytes)?;
+            if id != self.id || profile != self.profile {
                 return Err(ProgramStoreError::TargetChanged);
             }
         } else if marker.is_none() {
@@ -535,10 +600,20 @@ impl ProgramStore {
                 return Err(StoreError::new(ErrorKind::AuthorizationRequired).into());
             }
         }
+        let profile = {
+            let _lock = location.lock_for(limits.timeout)?;
+            if location.database_exists()? {
+                let conn = history_store::connect(&location, key, Access::Recover)?;
+                identity(&conn, limits.bytes)?.2
+            } else {
+                ProgramProfile::MetadataV1
+            }
+        };
         Self {
             location,
             id: request.store,
             limits,
+            profile,
         }
         .remove(key, request)
     }
@@ -549,7 +624,10 @@ enum Stage {
     BeforeCommit,
     AfterCommit,
 }
-fn identity(c: &Connection, max: usize) -> Result<(StoreId, Vec<u8>), ProgramStoreError> {
+fn identity(
+    c: &Connection,
+    max: usize,
+) -> Result<(StoreId, Vec<u8>, ProgramProfile), ProgramStoreError> {
     let mut schema = c
         .prepare("SELECT name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY name")
         .map_err(sql)?;
@@ -594,19 +672,21 @@ fn identity(c: &Connection, max: usize) -> Result<(StoreId, Vec<u8>), ProgramSto
             },
         )
         .map_err(|_| ProgramStoreError::Corrupt)?;
-    if format != FORMAT || policy != POLICY {
-        return Err(ProgramStoreError::Unsupported);
-    }
+    let profile = [ProgramProfile::MetadataV1, ProgramProfile::FixturesV2]
+        .into_iter()
+        .find(|p| p.format() == format && p.policy() == policy)
+        .ok_or(ProgramStoreError::Unsupported)?;
     Ok((
         StoreId::from_bytes(id.try_into().map_err(|_| ProgramStoreError::Corrupt)?),
         initial,
+        profile,
     ))
 }
 fn load(
     c: &Connection,
     location: &Location,
     budget: &mut Budget,
-) -> Result<(StoreId, CoordinationKernel), ProgramStoreError> {
+) -> Result<(StoreId, CoordinationKernel, ProgramProfile), ProgramStoreError> {
     budget.check()?;
     if c.query_row("PRAGMA quick_check", [], |r| r.get::<_, String>(0))
         .map_err(sql)?
@@ -614,7 +694,7 @@ fn load(
     {
         return Err(ProgramStoreError::Corrupt);
     }
-    let (id, initial) = identity(c, budget.limits.bytes)?;
+    let (id, initial, profile) = identity(c, budget.limits.bytes)?;
     budget.add(initial.len())?;
     let definition = codec::decode_definition(&initial, budget.limits.bytes)?;
     check_source_exclusion(location.path(), &definition)?;
@@ -641,6 +721,7 @@ fn load(
             return Err(ProgramStoreError::Capacity);
         }
         let input = codec::decode_operation(bytes, &kernel)?;
+        profile.check(&input)?;
         let amendment = matches!(
             input.command,
             cortex_evidence::program::Command::Amend { .. }
@@ -665,7 +746,7 @@ fn load(
         }
     }
     budget.check()?;
-    Ok((id, kernel))
+    Ok((id, kernel, profile))
 }
 
 fn check_source_exclusion(

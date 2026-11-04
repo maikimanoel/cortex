@@ -102,12 +102,16 @@ pub fn simulate(
         return Err(ProgramError::Capacity);
     }
     let mut free = BTreeMap::new();
+    let mut insufficient_reserve = BTreeSet::new();
     for c in capacities {
+        if c.available.is_some_and(|v| v < c.verification_reserve) {
+            insufficient_reserve.insert(c.resource);
+        }
         if free
             .insert(
                 c.resource,
                 c.available
-                    .and_then(|v| v.checked_sub(c.verification_reserve)),
+                    .map(|v| v.saturating_sub(c.verification_reserve)),
             )
             .is_some()
         {
@@ -165,9 +169,14 @@ pub fn simulate(
             if cap.is_some_and(|c| !c.declared_enforceable) {
                 held.push(WaitReason::Unenforceable(d.resource));
             }
+            if insufficient_reserve.contains(&d.resource) {
+                held.push(WaitReason::Contention(d.resource));
+            }
             match (d.amount, free.get(&d.resource).copied().flatten()) {
                 (Some(required), Some(available)) if required > available => {
-                    held.push(WaitReason::Contention(d.resource))
+                    if !insufficient_reserve.contains(&d.resource) {
+                        held.push(WaitReason::Contention(d.resource));
+                    }
                 }
                 (Some(_), Some(_)) => {}
                 _ => held.push(WaitReason::Unknown(d.resource)),
