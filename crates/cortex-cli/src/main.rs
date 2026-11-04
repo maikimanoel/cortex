@@ -1,6 +1,8 @@
 //! The Cortex terminal interface and bounded local repository inspection.
 
 mod check;
+#[cfg(target_os = "linux")]
+mod program;
 
 use cortex_cli as inspection;
 
@@ -24,6 +26,7 @@ Options:
 
 Commands:
   inspect         Observe a local Git worktree (default: current directory)
+  program         Inspect an explicit encrypted coordination store (Linux)
   check           Check committed-HEAD equality with candidate-bound evidence
                   Use cortex check --help for scope and exit codes
 
@@ -66,6 +69,19 @@ fn run(
     diagnostics: &mut impl Write,
 ) -> Result<u8, CliError> {
     let first = args.next();
+    if first.as_deref() == Some(std::ffi::OsStr::new("program")) {
+        #[cfg(target_os = "linux")]
+        return program::run(args, output).map_err(CliError::Output);
+        #[cfg(not(target_os = "linux"))]
+        {
+            writeln!(
+                output,
+                "Program store inspection requires the qualified Linux storage profile"
+            )
+            .map_err(CliError::Output)?;
+            return Ok(3);
+        }
+    }
     if first.as_deref() == Some(std::ffi::OsStr::new("check")) {
         return check::run(args, output, diagnostics).map_err(CliError::Check);
     }

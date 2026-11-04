@@ -7,13 +7,28 @@ use std::{
     time::Instant,
 };
 
-pub(super) struct Location {
+pub(crate) struct Location {
     path: PathBuf,
     inode: u64,
     device: u64,
+    database: &'static str,
+    journal: &'static str,
 }
 impl Location {
-    pub(super) fn create(path: &Path, context: &CandidateObservation) -> Result<Self, StoreError> {
+    pub(crate) fn create(path: &Path, context: &CandidateObservation) -> Result<Self, StoreError> {
+        let mut roots = Vec::new();
+        for repo in std::iter::once(context.contract().candidate().repository())
+            .chain(context.state().repository())
+        {
+            roots.extend([
+                repo.root().to_owned(),
+                repo.git_dir().to_owned(),
+                repo.common_dir().to_owned(),
+            ]);
+        }
+        Self::create_roots(path, &roots)
+    }
+    fn create_roots(path: &Path, roots: &[PathBuf]) -> Result<Self, StoreError> {
         if !path.is_absolute() {
             return Err(StoreError::new(ErrorKind::InvalidLocation));
         }
@@ -25,13 +40,10 @@ impl Location {
             .file_name()
             .ok_or_else(|| StoreError::new(ErrorKind::InvalidLocation))?;
         let target = parent.join(name);
-        let expected = context.contract().candidate().repository();
-        for repo in std::iter::once(expected).chain(context.state().repository()) {
-            for root in [repo.root(), repo.git_dir(), repo.common_dir()] {
-                let resolved = root.canonicalize().unwrap_or_else(|_| root.to_owned());
-                if target.starts_with(resolved) {
-                    return Err(StoreError::new(ErrorKind::InvalidLocation));
-                }
+        for root in roots {
+            let resolved = root.canonicalize().unwrap_or_else(|_| root.to_owned());
+            if target.starts_with(resolved) {
+                return Err(StoreError::new(ErrorKind::InvalidLocation));
             }
         }
         DirBuilder::new().mode(0o700).create(&target)?;
@@ -61,17 +73,35 @@ impl Location {
             path: path.canonicalize()?,
             inode: m.ino(),
             device: m.dev(),
+            database: DATABASE,
+            journal: JOURNAL,
         })
     }
-    pub(super) fn open(path: &Path) -> Result<Self, StoreError> {
+    pub(crate) fn open(path: &Path) -> Result<Self, StoreError> {
         let location = Self::open_directory(path)?;
         location.files()?;
         Ok(location)
     }
-    pub(super) fn path(&self) -> &Path {
+    pub(crate) fn program_create(path: &Path, roots: &[PathBuf]) -> Result<Self, StoreError> {
+        let mut location = Self::create_roots(path, roots)?;
+        location.database = "program.db";
+        location.journal = "program.db-journal";
+        Ok(location)
+    }
+    pub(crate) fn program_open(path: &Path) -> Result<Self, StoreError> {
+        let mut location = Self::open_directory(path)?;
+        location.database = "program.db";
+        location.journal = "program.db-journal";
+        location.files()?;
+        Ok(location)
+    }
+    pub(crate) fn database(&self) -> &'static str {
+        self.database
+    }
+    pub(crate) fn path(&self) -> &Path {
         &self.path
     }
-    pub(super) fn check(&self) -> Result<(), StoreError> {
+    pub(crate) fn check(&self) -> Result<(), StoreError> {
         let m = fs::symlink_metadata(&self.path)?;
         if !m.is_dir()
             || m.ino() != self.inode
@@ -82,7 +112,10 @@ impl Location {
         }
         Ok(())
     }
-    pub(super) fn lock(&self) -> Result<File, StoreError> {
+    pub(crate) fn lock(&self) -> Result<File, StoreError> {
+        self.lock_for(Duration::from_secs(5))
+    }
+    pub(crate) fn lock_for(&self, timeout: Duration) -> Result<File, StoreError> {
         self.check()?;
         let file = OpenOptions::new()
             .read(true)
@@ -103,7 +136,7 @@ impl Location {
             match file.try_lock() {
                 Ok(()) => break,
                 Err(fs::TryLockError::WouldBlock) => {
-                    if start.elapsed() >= Duration::from_secs(5) {
+                    if start.elapsed() >= timeout.min(Duration::from_secs(5)) {
                         return Err(StoreError::new(ErrorKind::Busy));
                     }
                     std::thread::sleep(Duration::from_millis(10));
@@ -118,7 +151,7 @@ impl Location {
         }
         Ok(file)
     }
-    pub(super) fn files(&self) -> Result<(), StoreError> {
+    pub(crate) fn files(&self) -> Result<(), StoreError> {
         self.check()?;
         let mut bytes = 0u64;
         for (count, entry) in fs::read_dir(&self.path)?.enumerate() {
@@ -127,7 +160,7 @@ impl Location {
             }
             let entry = entry?;
             let name = entry.file_name();
-            if ![".lock", DATABASE, JOURNAL, REMOVING]
+            if ![".lock", self.database, self.journal, REMOVING]
                 .iter()
                 .any(|n| name == *n)
             {
@@ -150,29 +183,29 @@ impl Location {
         }
         Ok(())
     }
-    pub(super) fn ready(&self) -> Result<(), StoreError> {
+    pub(crate) fn ready(&self) -> Result<(), StoreError> {
         self.files()?;
         if self.intent()?.is_some() {
             return Err(StoreError::new(ErrorKind::RemovalPending));
         }
         Ok(())
     }
-    pub(super) fn database_exists(&self) -> Result<bool, StoreError> {
-        match fs::symlink_metadata(self.path.join(DATABASE)) {
+    pub(crate) fn database_exists(&self) -> Result<bool, StoreError> {
+        match fs::symlink_metadata(self.path.join(self.database)) {
             Ok(_) => Ok(true),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
             Err(e) => Err(e.into()),
         }
     }
-    pub(super) fn journal_exists(&self) -> Result<bool, StoreError> {
-        match fs::symlink_metadata(self.path.join(JOURNAL)) {
+    pub(crate) fn journal_exists(&self) -> Result<bool, StoreError> {
+        match fs::symlink_metadata(self.path.join(self.journal)) {
             Ok(m) => Ok(m.len() > 0),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
             Err(e) => Err(e.into()),
         }
     }
-    pub(super) fn check_database(&self) -> Result<(), StoreError> {
-        let m = fs::symlink_metadata(self.path.join(DATABASE))?;
+    pub(crate) fn check_database(&self) -> Result<(), StoreError> {
+        let m = fs::symlink_metadata(self.path.join(self.database))?;
         if m.mode() & 0o400 == 0 {
             return Err(StoreError::new(ErrorKind::Permission));
         }
@@ -181,21 +214,21 @@ impl Location {
         }
         Ok(())
     }
-    pub(super) fn create_database(&self) -> Result<(), StoreError> {
+    pub(crate) fn create_database(&self) -> Result<(), StoreError> {
         let file = OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(self.path.join(DATABASE))?;
+            .open(self.path.join(self.database))?;
         file.sync_all()?;
         Ok(())
     }
-    pub(super) fn sync(&self) -> Result<(), StoreError> {
+    pub(crate) fn sync(&self) -> Result<(), StoreError> {
         File::open(&self.path)?.sync_all()?;
         Ok(())
     }
-    pub(super) fn intent(&self) -> Result<Option<StoreId>, StoreError> {
+    pub(crate) fn intent(&self) -> Result<Option<StoreId>, StoreError> {
         match fs::symlink_metadata(self.path.join(REMOVING)) {
             Ok(m) if m.len() != 16 => return Err(StoreError::new(ErrorKind::RemovalIncomplete)),
             Ok(_) => {}
@@ -212,7 +245,7 @@ impl Location {
             Err(e) => Err(e.into()),
         }
     }
-    pub(super) fn write_intent(&self, id: StoreId) -> Result<(), StoreError> {
+    pub(crate) fn write_intent(&self, id: StoreId) -> Result<(), StoreError> {
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -223,7 +256,7 @@ impl Location {
         file.sync_all()?;
         self.sync()
     }
-    pub(super) fn unlink(&self, name: &str) -> Result<(), StoreError> {
+    pub(crate) fn unlink(&self, name: &str) -> Result<(), StoreError> {
         self.files()?;
         match fs::remove_file(self.path.join(name)) {
             Ok(()) => Ok(()),

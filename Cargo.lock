@@ -24,8 +24,8 @@ version = "0.1.0"
 dependencies = [
  "cortex-core",
  "cortex-evidence",
+ "cortex-storage",
  "libc",
- "rusqlite",
  "serde",
  "serde_json",
  "zeroize",
@@ -40,6 +40,19 @@ name = "cortex-evidence"
 version = "0.1.0"
 dependencies = [
  "cortex-core",
+]
+
+[[package]]
+name = "cortex-storage"
+version = "0.1.0"
+dependencies = [
+ "cortex-core",
+ "cortex-evidence",
+ "libc",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "zeroize",
 ]
 
 [[package]]
