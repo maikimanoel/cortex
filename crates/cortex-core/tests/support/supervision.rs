@@ -116,6 +116,117 @@ pub fn spec(scope: &EffectScope) -> ProcessSpec {
             argument_bytes: 50,
             transport: None,
         },
+        containment: None,
+    }
+}
+/// Explicit synthetic test contract; these paths are not a discovered host grant.
+pub fn owned_scope() -> OwnedScopeSpec {
+    OwnedScopeSpec {
+        reference: source("owned-scope-spec"),
+        unit: "cortex-qualification-fixture.scope".into(),
+        delegated_root: "/owned/cgroup".into(),
+        runtime_dir: "/owned/runtime".into(),
+        launcher: "/usr/bin/systemd-run".into(),
+        launcher_identity: source("scope-launcher"),
+        manager: "/usr/bin/systemctl".into(),
+        manager_identity: source("scope-manager"),
+        controls: ScopeControls {
+            cpu_quota_us: 100_000,
+            cpu_period_us: 100_000,
+            memory_bytes: 536_870_912,
+            swap_bytes: 0,
+            tasks_max: 8,
+        },
+        cpu_time_ms: 2000,
+        cancellation_grace_ms: 500,
+        escalation_ms: 500,
+        isolation: ScopeIsolation::ScopeOnlyInertFixture,
+    }
+}
+pub fn scope_demand() -> Vec<Demand> {
+    [
+        (Resource::Workers, 1),
+        (Resource::TimeMillis, 7000),
+        (Resource::OutputBytes, 81920),
+        (Resource::CpuMillis, 1000),
+        (Resource::RamBytes, 536_870_912),
+    ]
+    .into_iter()
+    .map(|(resource, amount)| Demand {
+        resource,
+        amount: Some(amount),
+    })
+    .collect()
+}
+pub fn scope_policy() -> Policy {
+    let mut p = policy();
+    p.reference = source("scope-policy");
+    p.capacities = [
+        (Resource::Workers, 2, 1),
+        (Resource::TimeMillis, 21_000, 7000),
+        (Resource::OutputBytes, 245_760, 81_920),
+        (Resource::CpuMillis, 3000, 2000),
+        (Resource::RamBytes, 4_831_838_208, 4_294_967_296),
+    ]
+    .into_iter()
+    .map(|(resource, available, verification_reserve)| Capacity {
+        resource,
+        available: Some(available),
+        verification_reserve,
+        declared_enforceable: true,
+    })
+    .collect();
+    p.max_retries = 0;
+    p
+}
+pub fn scope_grant(s: &EffectScope) -> OperationalGrant {
+    let mut g = proposed_grant(s);
+    g.policy = scope_policy().reference;
+    g.ceilings = scope_demand();
+    g.expires_before = 10_000;
+    g
+}
+pub fn scope_intent(s: &EffectScope) -> EffectIntent {
+    let mut i = intent(s);
+    i.demand = scope_demand();
+    i
+}
+pub fn contained_spec(s: &EffectScope) -> ProcessSpec {
+    let mut p = spec(s);
+    p.limits.wall_ms = 5000;
+    p.limits.cleanup_ms = 1000;
+    p.limits.input_bytes = 16_384;
+    p.limits.output_bytes = 81_920;
+    p.limits.frame_bytes = 4096;
+    p.limits.transport = Some(TransportLimits {
+        startup_ms: 1000,
+        idle_ms: 1000,
+        stdout_bytes: 65_536,
+        stderr_bytes: 16_384,
+        records: 128,
+        buffer_bytes: 131_072,
+    });
+    p.containment = Some(owned_scope());
+    p
+}
+pub fn scope_observation(s: &OwnedScopeSpec, populated: Option<bool>) -> ScopeObservation {
+    ScopeObservation {
+        identity: ScopeIdentity {
+            spec: s.reference.clone(),
+            unit: s.unit.clone(),
+            invocation_id: "123456789abcdef0123456789abcdef0".into(),
+            cgroup: s.delegated_root.join(&s.unit),
+            device: 1,
+            inode: 2,
+        },
+        controls: Some(s.controls.clone()),
+        membership_verified: true,
+        helper_quiescent: true,
+        lifecycle_verified: true,
+        populated,
+        cpu_usage_us: Some(10_000),
+        memory_peak_bytes: Some(1_048_576),
+        tasks_peak: Some(1),
     }
 }
 pub fn setup() -> (ProgramState, OperationalProjection, EffectScope) {
@@ -194,6 +305,8 @@ pub fn observation(
         malformed_output: false,
         elapsed_ms: n,
         basis: source("captured-fixture-observation"),
+        containment: None,
+        unresolved_scope_helpers: vec![],
     }
 }
 pub fn observed(

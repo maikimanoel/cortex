@@ -16,7 +16,7 @@ The Cortex foundation contains these actual crates:
 | `cortex-core` | Foundation contracts, candidate/task binding, canonical temporal records, immutable knowledge projections, G1 and metadata-only program contracts | Standard library only |
 | `cortex-evidence` | Legacy evidence plus unified result/applicability/validity, versioned context, redacted inspection and evidence-backed non-effectful program admission | `cortex-core` |
 | `cortex-storage` | Shared explicit encrypted lifecycle, compatible history and separate replayable program/Evidence codecs | Core/Evidence, existing JSON/SQLCipher bindings; OpenSSL 3 build prerequisite |
-| `cortex-harness` | Native supervision of explicitly granted trusted local process fixtures; no AI executor or isolation backend | Core/Evidence/Storage and existing JSON |
+| `cortex-harness` | Native supervision of explicitly granted trusted local fixtures and an optional owned-scope adapter; actual host qualification remains required | Core/Evidence/Storage and existing JSON |
 | `cortex-cli` | Existing commands, Git/lexical knowledge acquisition, history facade and read-only program/host inspection | Core/Evidence/Storage/Harness and JSON; local Git/util-linux |
 
 The accepted [0001 foundation decision](0001-foundation.md) is authoritative for
@@ -71,6 +71,13 @@ The [provider-free host extension](host-qualification.md) adds bounded metadata
 inspection in Harness, consumed read-only by CLI (CLI -> Harness), and optional
 journal-bound transport limits. It activates no isolation backend and supplies no
 qualification token. Core/Evidence/Storage retain their existing owners.
+
+The [owned-scope fixture adapter](owned-scope-fixtures.md) is a Harness module
+consumed by the same serialized launch path. Core owns optional exact scope
+requests and cleanup guards; Storage retains them in the existing encrypted
+journal; CLI projects the retained facts. Manager process grouping is operating-
+system infrastructure, not a second workflow authority. Actual denial and recovery
+evidence remains necessary before a host-control qualification claim.
 
 ## Logical areas and dependency direction
 

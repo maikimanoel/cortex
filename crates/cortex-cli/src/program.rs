@@ -149,6 +149,37 @@ fn fixture_view(k: &CoordinationKernel) -> Value {
     let prepared: Vec<_> = k.prepared_inputs().iter().map(|(id,p)|json!({"operation":id.as_str(),"package":p.package().request().id.as_str(),"package_revision":p.package().request().revision.get(),"executor":p.descriptor().identity().name(),"executor_version":p.descriptor().identity().version(),"bytes":p.bytes().len(),"current_structural_correspondence":p.check(k.state(),p.descriptor(),p.requirements(),p.bytes()).is_ok(),"submitted":false})).collect();
     json!({"schema":"cortex.fixture-effects.v1","mode":"CONTROLLED_FIXTURE_ONLY","real_execution_supported":false,"logical_tick":projection.last_tick(),"clock":"CALLER_ASSERTION","policies":projection.policies().len(),"proposed_grants":projection.grants().len(),"revoked_grants":projection.revoked().iter().map(|id|id.as_str()).collect::<Vec<_>>(),"effects":effects,"accounting":accounting,"prepared_inputs":prepared})
 }
+fn scope_controls_view(c: &ScopeControls) -> Value {
+    json!({"cpu_quota_us":c.cpu_quota_us,"cpu_period_us":c.cpu_period_us,
+        "charged_memory_bytes":c.memory_bytes,"swap_bytes":c.swap_bytes,"tasks_max":c.tasks_max})
+}
+fn scope_spec_view(s: &OwnedScopeSpec) -> Value {
+    let isolation = match &s.isolation {
+        ScopeIsolation::ScopeOnlyInertFixture => {
+            json!({"kind":"INERT_SCOPE_FIXTURE","filesystem_network_isolation":false})
+        }
+        ScopeIsolation::RootlessSyntheticCanary {
+            mounts,
+            scratch_bytes,
+            ..
+        } => json!({
+            "kind":"ROOTLESS_SYNTHETIC_CANARY","read_only_file_mounts":mounts.len(),
+            "scratch_bytes":scratch_bytes,"independent_file_inode_quotas":"UNESTABLISHED"}),
+    };
+    json!({"requested_controls":scope_controls_view(&s.controls),
+        "cpu_time_ms":s.cpu_time_ms,"cpu_time_enforcement":"COOPERATIVE_SAMPLING_NOT_HARD_CUMULATIVE_QUOTA",
+        "cancellation_grace_ms":s.cancellation_grace_ms,"escalation_ms":s.escalation_ms,
+        "isolation":isolation,"qualification":"NOT_INFERRED","private_scope_identity_omitted":true})
+}
+fn scope_observation_view(s: &ScopeObservation) -> Value {
+    json!({"incarnation_recorded":true,"membership_verified":s.membership_verified,
+        "lifecycle_verified":s.lifecycle_verified,"helper_quiescent":s.helper_quiescent,
+        "controls_readback":s.controls.as_ref().map(scope_controls_view),
+        "populated":s.populated,"cpu_usage_us":s.cpu_usage_us,
+        "charged_memory_peak_bytes":s.memory_peak_bytes,"tasks_peak":s.tasks_peak,
+        "measurement_scope":"RETAINED_CAPTURE_NOT_CURRENT_HOST_REINSPECTION",
+        "qualification":"NOT_INFERRED","adoption_supported":false,"private_scope_identity_omitted":true})
+}
 fn supervised_view(k: &CoordinationKernel) -> Value {
     let projection = k.fixture_effects();
     let accounting: Vec<_> = projection.current_policy().into_iter().flat_map(|p| &p.capacities).map(|capacity| {
@@ -170,11 +201,16 @@ fn supervised_view(k: &CoordinationKernel) -> Value {
                 ProcessCompletion::Interrupted { reason } => json!({"kind":"INTERRUPTED","reason":format!("{reason:?}")}),
                 ProcessCompletion::Unknown => json!({"kind":"UNKNOWN"}),
             };
-            json!({"observation_scope":o.id.scope(),"observation_sequence":o.id.sequence(),"completion":completion,"quiescence":format!("{:?}",o.quiescence),"process":o.process.as_ref().map(|p|json!({"pid":p.pid,"start_ticks":p.start_ticks,"adoption_supported":false})),"input_bytes":o.input_bytes,"stdout_bytes":o.stdout_bytes,"stderr_bytes":o.stderr_bytes,"structured_records":o.structured_records,"malformed_output":o.malformed_output,"elapsed_ms":o.elapsed_ms,"raw_output_retained":false})
+            json!({"observation_scope":o.id.scope(),"observation_sequence":o.id.sequence(),"completion":completion,"quiescence":format!("{:?}",o.quiescence),"process":o.process.as_ref().map(|p|json!({"pid":p.pid,"start_ticks":p.start_ticks,"adoption_supported":false})),"input_bytes":o.input_bytes,"stdout_bytes":o.stdout_bytes,"stderr_bytes":o.stderr_bytes,"structured_records":o.structured_records,"malformed_output":o.malformed_output,"elapsed_ms":o.elapsed_ms,"containment":o.containment.as_deref().map(scope_observation_view),"unresolved_scope_helpers":o.unresolved_scope_helpers.iter().map(|h|json!({"pid":h.pid,"start_ticks":h.start_ticks,"adoption_supported":false})).collect::<Vec<_>>(),"raw_output_retained":false})
         }).collect();
-        json!({"effect":effect.intent.id.as_str(),"mission":effect.intent.scope.mission.as_str(),"attempt":effect.intent.scope.attempt.as_str(),"candidate":effect.intent.scope.candidate.commit().as_str(),"status":format!("{:?}",effect.status),"pending_reconciliation":effect.pending(),"cancellation_requested":effect.cancellation_requested,"grant_revoked":projection.revoked().contains(&grant.id),"grant_expired_at_observed_tick":projection.last_tick() >= grant.expires_before,"dispatch_intent_durable":effect.dispatch_at.is_some(),"dispatch_tick":effect.dispatch_at,"process_spec_retained":effect.process_spec.is_some(),"configured_process_limits":limits,"reported_outcome":effect.report.map(|v|format!("{v:?}")),"observations":observations,"mission_acceptance":"NOT_INFERRED"})
+        json!({"effect":effect.intent.id.as_str(),"mission":effect.intent.scope.mission.as_str(),"attempt":effect.intent.scope.attempt.as_str(),"candidate":effect.intent.scope.candidate.commit().as_str(),"status":format!("{:?}",effect.status),"pending_reconciliation":effect.pending(),"cancellation_requested":effect.cancellation_requested,"grant_revoked":projection.revoked().contains(&grant.id),"grant_expired_at_observed_tick":projection.last_tick() >= grant.expires_before,"dispatch_intent_durable":effect.dispatch_at.is_some(),"dispatch_tick":effect.dispatch_at,"process_spec_retained":effect.process_spec.is_some(),"configured_process_limits":limits,"containment_request":effect.process_spec.as_ref().and_then(|s|s.containment.as_ref()).map(scope_spec_view),"reported_outcome":effect.report.map(|v|format!("{v:?}")),"observations":observations,"mission_acceptance":"NOT_INFERRED"})
     }).collect();
-    json!({"schema":"cortex.supervised-fixtures.v1","mode":"TRUSTED_LOCAL_PROCESS_FIXTURES","logical_tick":projection.last_tick(),"clock":"CONTROLLER_LOGICAL_MILLISECONDS","native_fixture_consumer":"AVAILABLE_REQUIRES_EXPLICIT_INVOCATION","live_executor_supported":false,"isolation_backend_qualified":false,"descendant_containment":"NOT_SUPPORTED","hard_host_quotas":"NOT_ESTABLISHED","accounting":accounting,"effects":effects})
+    let scoped = projection.effects().iter().any(|e| {
+        e.process_spec
+            .as_ref()
+            .is_some_and(|s| s.containment.is_some())
+    });
+    json!({"schema":"cortex.supervised-fixtures.v1","mode":"TRUSTED_LOCAL_PROCESS_FIXTURES","logical_tick":projection.last_tick(),"clock":"CONTROLLER_LOGICAL_MILLISECONDS","native_fixture_consumer":"AVAILABLE_REQUIRES_EXPLICIT_INVOCATION","live_executor_supported":false,"isolation_backend_qualified":false,"descendant_containment":if scoped {"PER_ATTEMPT_OBSERVATIONS_REQUIRE_QUALIFICATION"} else {"NOT_SUPPORTED"},"hard_host_quotas":"NOT_ESTABLISHED","accounting":accounting,"effects":effects})
 }
 /// Run explicit inspection; errors do not include keys, supplied paths or raw SQL.
 pub fn run(args: impl Iterator<Item = OsString>, out: &mut impl Write) -> Result<u8, io::Error> {

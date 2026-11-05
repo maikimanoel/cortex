@@ -469,6 +469,11 @@ impl OperationalProjection {
                             .stdout_bytes
                             .checked_add(o.stderr_bytes)
                             .ok_or(ProgramError::Capacity)?,
+                        Some(o) if resource == Resource::RamBytes => o
+                            .containment
+                            .as_ref()
+                            .and_then(|c| c.memory_peak_bytes)
+                            .unwrap_or(0),
                         _ => 0,
                     }
                 } else {
@@ -806,27 +811,48 @@ impl OperationalProjection {
                     .effects
                     .iter()
                     .filter_map(|e| e.process_spec.as_ref())
-                    .any(|p| p.reference == spec.reference)
+                    .any(|p| {
+                        p.reference == spec.reference
+                            || p.containment
+                                .as_ref()
+                                .zip(spec.containment.as_ref())
+                                .is_some_and(|(a, b)| {
+                                    a.reference == b.reference
+                                        || (a.unit == b.unit
+                                            && a.delegated_root == b.delegated_root)
+                                })
+                    })
                 {
                     return Err(ProgramError::IdentityConflict.into());
                 }
-                let supported = BTreeSet::from([
+                let mut supported = BTreeSet::from([
                     Resource::Workers,
                     Resource::TimeMillis,
                     Resource::OutputBytes,
                 ]);
+                if spec.containment.is_some() {
+                    supported.extend([Resource::CpuMillis, Resource::RamBytes]);
+                }
                 if resource_set(&policy.capacities) != supported {
                     return Err(ProgramError::EffectUnavailable.into());
                 }
                 if quantity(&record.intent.demand, Resource::Workers)? != 1
                     || quantity(&record.intent.demand, Resource::TimeMillis)?
-                        < spec
-                            .limits
-                            .wall_ms
-                            .checked_add(spec.limits.cleanup_ms)
-                            .ok_or(ProgramError::Capacity)?
+                        < match &spec.containment {
+                            Some(scope) => scope.elapsed_envelope_ms(&spec.limits),
+                            None => spec.limits.wall_ms.checked_add(spec.limits.cleanup_ms),
+                        }
+                        .ok_or(ProgramError::Capacity)?
                     || quantity(&record.intent.demand, Resource::OutputBytes)?
                         < spec.limits.output_bytes
+                {
+                    return Err(ProgramError::Capacity.into());
+                }
+                if let Some(scope) = &spec.containment
+                    && (quantity(&record.intent.demand, Resource::CpuMillis)?
+                        < scope.cpu_capacity_millis().ok_or(ProgramError::Capacity)?
+                        || quantity(&record.intent.demand, Resource::RamBytes)?
+                            < scope.controls.memory_bytes)
                 {
                     return Err(ProgramError::Capacity.into());
                 }
@@ -994,6 +1020,24 @@ impl OperationalProjection {
             return Err(ProgramError::IdentityConflict.into());
         }
         for prior in &record.process_observations {
+            if let Some(before) = &prior.containment {
+                let after = observation
+                    .containment
+                    .as_ref()
+                    .ok_or(ProgramError::Stale)?;
+                if before.identity != after.identity
+                    || (before.membership_verified && !after.membership_verified)
+                    || [
+                        (before.cpu_usage_us, after.cpu_usage_us),
+                        (before.memory_peak_bytes, after.memory_peak_bytes),
+                        (before.tasks_peak, after.tasks_peak),
+                    ]
+                    .iter()
+                    .any(|(a, b)| a.is_some_and(|old| b.is_none_or(|new| new < old)))
+                {
+                    return Err(ProgramError::Stale.into());
+                }
+            }
             if prior
                 .process
                 .as_ref()
@@ -1043,14 +1087,16 @@ impl OperationalProjection {
             ProcessCompletion::StartFailed => EffectStatus::Reported,
             ProcessCompletion::Unknown => EffectStatus::Unknown,
             ProcessCompletion::Exited { .. } | ProcessCompletion::Interrupted { .. }
-                if observation.quiescence == Quiescence::DirectChildReapedStreamsClosed =>
+                if observation.quiescent(spec) =>
             {
                 EffectStatus::Reported
             }
             _ => EffectStatus::Unknown,
         };
         let record = &mut self.effects[i];
-        record.observed_running |= observation.process.is_some();
+        record.observed_running |= observation.process.is_some()
+            || observation.containment.is_some()
+            || !observation.unresolved_scope_helpers.is_empty();
         if let Some(outcome) = outcome {
             record.report = Some(outcome);
         }
@@ -1077,9 +1123,7 @@ impl OperationalProjection {
                 }
             }
             Reconciliation::Observed { outcome, usage } => {
-                if observation.quiescence != Quiescence::DirectChildReapedStreamsClosed
-                    || observation.outcome(spec) != Some(*outcome)
-                {
+                if !observation.quiescent(spec) || observation.outcome(spec) != Some(*outcome) {
                     return Err(ProgramError::Transition.into());
                 }
                 let output = observation
@@ -1091,6 +1135,19 @@ impl OperationalProjection {
                     || quantity(usage, Resource::OutputBytes)? != output
                 {
                     return Err(ProgramError::Structure.into());
+                }
+                if let Some(scope) = &spec.containment {
+                    let captured = observation
+                        .containment
+                        .as_ref()
+                        .ok_or(ProgramError::Missing)?;
+                    if quantity(usage, Resource::CpuMillis)?
+                        != scope.cpu_capacity_millis().ok_or(ProgramError::Capacity)?
+                        || quantity(usage, Resource::RamBytes)?
+                            != captured.memory_peak_bytes.ok_or(ProgramError::Missing)?
+                    {
+                        return Err(ProgramError::Structure.into());
+                    }
                 }
             }
         }

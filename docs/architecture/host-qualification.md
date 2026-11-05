@@ -139,3 +139,10 @@ and actual examination; shared operator, model and host limitations remain visib
 Full host qualification, live executor compatibility, provider disclosure,
 credential mediation, live budgets, protected integration and Stage 3/4 remain
 separate gates. No capability or milestone status advances from this slice.
+
+The [owned-scope continuation](owned-scope-fixtures.md) extends the same Harness
+with explicitly selected scope and synthetic namespace profiles. Its separate
+bounded grant permits temporary owned scopes under existing legitimate delegation,
+without shared-policy mutation. Inspection remains non-effectful. Neither the
+source adapter nor a successful narrow primitive qualifies the full required
+resource, denial or recovery profile.

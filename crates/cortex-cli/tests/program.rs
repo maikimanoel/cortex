@@ -427,6 +427,105 @@ fn extended_fixture_limits_are_inspectable_without_dispatch_or_store_mutation() 
 }
 
 #[test]
+fn owned_scope_inspection_keeps_requested_observed_and_unknown_facts_separate() {
+    use cortex_core::program::{operational::*, supervision::*};
+    let f = Temp::new();
+    let (mut k, scope, mut spec) = supervised_fixture::configured_scope_kernel(None);
+    let request = spec.containment.as_mut().unwrap();
+    request.unit = "cortex-qualification-private-unit.scope".into();
+    request.delegated_root = "/sys/fs/cgroup/private-owned-root".into();
+    let request = request.clone();
+    supervised_fixture::prepare(&mut k, &scope, &spec);
+    k.admit(supervised_fixture::dispatch_operation(&k, &scope))
+        .unwrap();
+    for n in 1..=2 {
+        let mut observation = supervised_fixture::observation(
+            &spec,
+            n,
+            if n == 1 {
+                ProcessCompletion::Spawned
+            } else {
+                ProcessCompletion::Unknown
+            },
+            Quiescence::Unknown,
+        );
+        let mut captured = supervised_fixture::scope_observation(&request, Some(true));
+        if n == 2 {
+            captured.controls = None;
+            captured.populated = None;
+            captured.helper_quiescent = false;
+            captured.lifecycle_verified = false;
+        }
+        observation.containment = Some(Box::new(captured));
+        supervised_fixture::effect(
+            &mut k,
+            &format!("scope-capture-{n}"),
+            EffectEvent::ProcessObserved {
+                effect: supervised_fixture::intent(&scope).id,
+                scope: scope.clone(),
+                at: 3 + n,
+                observation,
+            },
+        );
+    }
+    let s =
+        ProgramStore::create_supervised_fixture(&f.store(), &key(), k.initial().clone(), limits())
+            .unwrap();
+    for op in k.operations() {
+        s.admit(&key(), op.clone()).unwrap();
+    }
+    let before = snapshot(&f);
+    let mut c = command(&f);
+    c.arg("--json");
+    let output = run(c, &[0x57; 32]);
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    for private in [
+        "private-unit",
+        "private-owned-root",
+        "123456789abcdef0123456789abcdef0",
+    ] {
+        assert!(!text.contains(private));
+    }
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let projected = &value["supervised_projection"];
+    assert_eq!(projected["isolation_backend_qualified"], false);
+    assert_eq!(projected["live_executor_supported"], false);
+    let effect = &projected["effects"][0];
+    assert_eq!(effect["pending_reconciliation"], true);
+    assert_eq!(
+        effect["containment_request"]["requested_controls"]["cpu_quota_us"],
+        100_000
+    );
+    assert_eq!(
+        effect["containment_request"]["cpu_time_enforcement"],
+        "COOPERATIVE_SAMPLING_NOT_HARD_CUMULATIVE_QUOTA"
+    );
+    let first = &effect["observations"][0]["containment"];
+    assert_eq!(
+        first["controls_readback"]["charged_memory_bytes"],
+        536_870_912_u64
+    );
+    assert_eq!(first["populated"], true);
+    let last = &effect["observations"][1]["containment"];
+    assert!(last["controls_readback"].is_null());
+    assert!(last["populated"].is_null());
+    assert_eq!(last["helper_quiescent"], false);
+    assert_eq!(last["lifecycle_verified"], false);
+    assert_eq!(last["cpu_usage_us"], 10_000);
+    assert_eq!(last["qualification"], "NOT_INFERRED");
+    assert_eq!(
+        last["measurement_scope"],
+        "RETAINED_CAPTURE_NOT_CURRENT_HOST_REINSPECTION"
+    );
+    assert_eq!(snapshot(&f), before);
+    assert_eq!(
+        s.load(&key(), Access::ReadOnly).unwrap().revision(),
+        k.revision()
+    );
+}
+
+#[test]
 fn wrong_key_program_and_short_or_long_key_are_safe_refusals() {
     let f = Temp::new();
     create(&f);

@@ -1,3 +1,4 @@
+use crate::owned_scope::{PreparedScope, ScopeSignal};
 use cortex_core::{
     binding::ObservationId,
     program::{
@@ -26,7 +27,10 @@ use std::{
     },
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -144,14 +148,14 @@ fn stamp(m: &Metadata) -> Stamp {
         ctime: (m.ctime(), m.ctime_nsec()),
     }
 }
-struct PinnedExecutable {
+pub(crate) struct PinnedExecutable {
     path: PathBuf,
     file: File,
     stamp: Stamp,
     bytes: Vec<u8>,
 }
 impl PinnedExecutable {
-    fn inspect(path: &Path, max: u64) -> Result<Self, HarnessError> {
+    pub(crate) fn inspect(path: &Path, max: u64) -> Result<Self, HarnessError> {
         let metadata = fs::symlink_metadata(path)?;
         if !metadata.is_file()
             || metadata.mode() & 0o111 == 0
@@ -183,7 +187,7 @@ impl PinnedExecutable {
             bytes,
         })
     }
-    fn check(&self) -> Result<(), HarnessError> {
+    pub(crate) fn check(&self) -> Result<(), HarnessError> {
         if stamp(&fs::symlink_metadata(&self.path)?) != self.stamp
             || stamp(&self.file.metadata()?) != self.stamp
             || fs::canonicalize(&self.path)? != self.path
@@ -222,6 +226,7 @@ pub struct PinnedFixture {
     input: Vec<u8>,
     executable: PinnedExecutable,
     cwd: Stamp,
+    scope: Mutex<Option<PreparedScope>>,
 }
 fn spec_for<'a>(
     kernel: &'a CoordinationKernel,
@@ -295,6 +300,12 @@ pub fn inspect_fixture(
         || Instant::now()
             .checked_add(Duration::from_millis(l.cleanup_ms))
             .is_none()
+        || spec.containment.as_ref().is_some_and(|scope| {
+            scope
+                .elapsed_envelope_ms(l)
+                .and_then(|ms| Instant::now().checked_add(Duration::from_millis(ms)))
+                .is_none()
+        })
         || spec.input_len != input.bytes().len() as u64
     {
         return Err(HarnessError::Limits);
@@ -310,6 +321,13 @@ pub fn inspect_fixture(
         input: input.bytes().to_vec(),
         executable: PinnedExecutable::inspect(&spec.executable, l.executable_bytes)?,
         cwd: stamp(&cwd),
+        scope: Mutex::new(match &spec.containment {
+            Some(_) => Some(PreparedScope::inspect(
+                spec,
+                deadline(Instant::now(), l.wall_ms)?,
+            )?),
+            None => None,
+        }),
     })
 }
 
@@ -352,6 +370,7 @@ struct Running {
     stderr: UnixStream,
     identity: Option<ProcessIdentity>,
     start: Instant,
+    scope: Option<PreparedScope>,
 }
 fn start_ticks(pid: u32) -> io::Result<u64> {
     let mut data = Vec::new();
@@ -378,23 +397,90 @@ fn pipe() -> io::Result<(UnixStream, Stdio)> {
     parent.set_nonblocking(true)?;
     Ok((parent, Stdio::from(OwnedFd::from(child))))
 }
-fn spawn(prepared: &PinnedFixture, start: Instant) -> Result<Running, HarnessError> {
-    let (stdin, child_in) = pipe()?;
-    let (stdout, child_out) = pipe()?;
-    let (stderr, child_err) = pipe()?;
-    // Linux resolves this already-open ELF before close-on-exec. In-place writes
-    // and loader/library replacement are outside the cooperating fixture profile.
-    let child = Command::new(format!(
-        "/proc/self/fd/{}",
-        prepared.executable.file.as_raw_fd()
-    ))
-    .args(&prepared.spec.args)
-    .env_clear()
-    .current_dir(&prepared.spec.cwd)
-    .stdin(child_in)
-    .stdout(child_out)
-    .stderr(child_err)
-    .spawn()?;
+fn deadline(start: Instant, ms: u64) -> Result<Instant, HarnessError> {
+    start
+        .checked_add(Duration::from_millis(ms))
+        .ok_or(HarnessError::Limits)
+}
+struct SpawnFailure {
+    error: HarnessError,
+    scope: Option<Box<PreparedScope>>,
+}
+impl fmt::Debug for SpawnFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.error.fmt(f)
+    }
+}
+#[cfg(test)]
+fn spawn(prepared: &PinnedFixture, start: Instant) -> Result<Running, SpawnFailure> {
+    spawn_checked(prepared, start, || true)
+}
+fn spawn_checked(
+    prepared: &PinnedFixture,
+    start: Instant,
+    mut current: impl FnMut() -> bool,
+) -> Result<Running, SpawnFailure> {
+    let mut scope = prepared
+        .scope
+        .lock()
+        .map_err(|_| SpawnFailure {
+            error: HarnessError::Contract,
+            scope: None,
+        })?
+        .take();
+    let result = (|| -> Result<_, HarnessError> {
+        if prepared.spec.containment.is_some() != scope.is_some() {
+            return Err(HarnessError::Contract);
+        }
+        let (stdin, child_in) = pipe()?;
+        let (stdout, child_out) = pipe()?;
+        let (stderr, child_err) = pipe()?;
+        let mut command = if let Some(scope) = &mut scope {
+            let ms = prepared
+                .spec
+                .limits
+                .transport
+                .as_ref()
+                .map_or(prepared.spec.limits.wall_ms, |t| {
+                    t.startup_ms.min(prepared.spec.limits.wall_ms)
+                });
+            // This callback is reached only after durable dispatch uncertainty.
+            // Helper failure remains unknown; it can never certify no effect.
+            scope.prepare_dispatch(deadline(start, ms)?)?;
+            scope.command(&prepared.spec)?
+        } else {
+            // The open ELF pin covers this first exec only. Wrapper chains use
+            // explicit helper/file pins under the cooperating-owner contract.
+            let mut command = Command::new(format!(
+                "/proc/self/fd/{}",
+                prepared.executable.file.as_raw_fd()
+            ));
+            command
+                .args(&prepared.spec.args)
+                .env_clear()
+                .current_dir(&prepared.spec.cwd);
+            command
+        };
+        // Helpers and file pins may consume time. Current grant validity and
+        // cancellation must be checked again at the actual mutation boundary.
+        prepared.executable.check()?;
+        if !current() {
+            return Err(HarnessError::Contract);
+        }
+        let child = command
+            .stdin(child_in)
+            .stdout(child_out)
+            .stderr(child_err)
+            .spawn()?;
+        // Command retains configured Stdio handles; closing this parent copy is
+        // necessary before EOF can mean all inherited child writers closed.
+        drop(command);
+        Ok((child, stdin, stdout, stderr))
+    })();
+    let (child, stdin, stdout, stderr) = result.map_err(|error| SpawnFailure {
+        error,
+        scope: scope.take().map(Box::new),
+    })?;
     let identity = start_ticks(child.id())
         .ok()
         .filter(|v| *v > 0)
@@ -414,6 +500,7 @@ fn spawn(prepared: &PinnedFixture, start: Instant) -> Result<Running, HarnessErr
         stderr,
         identity,
         start,
+        scope,
     })
 }
 fn elapsed(start: Instant) -> u64 {
@@ -433,6 +520,8 @@ fn summary(spec: &ProcessSpec, id: ObservationId, basis: SourceReference) -> Pro
         malformed_output: false,
         elapsed_ms: 0,
         basis,
+        containment: None,
+        unresolved_scope_helpers: vec![],
     }
 }
 struct Framing {
@@ -541,6 +630,68 @@ fn capture(
         Err(_) => Err(InterruptionReason::Io),
     }
 }
+#[derive(Default)]
+struct Cleanup {
+    end: Option<Instant>,
+    phases: Option<(Instant, Instant)>,
+    killed: bool,
+}
+impl Cleanup {
+    fn query_deadline(&self, now: Instant, wall_end: Instant) -> Instant {
+        match self.phases {
+            Some((term, _)) if now < term => term,
+            Some((_, kill)) if now < kill => kill,
+            _ => self.end.unwrap_or(wall_end),
+        }
+    }
+    fn advance(
+        &mut self,
+        running: &mut Running,
+        spec: &ProcessSpec,
+        result: &mut ProcessObservation,
+    ) {
+        if self.end.is_none() {
+            let _ = running.stdin.shutdown(Shutdown::Both);
+            let now = Instant::now();
+            if let (Some(scope), Some(contract)) = (&mut running.scope, &spec.containment) {
+                let maximum = contract
+                    .elapsed_envelope_ms(&spec.limits)
+                    .and_then(|ms| deadline(running.start, ms).ok())
+                    .unwrap_or(now);
+                let term = deadline(now, contract.cancellation_grace_ms)
+                    .unwrap_or(now)
+                    .min(maximum);
+                let kill = deadline(term, contract.escalation_ms)
+                    .unwrap_or(term)
+                    .min(maximum);
+                self.end = Some(
+                    deadline(kill, spec.limits.cleanup_ms)
+                        .unwrap_or(kill)
+                        .min(maximum),
+                );
+                self.phases = Some((term, kill));
+                let _ = scope.terminate(ScopeSignal::Terminate, term);
+                result.containment = scope.last_observation().map(Box::new);
+            } else {
+                running.child.stop();
+                self.end = Some(deadline(now, spec.limits.cleanup_ms).unwrap_or(now));
+            }
+        }
+        if let Some((term, kill)) = self.phases
+            && !self.killed
+            && Instant::now() >= term
+        {
+            if let Some(scope) = &mut running.scope {
+                let _ = scope.terminate(ScopeSignal::Kill, kill);
+                result.containment = scope.last_observation().map(Box::new);
+            }
+            // Only our retained wrapper is stopped here. This cannot establish
+            // quiescence for an unknown scope or surviving descendants.
+            running.child.stop();
+            self.killed = true;
+        }
+    }
+}
 fn supervise(
     mut running: Running,
     prepared: &PinnedFixture,
@@ -582,9 +733,12 @@ fn supervise(
     let mut err_failed = out_failed;
     let mut in_closed = false;
     let mut next_authority = 0_u64;
-    let mut cleanup_end = None;
+    let mut cleanup = Cleanup::default();
     let mut last_progress = 0_u64;
     let mut first_record = None;
+    let mut scope_ready = running.scope.is_none();
+    let mut next_scope = 0_u64;
+    let wall_end = deadline(running.start, limits.wall_ms).expect("validated wall deadline");
     loop {
         let ms = elapsed(running.start);
         let transport_deadline = |ms: u64, first_record: Option<u64>, last_progress: u64| {
@@ -618,8 +772,66 @@ fn supervise(
         if reason.is_none() {
             reason = transport_deadline(elapsed(running.start), first_record, last_progress);
         }
+        // Escalation always precedes another manager readback. Every query is
+        // clamped to the next phase boundary instead of borrowing cleanup time.
+        if reason.is_some() {
+            cleanup.advance(&mut running, spec, &mut result);
+        }
+        if let Some(scope) = &mut running.scope
+            && ms >= next_scope
+        {
+            let end = cleanup.query_deadline(Instant::now(), wall_end);
+            let needs_membership = scope
+                .last_observation()
+                .is_none_or(|o| !o.membership_verified);
+            match scope.observe(
+                if needs_membership {
+                    running.identity.as_ref()
+                } else {
+                    None
+                },
+                end,
+            ) {
+                Ok(observed) => {
+                    scope_ready = spec
+                        .containment
+                        .as_ref()
+                        .is_some_and(|expected| observed.corresponds(expected));
+                    if !scope_ready {
+                        reason.get_or_insert(InterruptionReason::ContainmentUnknown);
+                    }
+                    if let Some(expected) = &spec.containment
+                        && observed
+                            .cpu_usage_us
+                            .is_some_and(|cpu| cpu >= expected.cpu_time_ms.saturating_mul(1000))
+                    {
+                        reason.get_or_insert(InterruptionReason::CpuTimeLimit);
+                    }
+                    result.containment = Some(Box::new(observed));
+                }
+                Err(_) => {
+                    result.containment = scope.last_observation().map(Box::new);
+                    // A scope may not yet exist while its one committed launch is
+                    // starting. No input is released during this bounded wait.
+                    if scope_ready || result.containment.is_some() || cleanup.end.is_some() {
+                        reason.get_or_insert(InterruptionReason::ContainmentUnknown);
+                    }
+                    scope_ready = false;
+                }
+            }
+            next_scope = elapsed(running.start).saturating_add(limits.authority_poll_ms);
+        }
+        // A bounded helper can consume the remaining time; recheck before I/O.
+        if reason.is_none() {
+            let now_ms = elapsed(running.start);
+            reason = if now_ms >= limits.wall_ms {
+                Some(InterruptionReason::Timeout)
+            } else {
+                transport_deadline(now_ms, first_record, last_progress)
+            };
+        }
         let previous_counts = (result.input_bytes, result.stdout_bytes, result.stderr_bytes);
-        if reason.is_none() && !in_closed {
+        if reason.is_none() && scope_ready && !in_closed {
             match running
                 .stdin
                 .write(&prepared.input[result.input_bytes as usize..])
@@ -704,11 +916,6 @@ fn supervise(
         if running.child.poll().is_err() {
             reason.get_or_insert(InterruptionReason::Io);
         }
-        if reason.is_some() && cleanup_end.is_none() {
-            running.child.stop();
-            let _ = running.stdin.shutdown(Shutdown::Both);
-            cleanup_end = Instant::now().checked_add(Duration::from_millis(limits.cleanup_ms));
-        }
         if running.child.reaped.is_some() && out_eof && err_eof {
             if result.input_bytes < spec.input_len {
                 reason.get_or_insert(InterruptionReason::InputClosed);
@@ -716,21 +923,38 @@ fn supervise(
             if limits.transport.is_some() && framing.records == 0 {
                 reason.get_or_insert(InterruptionReason::StartupIncomplete);
             }
-            // Recheck canonical authority at the observed completion boundary.
             if reason.is_none()
                 && let Err(e) = authority(elapsed(running.start))
             {
                 reason = Some(e);
             }
-            if running.identity.is_some() {
-                result.quiescence = Quiescence::DirectChildReapedStreamsClosed;
+            let whole_set_empty = match &spec.containment {
+                None => running.identity.is_some(),
+                Some(expected) => result
+                    .containment
+                    .as_ref()
+                    .is_some_and(|o| o.corresponds(expected) && o.populated == Some(false)),
+            };
+            if whole_set_empty {
+                result.quiescence = if spec.containment.is_some() {
+                    Quiescence::OwnedScopeEmpty
+                } else {
+                    Quiescence::DirectChildReapedStreamsClosed
+                };
+                break;
             }
-            break;
+            reason.get_or_insert(InterruptionReason::ContainmentUnknown);
         }
-        if cleanup_end.is_some_and(|end| Instant::now() >= end) {
+        if reason.is_some() {
+            cleanup.advance(&mut running, spec, &mut result);
+        }
+        if cleanup.end.is_some_and(|end| Instant::now() >= end) {
             break;
         }
         thread::sleep(POLL);
+    }
+    if let Some(scope) = &running.scope {
+        result.unresolved_scope_helpers = scope.unresolved_helpers();
     }
     result.elapsed_ms = elapsed(running.start);
     result.structured_records = framing.records;
@@ -842,7 +1066,7 @@ fn launch_after_commit(
     at: u64,
     start: Instant,
     cancel: &AtomicBool,
-) -> Result<Option<Running>, HarnessError> {
+) -> Result<Option<Running>, SpawnFailure> {
     if cancel.load(Ordering::Acquire) || prepared.check(current, effect).is_err() {
         return Ok(None);
     }
@@ -866,7 +1090,24 @@ fn launch_after_commit(
         // from a timeout or an ambiguous operating-system spawn error.
         return Ok(None);
     }
-    spawn(prepared, start).map(Some)
+    spawn_checked(prepared, start, || {
+        let ms = elapsed(start);
+        !cancel.load(Ordering::Acquire)
+            && ms < prepared.spec.limits.wall_ms
+            && prepared
+                .spec
+                .limits
+                .transport
+                .as_ref()
+                .is_none_or(|t| ms < t.startup_ms)
+            && at.checked_add(ms).is_some_and(|tick| {
+                current
+                    .fixture_effects()
+                    .check_supervised_current(current.state(), effect, scope, tick)
+                    .is_ok()
+            })
+    })
+    .map(Some)
 }
 
 /// Run one explicitly retained trusted fixture through the canonical store gate.
@@ -876,12 +1117,14 @@ fn launch_after_commit(
 /// their exact supplied IDs. A missing final receipt remains unresolved.
 ///
 /// This supports cooperating local operators and an unchanged owned ELF fixture
-/// on a responsive Linux filesystem. Environment is cleared; no shell or PATH
-/// resolution is used. Exact byte pinning is not authentication or hostile-write
+/// on a responsive Linux filesystem. Ambient environment is cleared; the narrow
+/// scope-only profile adds explicit manager routing metadata, and rootless
+/// fixtures clear it again. No shell or PATH resolution is used. Exact byte pinning is not authentication or hostile-write
 /// protection. Canonical grant/cancel state is observed cooperatively; store and
-/// kernel calls can delay polling. No instantaneous revocation, process-tree,
-/// filesystem, network, CPU or memory isolation is provided. Required unsupported
-/// controls are refused. Raw output is bounded, validated where applicable and
+/// kernel calls can delay polling. The optional owned-scope primitive retains
+/// observed whole-set identity and controls; its configured profile is not host
+/// qualification. It provides no instantaneous revocation or hard cumulative CPU
+/// guarantee. Required unsupported controls remain refused. Raw output is bounded, validated where applicable and
 /// discarded; only counts and typed causes are retained. No PID is reattached.
 pub fn execute_fixture(
     store: &ProgramStore,
@@ -1039,13 +1282,26 @@ pub fn execute_fixture(
             observation.elapsed_ms = elapsed(start);
             observation
         }
-        Err(_) => {
-            // A generic spawn error never establishes absence of external effects.
+        Err(mut failed) => {
+            // A generic spawn or manager-helper error never establishes absence of external effects.
             let mut observation = summary(
                 &prepared.spec,
                 ids.finished_observation.clone(),
                 ids.basis.clone(),
             );
+            if let Some(scope) = &mut failed.scope {
+                let envelope = prepared
+                    .spec
+                    .containment
+                    .as_ref()
+                    .and_then(|s| s.elapsed_envelope_ms(&prepared.spec.limits))
+                    .unwrap_or(prepared.spec.limits.wall_ms);
+                if let Ok(end) = deadline(start, envelope) {
+                    let _ = scope.observe(None, end);
+                }
+                observation.containment = scope.last_observation().map(Box::new);
+                observation.unresolved_scope_helpers = scope.unresolved_helpers();
+            }
             observation.elapsed_ms = elapsed(start);
             observation
         }

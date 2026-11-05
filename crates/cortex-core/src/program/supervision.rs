@@ -52,7 +52,124 @@ pub struct TransportLimits {
     /// whole-process limit. Parser metadata remains bounded by the frame size.
     pub buffer_bytes: u64,
 }
-/// Immutable exact process intent. Environment is cleared, shell/PATH expansion
+/// One explicit read-only mount in the synthetic namespace profile. Actual
+/// canonical files and their byte correspondence remain Harness observations.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ReadOnlyMount {
+    /// Explicit host file, never discovered by searching a user's home.
+    pub source: PathBuf,
+    /// Absolute file path inside the selected namespace.
+    pub destination: PathBuf,
+}
+/// Narrow provider-free containment modes. Neither permits arbitrary executors.
+#[derive(Clone, PartialEq, Eq)]
+pub enum ScopeIsolation {
+    /// An audited finite inert fixture used to qualify the owned scope primitive.
+    /// No filesystem or network isolation is claimed by this mode.
+    ScopeOnlyInertFixture,
+    /// Owned synthetic canaries under an exact rootless namespace configuration.
+    /// Missing byte/file/inode quotas or denials still block broader profiles.
+    RootlessSyntheticCanary {
+        /// Exact explicitly pinned namespace utility path.
+        bubblewrap: PathBuf,
+        /// Caller-supplied executable/configuration provenance.
+        bubblewrap_identity: SourceReference,
+        /// Complete bounded read-only file mount set.
+        mounts: Vec<ReadOnlyMount>,
+        /// Explicit tmpfs byte ceiling; not an independent file/inode quota.
+        scratch_bytes: u64,
+    },
+}
+/// Exact requested cgroup controls. CPU rate and cumulative CPU work are distinct.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopeControls {
+    /// CPU quota microseconds per period.
+    pub cpu_quota_us: u64,
+    /// CPU quota period in microseconds.
+    pub cpu_period_us: u64,
+    /// Charged memory ceiling, not an address-space limit.
+    pub memory_bytes: u64,
+    /// Charged swap ceiling; zero forbids swap use in this group.
+    pub swap_bytes: u64,
+    /// Total contained processes and threads.
+    pub tasks_max: u64,
+}
+/// Immutable, explicitly selected owned-scope request for an audited fixture.
+/// This is data consumed by the existing authority/journal path, not a grant.
+#[derive(Clone, PartialEq, Eq)]
+pub struct OwnedScopeSpec {
+    /// Exact request/configuration identity.
+    pub reference: SourceReference,
+    /// Fresh single-use unit name: `cortex-qualification-<ASCII identifier>.scope`.
+    pub unit: String,
+    /// Exact already-delegated user-manager cgroup root.
+    pub delegated_root: PathBuf,
+    /// Explicit local user-runtime directory; no session environment is adopted.
+    pub runtime_dir: PathBuf,
+    /// Exact scope-launch utility path.
+    pub launcher: PathBuf,
+    /// Exact launcher provenance, independently pinned by Harness.
+    pub launcher_identity: SourceReference,
+    /// Exact manager-inspection/termination utility path.
+    pub manager: PathBuf,
+    /// Exact manager utility provenance, independently pinned by Harness.
+    pub manager_identity: SourceReference,
+    /// Requested controls that must be read back before fixture input is released.
+    pub controls: ScopeControls,
+    /// Cumulative CPU-time sampling cutoff. This is cooperative and does not
+    /// establish a hard group CPU-time limit; observed overshoot remains charged.
+    pub cpu_time_ms: u64,
+    /// Selected interval after graceful group termination is requested.
+    pub cancellation_grace_ms: u64,
+    /// Selected interval after forceful group termination is requested.
+    pub escalation_ms: u64,
+    /// Exact narrow scope or synthetic namespace profile.
+    pub isolation: ScopeIsolation,
+}
+/// Retained identity of one actually observed owned scope incarnation.
+/// A name, PID or filesystem path alone is insufficient for later adoption.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ScopeIdentity {
+    /// Exact requested scope reference.
+    pub spec: SourceReference,
+    /// Exact unit name.
+    pub unit: String,
+    /// Manager-provided 32-character lowercase hexadecimal invocation identity.
+    pub invocation_id: String,
+    /// Exact observed cgroup directory.
+    pub cgroup: PathBuf,
+    /// Observed cgroup device identity.
+    pub device: u64,
+    /// Observed nonzero cgroup inode identity.
+    pub inode: u64,
+}
+/// Latest immutable scope facts. Missing observations never mean zero or empty.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ScopeObservation {
+    /// Exact retained incarnation, including when a later read is unavailable.
+    pub identity: ScopeIdentity,
+    /// Current readback of required controls; absent if not currently established.
+    pub controls: Option<ScopeControls>,
+    /// Actual initial direct-child incarnation/membership was checked by Harness.
+    /// This is retained provenance, not authenticated permission.
+    pub membership_verified: bool,
+    /// All controller-owned query/signal helper children were reaped. Missing
+    /// helper cleanup cannot establish complete operation quiescence.
+    pub helper_quiescent: bool,
+    /// Current manager runtime/termination properties match the exact specification.
+    pub lifecycle_verified: bool,
+    /// Current whole-group population bit; None is unknown, never empty.
+    pub populated: Option<bool>,
+    /// Latest retained cumulative CPU reading in microseconds, not capacity.
+    pub cpu_usage_us: Option<u64>,
+    /// Latest retained charged-memory peak, when available.
+    pub memory_peak_bytes: Option<u64>,
+    /// Latest retained process/thread peak, when available.
+    pub tasks_peak: Option<u64>,
+}
+/// Immutable exact process intent. Ambient environment is cleared. The narrow
+/// scope-only inert profile adds only explicit manager routing metadata; rootless
+/// fixtures clear that metadata again. Shell/PATH expansion
 /// is unavailable, and stdin is the named unchanged prepared fixture package.
 #[derive(Clone, PartialEq, Eq)]
 pub struct ProcessSpec {
@@ -80,6 +197,9 @@ pub struct ProcessSpec {
     pub approval: SourceReference,
     /// Complete per-launch limits; installation or naming supplies no defaults.
     pub limits: ProcessLimits,
+    /// Optional exact owned-scope fixture contract; absence preserves the
+    /// historical trusted direct-child profile and its narrower cleanup meaning.
+    pub containment: Option<OwnedScopeSpec>,
 }
 /// Observed child incarnation. PID alone can never identify or authorize adoption.
 #[derive(Clone, PartialEq, Eq)]
@@ -99,6 +219,9 @@ pub enum Quiescence {
     /// The owned direct child was reaped and inherited output streams reached EOF.
     /// This does not prove hostile descendant containment or protected revocation.
     DirectChildReapedStreamsClosed,
+    /// Direct child reaped, streams closed and the exact owned scope observed
+    /// empty with matching controls/incarnation. This still is a captured claim.
+    OwnedScopeEmpty,
     /// Cleanup or process outcome remains unresolved; resource reservations remain.
     Unknown,
 }
@@ -121,6 +244,10 @@ pub enum InterruptionReason {
     BufferLimit,
     /// The child ended without the required first valid stdout record.
     StartupIncomplete,
+    /// Scope identity, membership or configured control correspondence failed.
+    ContainmentUnknown,
+    /// Observed cumulative group CPU reached the cooperative sampling cutoff.
+    CpuTimeLimit,
     /// Explicit cancellation request was observed.
     Cancelled,
     /// Captured output reached or exceeded its bound.
@@ -159,6 +286,15 @@ pub enum ProcessCompletion {
     /// Observations do not establish whether or how the process completed.
     Unknown,
 }
+/// An unresolved bounded manager helper. This is observation provenance, never
+/// permission to reattach, signal a recovered PID or repeat a query.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopeHelperIdentity {
+    /// Positive observed OS process ID.
+    pub pid: u32,
+    /// Observed start ticks when captured; absence remains explicit uncertainty.
+    pub start_ticks: Option<u64>,
+}
 /// Immutable captured summary. Raw output is deliberately absent; structural
 /// validation checks correspondence, not the truth or independence of its source.
 #[derive(Clone, PartialEq, Eq)]
@@ -187,6 +323,142 @@ pub struct ProcessObservation {
     pub elapsed_ms: u64,
     /// Exact source/mechanism observation reference supplied by the caller.
     pub basis: SourceReference,
+    /// Immutable scope identity/control/usage observation, when actually known.
+    /// An uncertain scope creation may legitimately have no captured identity.
+    pub containment: Option<Box<ScopeObservation>>,
+    /// At most one bounded controller helper can remain unresolved; no further
+    /// helper is started until it is observed reaped. Empty is the legacy value.
+    pub unresolved_scope_helpers: Vec<ScopeHelperIdentity>,
+}
+fn absolute_bounded_path(path: &std::path::Path, bounds: ProgramLimits) -> bool {
+    path.is_absolute()
+        && path.as_os_str().len() <= bounds.bytes
+        && !path.as_os_str().as_encoded_bytes().contains(&0)
+        && !path
+            .components()
+            .any(|c| matches!(c, Component::ParentDir | Component::CurDir))
+}
+impl OwnedScopeSpec {
+    /// Validate an exact bounded request without inspecting host support or
+    /// manufacturing authority from paths, names or caller provenance.
+    pub fn validate(
+        &self,
+        process: &ProcessLimits,
+        bounds: ProgramLimits,
+    ) -> Result<(), ProgramError> {
+        let id = self
+            .unit
+            .strip_prefix("cortex-qualification-")
+            .and_then(|s| s.strip_suffix(".scope"))
+            .ok_or(ProgramError::Structure)?;
+        if id.is_empty()
+            || id.len() > 64
+            || !id
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        {
+            return Err(ProgramError::Structure);
+        }
+        for path in [
+            &self.delegated_root,
+            &self.runtime_dir,
+            &self.launcher,
+            &self.manager,
+        ] {
+            if !absolute_bounded_path(path, bounds) || path == std::path::Path::new("/") {
+                return Err(ProgramError::Structure);
+            }
+        }
+        let c = &self.controls;
+        if c.cpu_quota_us == 0
+            || c.cpu_period_us == 0
+            || c.memory_bytes == 0
+            || c.tasks_max == 0
+            || self.cpu_time_ms == 0
+            || self.cancellation_grace_ms == 0
+            || self.escalation_ms == 0
+            || self.cpu_capacity_millis().is_none()
+            || self.elapsed_envelope_ms(process).is_none()
+            || self.cpu_time_ms.checked_mul(1000).is_none()
+        {
+            return Err(ProgramError::Capacity);
+        }
+        if let ScopeIsolation::RootlessSyntheticCanary {
+            bubblewrap,
+            mounts,
+            scratch_bytes,
+            ..
+        } = &self.isolation
+        {
+            if !absolute_bounded_path(bubblewrap, bounds)
+                || *scratch_bytes == 0
+                || mounts.is_empty()
+                || mounts.len() > 16
+                || mounts.len() > bounds.entries
+            {
+                return Err(ProgramError::Capacity);
+            }
+            for (i, mount) in mounts.iter().enumerate() {
+                if !absolute_bounded_path(&mount.source, bounds)
+                    || !absolute_bounded_path(&mount.destination, bounds)
+                    || mount.destination == std::path::Path::new("/")
+                    || ["/proc", "/dev", "/scratch"]
+                        .iter()
+                        .any(|p| mount.destination.starts_with(p))
+                    || mounts[..i].iter().any(|m| {
+                        m.destination.starts_with(&mount.destination)
+                            || mount.destination.starts_with(&m.destination)
+                    })
+                {
+                    return Err(ProgramError::Structure);
+                }
+            }
+        }
+        Ok(())
+    }
+    /// Rounded-up milli-CPU capacity required for the requested quota ratio.
+    /// This is never cumulative CPU execution time.
+    pub fn cpu_capacity_millis(&self) -> Option<u64> {
+        let n = self.controls.cpu_quota_us.checked_mul(1000)?;
+        (self.controls.cpu_period_us > 0).then(|| n.div_ceil(self.controls.cpu_period_us))
+    }
+    /// Complete cooperative execution and staged termination interval.
+    pub fn elapsed_envelope_ms(&self, limits: &ProcessLimits) -> Option<u64> {
+        limits
+            .wall_ms
+            .checked_add(self.cancellation_grace_ms)?
+            .checked_add(self.escalation_ms)?
+            .checked_add(limits.cleanup_ms)
+    }
+}
+impl ScopeObservation {
+    /// Structural correspondence only; capture and OS guarantees are not authenticated.
+    pub fn validate(&self, spec: &OwnedScopeSpec) -> Result<(), ProgramError> {
+        let i = &self.identity;
+        if i.spec != spec.reference
+            || i.unit != spec.unit
+            || i.cgroup != spec.delegated_root.join(&spec.unit)
+            || i.inode == 0
+            || i.invocation_id.len() != 32
+            || !i
+                .invocation_id
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            || i.invocation_id.bytes().all(|b| b == b'0')
+        {
+            return Err(ProgramError::Stale);
+        }
+        Ok(())
+    }
+    /// Whether current captured readbacks and original checked membership match
+    /// this exact request. This method performs no host verification or grant.
+    pub fn corresponds(&self, spec: &OwnedScopeSpec) -> bool {
+        self.validate(spec).is_ok()
+            && self.membership_verified
+            && self.helper_quiescent
+            && self.lifecycle_verified
+            && self.controls.as_ref() == Some(&spec.controls)
+    }
 }
 impl ProcessSpec {
     /// Validate finite, explicit shape before retention; actual paths, executable
@@ -235,6 +507,9 @@ impl ProcessSpec {
         {
             return Err(ProgramError::Capacity);
         }
+        if let Some(scope) = &self.containment {
+            scope.validate(l, bounds)?;
+        }
         let mut bytes = 0_usize;
         for arg in &self.args {
             if arg.contains('\0') {
@@ -270,6 +545,26 @@ impl ProcessObservation {
         {
             return Err(ProgramError::Stale.into());
         }
+        if self.unresolved_scope_helpers.len() > 1
+            || (!self.unresolved_scope_helpers.is_empty() && spec.containment.is_none())
+            || self
+                .unresolved_scope_helpers
+                .iter()
+                .any(|h| h.pid == 0 || h.start_ticks == Some(0))
+        {
+            return Err(ProgramError::Structure.into());
+        }
+        match (&spec.containment, &self.containment) {
+            (Some(expected), Some(actual)) => actual.validate(expected)?,
+            (None, Some(_)) => return Err(ProgramError::Structure.into()),
+            _ => {}
+        }
+        if (spec.containment.is_some()
+            && self.quiescence == Quiescence::DirectChildReapedStreamsClosed)
+            || (self.quiescence == Quiescence::OwnedScopeEmpty && !self.quiescent(spec))
+        {
+            return Err(ProgramError::Structure.into());
+        }
         if self.input_bytes > spec.input_len
             || self.stdout_bytes.checked_add(self.stderr_bytes).is_none()
             || self.structured_records > self.stdout_bytes
@@ -285,6 +580,8 @@ impl ProcessObservation {
                     || self.stderr_bytes != 0
                     || self.structured_records != 0
                     || self.malformed_output
+                    || self.containment.is_some()
+                    || !self.unresolved_scope_helpers.is_empty()
                 {
                     return Err(ProgramError::Structure.into());
                 }
@@ -314,6 +611,22 @@ impl ProcessObservation {
         }
         Ok(())
     }
+    /// Required cleanup correspondence for this profile. Direct-child cleanup
+    /// can never stand in for an exact empty owned scope.
+    pub fn quiescent(&self, spec: &ProcessSpec) -> bool {
+        if !self.unresolved_scope_helpers.is_empty() {
+            return false;
+        }
+        match &spec.containment {
+            None => self.quiescence == Quiescence::DirectChildReapedStreamsClosed,
+            Some(expected) => {
+                self.quiescence == Quiescence::OwnedScopeEmpty
+                    && self.containment.as_ref().is_some_and(|actual| {
+                        actual.corresponds(expected) && actual.populated == Some(false)
+                    })
+            }
+        }
+    }
     /// Mechanism result only. A missing/unknown result or incomplete input cannot
     /// become success, and this result never releases a dependency by itself.
     pub fn outcome(&self, spec: &ProcessSpec) -> Option<EffectOutcome> {
@@ -341,7 +654,21 @@ impl ProcessObservation {
                 }) {
                     return Some(EffectOutcome::Failed);
                 }
-                if self.quiescence == Quiescence::DirectChildReapedStreamsClosed {
+                if let Some(expected) = &spec.containment {
+                    let actual = self.containment.as_ref()?;
+                    let (cpu, memory, tasks) = (
+                        actual.cpu_usage_us?,
+                        actual.memory_peak_bytes?,
+                        actual.tasks_peak?,
+                    );
+                    if cpu > expected.cpu_time_ms.saturating_mul(1000)
+                        || memory > expected.controls.memory_bytes
+                        || tasks > expected.controls.tasks_max
+                    {
+                        return Some(EffectOutcome::Failed);
+                    }
+                }
+                if self.quiescent(spec) {
                     Some(EffectOutcome::Succeeded)
                 } else {
                     // Exit zero is retained as a fact, but cleanup and its

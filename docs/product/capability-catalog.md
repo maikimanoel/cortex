@@ -100,6 +100,14 @@ denial evidence or delegation, and unavailable mandatory controls block dependen
 probes. Independent source verification and actual host qualification are separate;
 all capability IDs, ownership and full statuses remain unchanged.
 
+The bounded [owned-scope continuation](../architecture/owned-scope-fixtures.md)
+extends those same contracts with exact scope identity, reservation correspondence,
+captured resource/lifecycle facts and whole-set cleanup guards for explicitly
+approved synthetic fixtures. Independent source acceptance and actual per-control
+host qualification remain distinct. A cooperative CPU-time cutoff, a tmpfs byte
+size or an observed free-capacity margin cannot satisfy missing mandatory hard
+limits or protected reserves. No full capability status advances from this extension.
+
 ## A. Core, task contracts, and operational authority
 
 ### CAP-CORE-001

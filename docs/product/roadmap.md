@@ -390,6 +390,16 @@ No host-wide policy change, escalation, live provider, protected merge or full
 operational release is authorized. The original 27-artifact graph and all milestone
 states remain unchanged; source delivery cannot stand in for H1/F1-host acceptance.
 
+The separately authorized [owned-scope continuation](../architecture/owned-scope-fixtures.md)
+permits uniquely identified temporary user scopes only inside existing legitimate
+delegation, with exact owned-effects manifests and cleanup/recovery obligations.
+Native scope and namespace implementation may advance after the accepted source
+baseline is integrated and verified. Safe finite primitives precede dependent
+boundary probes; absent controls block their consumers, not unrelated source work.
+Previously consumed campaign resources remain charged. Any protected source merge
+requires its own exact-candidate grant; no general integration or live-provider
+authority follows. The retained 27-increment topology and milestone states are unchanged.
+
 ## 005: governed evolution and evaluation
 
 CAP-EVL-002 evaluates defect-learning and rule changes against missed defects,

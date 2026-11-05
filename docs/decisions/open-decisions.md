@@ -104,6 +104,18 @@ old-record compatibility and old-reader refusal. DEC-012 requires independent
 technical acceptance and grants no protected merge or live execution authority.
 These scoped choices close none of the broader live or milestone decisions.
 
+The separately authorized [owned-scope continuation](../architecture/owned-scope-fixtures.md)
+permits safe finite creation/removal of unique owned user scopes inside existing
+delegation. DEC-006 retains per-control behavioral qualification and no escalation
+or shared-policy changes. DEC-007 extends the same supervised-fixture journal
+with optional exact scope requests and immutable observations; absence preserves
+old encoding and extended records require supporting readers. DEC-005 keeps CPU
+rate separate from cumulative CPU time, configured limits from measurements, and
+free capacity from protected reserves. DEC-004 retains synthetic inputs and bounded
+private evidence; no provider disclosure or session adoption is selected. DEC-012
+retains independent acceptance and exact-operation integration authority. No broad
+operational capability or live decision is closed by this continuation.
+
 ## DEC-001
 
 **Open-source license — resolved by the owner.** Cortex uses the standard
