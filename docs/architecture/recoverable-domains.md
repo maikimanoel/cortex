@@ -107,7 +107,13 @@ becomes Cortex's workflow, scheduler or permission authority.
 
 The service executes a pinned environment-cleaning OS wrapper inside its managed
 domain before the fixed bootstrap. The wrapper supplies an empty environment;
-the bootstrap rejects unexpected descriptors. Manager-library buffering is a
+the bootstrap rejects unexpected descriptors. Only the exact descriptor owned
+by enumeration is exempt; another handle with the same procfs target is refused.
+Startup and protocol share one absolute deadline. Fixed phase/error diagnostics
+omit paths, descriptor targets, environment and payload. The finite development
+fixture uses child-side POSIX spawn file actions to establish its descriptor set;
+it does not alter the parent/Cargo descriptor table or qualify host isolation.
+Manager-library buffering is a
 trusted control-plane limitation, separate from the bounded payload transport.
 No hard whole-controller memory or real-time guarantee follows from call deadlines.
 

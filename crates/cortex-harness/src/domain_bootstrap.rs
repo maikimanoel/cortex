@@ -106,67 +106,159 @@ fn remaining(end: Instant) -> io::Result<Duration> {
 /// trusted bootstrap. This function neither launches a payload nor authenticates
 /// a manager; it emits one public nonce only after the exact release frame.
 /// No arbitrary command, environment, private package or provider is supported.
-pub fn run_nonce_bootstrap(
-    mut stream: UnixStream,
-    request: &str,
-    timeout: Duration,
-) -> io::Result<()> {
-    if !token(request) || timeout.is_zero() || timeout > Duration::from_secs(5) {
-        return Err(io::ErrorKind::InvalidInput.into());
-    }
-    let end = Instant::now()
-        .checked_add(timeout)
-        .ok_or(io::ErrorKind::InvalidInput)?;
-    let pid = std::process::id();
-    let boot = fs::read_to_string("/proc/sys/kernel/random/boot_id")?;
-    frame_write(
-        &mut stream,
-        &json!([1, "hello", request, pid, ticks(pid)?, boot.trim()]),
-        end,
-    )?;
-    let value = frame_read(&mut stream, end)?;
-    let a = value.as_array().ok_or(io::ErrorKind::InvalidData)?;
-    if a.len() != 4 || a[0] != 1 || a[1] != "release" || a[2] != request {
-        return Err(io::ErrorKind::InvalidData.into());
-    }
-    let nonce = a[3].as_str().ok_or(io::ErrorKind::InvalidData)?;
-    if !token(nonce) {
-        return Err(io::ErrorKind::InvalidData.into());
-    }
-    frame_write(&mut stream, &json!([1, "nonce", request, nonce]), end)
+pub fn run_nonce_bootstrap(stream: UnixStream, request: &str, timeout: Duration) -> io::Result<()> {
+    let end = deadline(timeout).map_err(as_io)?;
+    run_until(stream, request, end).map_err(as_io)
 }
 
-/// Entrypoint for the fixed manager-launched executable. Only an absolute owned
-/// endpoint, request token and finite timeout are accepted. Unexpected inherited
-/// descriptors are refused before connection; all payload activity is fixed Rust.
+/// Redacted startup/protocol phase. No path, descriptor target or input is retained.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BootstrapPhase {
+    /// Invalid fixed invocation arguments.
+    Arguments,
+    /// Unexpected descriptor or descriptor enumeration failure.
+    Descriptors,
+    /// Bounded local connection refused or failed.
+    Connect,
+    /// Own-process identity could not be read.
+    Identity,
+    /// Initial observation could not be sent.
+    Hello,
+    /// Exact release was missing, late or invalid.
+    Release,
+    /// Fixed nonce observation could not be sent.
+    Result,
+}
+/// Finite diagnostic containing only a phase, error category and optional OS number.
+#[derive(Clone, Copy, Debug)]
+pub struct BootstrapFailure {
+    /// Boundary at which the invocation stopped.
+    pub phase: BootstrapPhase,
+    /// Original I/O category, without private diagnostic text.
+    pub kind: io::ErrorKind,
+    /// Numeric OS error where available; no raw input is retained.
+    pub os_error: Option<i32>,
+}
+impl std::fmt::Display for BootstrapFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "phase={:?} kind={:?} os={:?}",
+            self.phase, self.kind, self.os_error
+        )
+    }
+}
+impl std::error::Error for BootstrapFailure {}
+fn failure(phase: BootstrapPhase, e: io::Error) -> BootstrapFailure {
+    BootstrapFailure {
+        phase,
+        kind: e.kind(),
+        os_error: e.raw_os_error(),
+    }
+}
+fn as_io(e: BootstrapFailure) -> io::Error {
+    io::Error::new(e.kind, e)
+}
+fn deadline(timeout: Duration) -> Result<Instant, BootstrapFailure> {
+    if timeout.is_zero() || timeout > Duration::from_secs(5) {
+        return Err(failure(
+            BootstrapPhase::Arguments,
+            io::ErrorKind::InvalidInput.into(),
+        ));
+    }
+    Instant::now().checked_add(timeout).ok_or_else(|| {
+        failure(
+            BootstrapPhase::Arguments,
+            io::ErrorKind::InvalidInput.into(),
+        )
+    })
+}
+fn run_until(mut stream: UnixStream, request: &str, end: Instant) -> Result<(), BootstrapFailure> {
+    use BootstrapPhase::*;
+    if !token(request) {
+        return Err(failure(Arguments, io::ErrorKind::InvalidInput.into()));
+    }
+    let pid = std::process::id();
+    let boot =
+        fs::read_to_string("/proc/sys/kernel/random/boot_id").map_err(|e| failure(Identity, e))?;
+    let ticks = ticks(pid).map_err(|e| failure(Identity, e))?;
+    frame_write(
+        &mut stream,
+        &json!([1, "hello", request, pid, ticks, boot.trim()]),
+        end,
+    )
+    .map_err(|e| failure(Hello, e))?;
+    let value = frame_read(&mut stream, end).map_err(|e| failure(Release, e))?;
+    let a = value
+        .as_array()
+        .ok_or_else(|| failure(Release, io::ErrorKind::InvalidData.into()))?;
+    if a.len() != 4 || a[0] != 1 || a[1] != "release" || a[2] != request {
+        return Err(failure(Release, io::ErrorKind::InvalidData.into()));
+    }
+    let nonce = a[3]
+        .as_str()
+        .filter(|n| token(n))
+        .ok_or_else(|| failure(Release, io::ErrorKind::InvalidData.into()))?;
+    frame_write(&mut stream, &json!([1, "nonce", request, nonce]), end)
+        .map_err(|e| failure(Result, e))
+}
+
+/// Compatible I/O entrypoint; see [`nonce_bootstrap_diagnosed`] for redacted phases.
 pub fn nonce_bootstrap_main(args: &[String]) -> io::Result<()> {
+    nonce_bootstrap_diagnosed(args).map_err(as_io)
+}
+
+/// Fixed manager-launched entrypoint with bounded, redacted error information.
+/// Only the exact descriptor owned by enumeration is exempt from rejection.
+/// Startup, enumeration, connection and protocol share one absolute deadline.
+pub fn nonce_bootstrap_diagnosed(args: &[String]) -> Result<(), BootstrapFailure> {
+    use BootstrapPhase::*;
+    use std::os::fd::AsRawFd;
+    let start = Instant::now();
     if args.len() != 3 || !Path::new(&args[0]).is_absolute() || !token(&args[1]) {
-        return Err(io::ErrorKind::InvalidInput.into());
+        return Err(failure(Arguments, io::ErrorKind::InvalidInput.into()));
     }
-    let timeout: u64 = args[2].parse().map_err(|_| io::ErrorKind::InvalidInput)?;
+    let timeout: u64 = args[2]
+        .parse()
+        .map_err(|_| failure(Arguments, io::ErrorKind::InvalidInput.into()))?;
     if timeout == 0 || timeout > 5000 {
-        return Err(io::ErrorKind::InvalidInput.into());
+        return Err(failure(Arguments, io::ErrorKind::InvalidInput.into()));
     }
-    // read_dir itself owns one descriptor. Its target is the current fd
-    // directory; every other inherited descriptor above stderr is unsupported.
-    let own_fd_dir = format!("/proc/{}/fd", std::process::id());
-    for entry in fs::read_dir("/proc/self/fd")? {
-        let entry = entry?;
-        let number: u32 = entry
-            .file_name()
-            .to_str()
-            .ok_or(io::ErrorKind::InvalidData)?
-            .parse()
-            .map_err(|_| io::ErrorKind::InvalidData)?;
-        if number > 2 && fs::read_link(entry.path())? != Path::new(&own_fd_dir) {
-            return Err(io::ErrorKind::PermissionDenied.into());
+    let end = start
+        .checked_add(Duration::from_millis(timeout))
+        .ok_or_else(|| failure(Arguments, io::ErrorKind::InvalidInput.into()))?;
+    {
+        let fd = fs::File::open("/proc/self/fd").map_err(|e| failure(Descriptors, e))?;
+        let mut directory = rustix::fs::Dir::new(fd).map_err(|e| failure(Descriptors, e.into()))?;
+        let own = directory
+            .fd()
+            .map_err(|e| failure(Descriptors, e.into()))?
+            .as_raw_fd();
+        let mut count = 0;
+        while let Some(entry) = directory.read() {
+            remaining(end).map_err(|e| failure(Descriptors, e))?;
+            count += 1;
+            if count > 256 {
+                return Err(failure(Descriptors, io::ErrorKind::InvalidData.into()));
+            }
+            let entry = entry.map_err(|e| failure(Descriptors, e.into()))?;
+            let name = entry.file_name().to_bytes();
+            if name == b"." || name == b".." {
+                continue;
+            }
+            let number: i32 = std::str::from_utf8(name)
+                .ok()
+                .and_then(|n| n.parse().ok())
+                .ok_or_else(|| failure(Descriptors, io::ErrorKind::InvalidData.into()))?;
+            if number > 2 && number != own {
+                return Err(failure(Descriptors, io::ErrorKind::PermissionDenied.into()));
+            }
         }
     }
-    run_nonce_bootstrap(
-        connect_now(Path::new(&args[0]))?,
-        &args[1],
-        Duration::from_millis(timeout),
-    )
+    remaining(end).map_err(|e| failure(Connect, e))?;
+    let stream = connect_now(Path::new(&args[0])).map_err(|e| failure(Connect, e))?;
+    remaining(end).map_err(|e| failure(Connect, e))?;
+    run_until(stream, &args[1], end)
 }
 
 #[cfg(test)]
