@@ -303,7 +303,14 @@ fn retainer_ready(
 fn expect_owned_process_exit(identity: &ProcessIdentity, end: Instant) {
     loop {
         match fs::read_to_string(format!("/proc/{}/stat", identity.pid)) {
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return,
+            // Only this already-terminated/released owned incarnation is being
+            // observed. A live-readiness check must still refuse either error.
+            Err(e)
+                if e.kind() == io::ErrorKind::NotFound
+                    || e.raw_os_error() == Some(rustix::io::Errno::SRCH.raw_os_error()) =>
+            {
+                return;
+            }
             Ok(stat) => {
                 let fields: Vec<_> = stat
                     .rsplit_once(')')
