@@ -11,6 +11,38 @@ fn main() {
     if std::env::vars_os().next().is_some() {
         std::process::exit(40);
     }
+    if mode == "controlled-retain" {
+        // This child owns the readiness channel and inherited stream writers.
+        // Disconnect/timeout is a finite fallback if the test controller fails.
+        let mut channel = std::os::unix::net::UnixStream::connect(args.next().unwrap()).unwrap();
+        channel.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        channel.set_write_timeout(Some(Duration::from_secs(2))).unwrap();
+        let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
+        let fields: Vec<_> = stat.rsplit_once(')').unwrap().1.split_whitespace().collect();
+        let parent: u64 = fields[1].parse().unwrap();
+        let ticks: u64 = fields[19].parse().unwrap();
+        for value in [u64::from(std::process::id()), parent, ticks] {
+            channel.write_all(&value.to_be_bytes()).unwrap();
+        }
+        let mut release = [0];
+        if channel.read_exact(&mut release).is_ok() && release == [1] {
+            channel.write_all(&[2]).unwrap();
+        }
+        return;
+    }
+    if mode == "controlled-descendant" {
+        let child = Command::new(std::env::current_exe().unwrap())
+            .args(["controlled-retain", &args.next().unwrap()])
+            .env_clear().stdin(Stdio::null()).stdout(Stdio::inherit()).stderr(Stdio::inherit())
+            .spawn().unwrap();
+        // The stream-retention test has an explicit empty package. Nonempty
+        // input/EOF-before-spawn remains the separate legacy descendant case.
+        let mut input = Vec::new();
+        std::io::stdin().read_to_end(&mut input).unwrap();
+        assert!(input.is_empty());
+        drop(child);
+        return;
+    }
     if mode == "retain" {
         thread::sleep(Duration::from_millis(250));
         return;

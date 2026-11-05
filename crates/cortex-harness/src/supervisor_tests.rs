@@ -218,16 +218,166 @@ fn output_limits_and_malformed_frames_are_not_success_or_fake_eof() {
         assert!(result.stdout_bytes + result.stderr_bytes <= 65);
     }
 }
+// A child-owned channel establishes the scenario before measuring retention.
+// A parent-written PID marker is not evidence that a descendant has run.
+fn live_retainer(identity: &ProcessIdentity, parent: Option<u32>) -> io::Result<()> {
+    let stat = fs::read_to_string(format!("/proc/{}/stat", identity.pid))?;
+    let fields: Vec<_> = stat
+        .rsplit_once(')')
+        .ok_or(io::ErrorKind::InvalidData)?
+        .1
+        .split_whitespace()
+        .collect();
+    let ticks = fields.get(19).and_then(|s| s.parse::<u64>().ok());
+    let ppid = fields.get(1).and_then(|s| s.parse::<u32>().ok());
+    if ticks != Some(identity.start_ticks)
+        || fields.first() == Some(&"Z")
+        || parent.is_some_and(|p| ppid != Some(p))
+    {
+        return Err(io::ErrorKind::InvalidData.into());
+    }
+    Ok(())
+}
+fn retainer_ready(
+    listener: &std::os::unix::net::UnixListener,
+    parent: &ProcessIdentity,
+    end: Instant,
+) -> io::Result<(UnixStream, ProcessIdentity)> {
+    loop {
+        if Instant::now() >= end {
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+        match listener.accept() {
+            Ok((mut channel, _)) => {
+                let peer = rustix::net::sockopt::socket_peercred(&channel)?;
+                let mut bytes = [0; 24];
+                let mut received = 0;
+                channel.set_nonblocking(true)?;
+                while received < bytes.len() {
+                    if Instant::now() >= end {
+                        return Err(io::ErrorKind::TimedOut.into());
+                    }
+                    match channel.read(&mut bytes[received..]) {
+                        Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
+                        Ok(n) => received += n,
+                        Err(e)
+                            if matches!(
+                                e.kind(),
+                                io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+                            ) =>
+                        {
+                            thread::sleep(POLL)
+                        }
+                        Err(e) => return Err(e),
+                    }
+                }
+                let field = |at| u64::from_be_bytes(bytes[at..at + 8].try_into().unwrap());
+                let pid = u32::try_from(field(0)).map_err(|_| io::ErrorKind::InvalidData)?;
+                if pid == parent.pid
+                    || peer.pid.as_raw_pid() as u32 != pid
+                    || field(8) != u64::from(parent.pid)
+                    || field(16) == 0
+                {
+                    return Err(io::ErrorKind::InvalidData.into());
+                }
+                let identity = ProcessIdentity {
+                    launch: source("controlled-retainer"),
+                    pid,
+                    start_ticks: field(16),
+                };
+                live_retainer(&identity, Some(parent.pid))?;
+                return Ok((channel, identity));
+            }
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+                ) =>
+            {
+                thread::sleep(POLL)
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+fn expect_owned_process_exit(identity: &ProcessIdentity, end: Instant) {
+    loop {
+        match fs::read_to_string(format!("/proc/{}/stat", identity.pid)) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return,
+            Ok(stat) => {
+                let fields: Vec<_> = stat
+                    .rsplit_once(')')
+                    .unwrap()
+                    .1
+                    .split_whitespace()
+                    .collect();
+                assert_eq!(
+                    fields[19].parse::<u64>().unwrap(),
+                    identity.start_ticks,
+                    "owned PID was reused"
+                );
+                if fields[0] == "Z" {
+                    return;
+                }
+            }
+            Err(e) => panic!("owned process observation category={:?}", e.kind()),
+        }
+        assert!(Instant::now() < end, "owned process did not finish");
+        thread::sleep(POLL);
+    }
+}
+fn expect_stream_open(stream: &mut UnixStream) {
+    assert_eq!(
+        stream.read(&mut [0]).unwrap_err().kind(),
+        io::ErrorKind::WouldBlock
+    );
+}
+fn expect_stream_eof(stream: &mut UnixStream, end: Instant) {
+    loop {
+        match stream.read(&mut [0]) {
+            Ok(0) => return,
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+                ) =>
+            {
+                assert!(Instant::now() < end, "owned fixture stream did not close");
+                thread::sleep(POLL);
+            }
+            other => panic!("unexpected controlled stream observation: {other:?}"),
+        }
+    }
+}
 #[test]
 fn finite_descendant_retaining_streams_is_unknown_then_owned_fixture_finishes() {
     let root = Temp::new();
-    let mut pin = pin(&root, "descendant", b"input".to_vec());
-    let marker = root.0.join("child-pid");
-    pin.spec.args.push(marker.to_string_lossy().into_owned());
+    let endpoint = root.0.join("control");
+    let listener = std::os::unix::net::UnixListener::bind(&endpoint).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    // Deliberately empty input: this case tests retained streams, while the
+    // existing five-byte/EOF test separately proves its input prerequisite.
+    let mut pin = pin(&root, "controlled-descendant", Vec::new());
+    pin.spec.args.push(endpoint.to_string_lossy().into_owned());
     pin.spec.limits.wall_ms = 30;
     pin.spec.limits.cleanup_ms = 30;
-    let result = run(&pin, |_| Ok(()));
+    let running = spawn(&pin, Instant::now()).unwrap();
+    let parent = running.identity.clone().expect("owned parent identity");
+    let mut stdout = running.stdout.try_clone().unwrap();
+    let mut stderr = running.stderr.try_clone().unwrap();
+    let (mut channel, child) =
+        retainer_ready(&listener, &parent, Instant::now() + Duration::from_secs(1)).unwrap();
+    // No clock reset: setup consumes the original launch deadline.
+    let result = supervise(
+        running,
+        &pin,
+        &ids(),
+        &AtomicBool::new(false),
+        |_| Ok(()),
+        None,
+    );
     assert_eq!(result.input_bytes, pin.spec.input_len);
+    assert!(result.process == Some(parent.clone()));
     assert_eq!(result.quiescence, Quiescence::Unknown);
     assert_eq!(
         result.completion,
@@ -235,9 +385,63 @@ fn finite_descendant_retaining_streams_is_unknown_then_owned_fixture_finishes() 
             reason: InterruptionReason::Timeout
         }
     );
-    let pid = fs::read_to_string(marker).unwrap().parse::<u32>().unwrap();
-    observe_finite_descendant_finished(pid);
+    expect_owned_process_exit(&parent, Instant::now() + Duration::from_secs(1));
+    live_retainer(&child, None).expect("same retaining child must still be live");
+    expect_stream_open(&mut stdout);
+    expect_stream_open(&mut stderr);
+    channel.set_nonblocking(false).unwrap();
+    channel
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .unwrap();
+    channel
+        .set_write_timeout(Some(Duration::from_secs(1)))
+        .unwrap();
+    channel.write_all(&[1]).unwrap();
+    let mut ack = [0];
+    channel.read_exact(&mut ack).unwrap();
+    assert_eq!(ack, [2]);
+    let end = Instant::now() + Duration::from_secs(1);
+    expect_stream_eof(&mut stdout, end);
+    expect_stream_eof(&mut stderr, end);
+    expect_owned_process_exit(&child, end);
+    // The result remains Unknown even after this separate fixture cleanup.
+    assert_eq!(result.quiescence, Quiescence::Unknown);
 }
+#[test]
+fn absent_or_parent_only_readiness_cannot_supply_a_descendant_scenario() {
+    let root = Temp::new();
+    let endpoint = root.0.join("negative-control");
+    let listener = std::os::unix::net::UnixListener::bind(&endpoint).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let parent = ProcessIdentity {
+        launch: source("test-parent"),
+        pid: std::process::id(),
+        start_ticks: start_ticks(std::process::id()).unwrap(),
+    };
+    assert_eq!(
+        retainer_ready(&listener, &parent, Instant::now())
+            .err()
+            .unwrap()
+            .kind(),
+        io::ErrorKind::TimedOut
+    );
+    let mut impostor = UnixStream::connect(endpoint).unwrap();
+    for value in [
+        u64::from(parent.pid),
+        u64::from(parent.pid),
+        parent.start_ticks,
+    ] {
+        impostor.write_all(&value.to_be_bytes()).unwrap();
+    }
+    assert_eq!(
+        retainer_ready(&listener, &parent, Instant::now() + Duration::from_secs(1))
+            .err()
+            .unwrap()
+            .kind(),
+        io::ErrorKind::InvalidData
+    );
+}
+
 fn observe_finite_descendant_finished(pid: u32) {
     thread::sleep(Duration::from_millis(350));
     // A briefly unreaped orphan zombie is no longer a running escaped fixture.
