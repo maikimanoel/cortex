@@ -248,3 +248,10 @@ The [process recovery extension](process-recovery.md) retains the same Core,
 Evidence, Storage and Harness owners. Opted-in scope fixtures commit an identity
 checkpoint before input. Read-only recovery reasons project canonical guards;
 they neither reacquire host authority nor settle ambiguous historical effects.
+
+The [recoverable-domain extension](recoverable-domains.md) adds a shared
+single-operator pool-coordinator profile within the same encrypted Workflow journal.
+Core owns separate outcome, capability, consumption, capacity and administrative
+facts; Evidence composes member-program admission; Storage serializes the shared
+pool; Harness implements the fixed-payload manager/bootstrap boundary. CLI remains
+read-only. No second allocator, effect store, provider or workflow engine is introduced.

@@ -23,12 +23,15 @@ pub enum KernelError {
     Support(SupportInputError),
     /// Executor input preparation refused an exact contract.
     Executor(cortex_core::program::executor::ExecutorError),
+    /// Recoverable-domain structural/accounting guard refused the input.
+    Domain(cortex_core::program::domain::DomainError),
     /// Controlled-fixture operational guards refused the input.
     Operational(OperationalError),
 }
 impl fmt::Display for KernelError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Domain(e) => e.fmt(f),
             Self::Core(e) => e.fmt(f),
             Self::Evidence(e) => e.fmt(f),
             Self::Support(e) => e.fmt(f),
@@ -40,6 +43,7 @@ impl fmt::Display for KernelError {
 impl Error for KernelError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(match self {
+            Self::Domain(e) => e,
             Self::Core(e) => e,
             Self::Evidence(e) => e,
             Self::Support(e) => e,
@@ -77,6 +81,12 @@ impl From<cortex_core::program::executor::ExecutorError> for KernelError {
 impl From<OperationalError> for KernelError {
     fn from(e: OperationalError) -> Self {
         Self::Operational(e)
+    }
+}
+
+impl From<cortex_core::program::domain::DomainError> for KernelError {
+    fn from(e: cortex_core::program::domain::DomainError) -> Self {
+        Self::Domain(e)
     }
 }
 
@@ -163,6 +173,17 @@ pub struct ExecutorInputRequest {
 /// may perform a supervised fixture effect; kernel admission and replay never do.
 #[derive(Clone, PartialEq, Eq)]
 pub enum Command {
+    /// Version-four global pool/domain input; never performs host operations.
+    Domain(Box<cortex_core::program::domain::DomainEvent>),
+    /// Register another accepted program in the same pool coordinator journal.
+    RegisterDomainMember(Box<ProgramDefinition>),
+    /// Apply an existing non-effectful input to a registered member; nesting is refused.
+    DomainMember {
+        /// Exact registered program.
+        program: ProgramId,
+        /// Original member operation and its separate scoped authority.
+        operation: Box<Operation>,
+    },
     /// Informational G1 input; raw Review and Status are prohibited here.
     Notify(Notification),
     /// Original verification observation; no judgment is inferred.
@@ -269,6 +290,9 @@ pub struct RecordInspection {
 /// Rebuildable validated state and immutable input journal.
 #[derive(Clone)]
 pub struct CoordinationKernel {
+    domain_projection: Option<cortex_core::program::domain::DomainProjection>,
+    domain_component: bool,
+    members: Vec<CoordinationKernel>,
     initial: ProgramDefinition,
     state: ProgramState,
     operations: Vec<Operation>,
@@ -282,6 +306,9 @@ impl CoordinationKernel {
     /// Create a kernel from a validated accepted initial baseline.
     pub fn new(initial: ProgramDefinition) -> Result<Self, KernelError> {
         Ok(Self {
+            domain_projection: None,
+            domain_component: false,
+            members: vec![],
             state: ProgramState::new(initial.clone())?,
             initial,
             operations: vec![],
@@ -299,6 +326,80 @@ impl CoordinationKernel {
         let mut kernel = Self::new(initial)?;
         kernel.fixture_effects = OperationalProjection::new_supervised_fixture();
         Ok(kernel)
+    }
+    /// Explicit single-operator recoverable-domain fixture coordinator. Every
+    /// member and pool allocation is serialized in this same source-input journal.
+    /// Legacy execution events are unavailable; no implicit migration occurs.
+    pub fn new_domain_fixture(initial: ProgramDefinition) -> Result<Self, KernelError> {
+        let mut kernel = Self::new_supervised_fixture(initial)?;
+        kernel.domain_projection = Some(Default::default());
+        kernel.domain_component = true;
+        Ok(kernel)
+    }
+    /// Read-only global domain state, when the explicit profile was selected.
+    pub fn domains(&self) -> Option<&cortex_core::program::domain::DomainProjection> {
+        self.domain_projection.as_ref()
+    }
+    /// Registered member snapshots. They have no independent store or allocator.
+    pub fn domain_members(&self) -> &[CoordinationKernel] {
+        &self.members
+    }
+    /// Find a member, including the coordinator's initial program itself.
+    pub fn domain_member(&self, program: &ProgramId) -> Option<&Self> {
+        if self.state.definition().id() == program {
+            Some(self)
+        } else {
+            self.members
+                .iter()
+                .find(|m| m.state.definition().id() == program)
+        }
+    }
+    /// Fresh read-only permission/candidate/package checks. A successful check is
+    /// not durable permission, a dispatch receipt or host qualification.
+    pub fn check_domain_current(
+        &self,
+        id: &cortex_core::program::domain::DomainId,
+        at: u64,
+    ) -> Result<(), KernelError> {
+        use cortex_core::program::domain::*;
+        let projection = self.domains().ok_or(ProgramError::EffectUnavailable)?;
+        let record = projection.domain(id).ok_or(ProgramError::Missing)?;
+        if at < projection.last_tick()
+            || record.cancelled
+            || record.disposition != AdministrativeDisposition::Active
+            || record.phase == DomainPhase::Closed
+        {
+            return Err(ProgramError::Authority.into());
+        }
+        self.check_domain_intent(&record.intent, at)
+    }
+    fn check_domain_intent(
+        &self,
+        intent: &cortex_core::program::domain::DomainIntent,
+        at: u64,
+    ) -> Result<(), KernelError> {
+        let member = self
+            .domain_member(&intent.effect.scope.program)
+            .ok_or(ProgramError::Missing)?;
+        member
+            .fixture_effects
+            .check_domain_intent(&member.state, &intent.effect, at)?;
+        let scope = &intent.effect.scope;
+        let package = member
+            .packages
+            .iter()
+            .find(|p| {
+                p.request().id == scope.package && p.request().revision == scope.package_revision
+            })
+            .ok_or(ProgramError::Missing)?;
+        if package.request().mission != scope.mission
+            || package.request().baseline != scope.baseline
+            || package.request().generation != scope.generation
+        {
+            return Err(ProgramError::Stale.into());
+        }
+        package.check(&member.state, package.bytes())?;
+        Ok(())
     }
     /// Initial immutable input, used for exact reconstruction.
     pub fn initial(&self) -> &ProgramDefinition {
@@ -342,6 +443,16 @@ impl CoordinationKernel {
     /// Validate and admit an operation atomically in memory. A durable caller must
     /// reload under its transaction lock and commit the same complete input.
     pub fn admit(&mut self, operation: Operation) -> Result<KernelReceipt, KernelError> {
+        if let Command::DomainMember { operation, .. } = &operation.command
+            && matches!(
+                operation.command,
+                Command::Domain(_)
+                    | Command::DomainMember { .. }
+                    | Command::RegisterDomainMember(_)
+            )
+        {
+            return Err(ProgramError::EffectUnavailable.into());
+        }
         if let Some((i, old)) = self
             .operations
             .iter()
@@ -404,7 +515,103 @@ impl CoordinationKernel {
     }
     fn reduce(&mut self, o: &Operation) -> Result<(), KernelError> {
         let g = &o.grant;
+        self.check_domain_ownership(self.state.definition().id(), &o.command)?;
         match &o.command {
+            Command::RegisterDomainMember(definition) => {
+                if self.domain_projection.is_none()
+                    || self.members.len() >= self.state.definition().limits().entries
+                    || self.domain_member(definition.id()).is_some()
+                {
+                    return Err(ProgramError::EffectUnavailable.into());
+                }
+                self.check(
+                    g,
+                    CoordinationPermission::Amend,
+                    &self
+                        .state
+                        .definition()
+                        .graph()
+                        .missions()
+                        .iter()
+                        .map(|m| m.id().clone())
+                        .collect::<Vec<_>>(),
+                )?;
+                let mut member = Self::new_supervised_fixture((**definition).clone())?;
+                member.domain_component = true;
+                self.members.push(member);
+            }
+            Command::DomainMember { program, operation } => {
+                if self.domain_projection.is_none()
+                    || matches!(
+                        operation.command,
+                        Command::Domain(_)
+                            | Command::DomainMember { .. }
+                            | Command::RegisterDomainMember(_)
+                    )
+                {
+                    return Err(ProgramError::EffectUnavailable.into());
+                }
+                self.check(g, CoordinationPermission::Plan, &[])?;
+                self.check_domain_ownership(program, &operation.command)?;
+                let member = self
+                    .members
+                    .iter_mut()
+                    .find(|m| m.state.definition().id() == program)
+                    .ok_or(ProgramError::Missing)?;
+                member.admit((**operation).clone())?;
+            }
+            Command::Domain(event) => {
+                use cortex_core::program::domain::*;
+                if self.domain_projection.is_none() {
+                    return Err(ProgramError::EffectUnavailable.into());
+                }
+                if matches!(event.as_ref(), DomainEvent::ConfigurePool(_)) {
+                    self.check(
+                        g,
+                        CoordinationPermission::Amend,
+                        &self
+                            .state
+                            .definition()
+                            .graph()
+                            .missions()
+                            .iter()
+                            .map(|m| m.id().clone())
+                            .collect::<Vec<_>>(),
+                    )?;
+                } else {
+                    self.check(g, CoordinationPermission::Review, &[])?;
+                }
+                if let DomainEvent::Reserve { intent, at } = event.as_ref() {
+                    self.check_domain_intent(intent, *at)?;
+                    let member = self
+                        .domain_member(&intent.effect.scope.program)
+                        .ok_or(ProgramError::Missing)?;
+                    let policy = member
+                        .fixture_effects
+                        .current_policy()
+                        .ok_or(ProgramError::Missing)?;
+                    let count = self
+                        .domains()
+                        .ok_or(ProgramError::Missing)?
+                        .domains()
+                        .iter()
+                        .filter(|d| d.intent.effect.scope.program == intent.effect.scope.program)
+                        .count();
+                    if count >= policy.max_effects {
+                        return Err(ProgramError::Capacity.into());
+                    }
+                    self.check_domain_member_capacity(intent)?;
+                } else if event.needs_current_authority() {
+                    self.check_domain_current(
+                        event.domain().ok_or(ProgramError::Structure)?,
+                        event.tick().ok_or(ProgramError::Structure)?,
+                    )?;
+                }
+                self.domain_projection
+                    .as_mut()
+                    .ok_or(ProgramError::EffectUnavailable)?
+                    .apply((**event).clone())?;
+            }
             Command::Notify(n) => {
                 if matches!(n.event(), Event::Review(_) | Event::Status { .. }) {
                     return Err(ProgramError::EffectUnavailable.into());
@@ -635,11 +842,142 @@ impl CoordinationKernel {
         }
         Ok(())
     }
+    fn check_domain_member_capacity(
+        &self,
+        intent: &cortex_core::program::domain::DomainIntent,
+    ) -> Result<(), KernelError> {
+        use cortex_core::program::{domain::*, scheduling::Resource};
+        let member = self
+            .domain_member(&intent.effect.scope.program)
+            .ok_or(ProgramError::Missing)?;
+        let policy = member
+            .fixture_effects
+            .current_policy()
+            .ok_or(ProgramError::Missing)?;
+        let projection = self.domains().ok_or(ProgramError::Missing)?;
+        for capacity in &policy.capacities {
+            let resource = capacity.resource;
+            let requested = intent
+                .effect
+                .demand
+                .iter()
+                .find(|d| d.resource == resource)
+                .and_then(|d| d.amount)
+                .ok_or(OperationalError::UnknownResource(resource))?;
+            let cumulative = policy.cumulative.contains(&resource);
+            let dimension = match (resource, cumulative) {
+                (Resource::TimeMillis, true) => Some(Consumption::ElapsedMillis),
+                (Resource::OutputBytes, true) => Some(Consumption::OutputBytes),
+                (
+                    Resource::Workers
+                    | Resource::Builds
+                    | Resource::Tests
+                    | Resource::CpuMillis
+                    | Resource::RamBytes
+                    | Resource::DiskBytes,
+                    false,
+                ) => None,
+                // Rate/capacity cannot silently become cumulative execution time.
+                // Provider/CI and other unsupported mappings are not this profile.
+                _ => return Err(ProgramError::Structure.into()),
+            };
+            if let Some(dimension) = dimension
+                && (!projection
+                    .pool()
+                    .is_some_and(|p| p.consumption.iter().any(|b| b.dimension == dimension))
+                    || intent
+                        .consumption
+                        .iter()
+                        .find(|d| d.dimension == dimension)
+                        .is_none_or(|d| d.amount != requested))
+            {
+                return Err(ProgramError::Structure.into());
+            }
+            let mut used = 0u64;
+            for prior in projection
+                .domains()
+                .iter()
+                .filter(|d| d.intent.effect.scope.program == intent.effect.scope.program)
+            {
+                let amount = if let Some(dimension) = dimension {
+                    match prior.phase {
+                        DomainPhase::CancelledBeforeCreate => 0,
+                        DomainPhase::Reserved => prior
+                            .intent
+                            .consumption
+                            .iter()
+                            .find(|d| d.dimension == dimension)
+                            .map(|d| d.amount)
+                            .ok_or(ProgramError::Structure)?,
+                        _ => prior
+                            .measured_consumption(dimension)
+                            .ok_or(DomainError::Debt(dimension))?,
+                    }
+                } else if prior.holds(resource) {
+                    prior
+                        .intent
+                        .effect
+                        .demand
+                        .iter()
+                        .find(|d| d.resource == resource)
+                        .and_then(|d| d.amount)
+                        .ok_or(OperationalError::UnknownResource(resource))?
+                } else {
+                    0
+                };
+                used = used
+                    .checked_add(amount)
+                    .ok_or(OperationalError::ResourceLimit(resource))?;
+            }
+            let free = capacity
+                .available
+                .ok_or(OperationalError::UnknownResource(resource))?
+                .checked_sub(capacity.verification_reserve)
+                .ok_or(OperationalError::ResourceLimit(resource))?;
+            if used.checked_add(requested).is_none_or(|n| n > free) {
+                return Err(OperationalError::ResourceLimit(resource).into());
+            }
+        }
+        Ok(())
+    }
+    fn check_domain_ownership(
+        &self,
+        program: &ProgramId,
+        command: &Command,
+    ) -> Result<(), KernelError> {
+        use cortex_core::program::domain::{DomainPhase, HistoricalOutcome};
+        let attempt = match command {
+            Command::Attempt { id, .. } => Some(id),
+            Command::Handoff { old, .. } => Some(old),
+            _ => None,
+        };
+        if let (Some(domains), Some(attempt)) = (&self.domain_projection, attempt)
+            && domains.domains().iter().any(|d| {
+                &d.intent.effect.scope.program == program
+                    && &d.intent.effect.scope.attempt == attempt
+                    && (!matches!(
+                        d.phase,
+                        DomainPhase::Closed | DomainPhase::CancelledBeforeCreate
+                    ) || d.outcome == HistoricalOutcome::Unknown)
+            })
+        {
+            return Err(ProgramError::Claimed.into());
+        }
+        Ok(())
+    }
     fn fixture_event(
         &mut self,
         grant: &CoordinationGrant,
         event: &EffectEvent,
     ) -> Result<(), KernelError> {
+        if self.domain_component
+            && !matches!(
+                event,
+                EffectEvent::Policy(_) | EffectEvent::Grant(_) | EffectEvent::Revoke { .. }
+            )
+        {
+            return Err(ProgramError::EffectUnavailable.into());
+        }
         let missions = match event {
             EffectEvent::Policy(_) => self
                 .state

@@ -1484,3 +1484,9 @@ opt-in durable scope identity checkpoints and read-only reconciliation inspectio
 under the existing supervised-fixture responsibilities. Historical Unknown and
 reservations are preserved; no operational host release or milestone/status
 advance follows from source verification.
+
+The owner-authorized [recoverable-domain extension](../architecture/recoverable-domains.md)
+separates historical Unknown from present closure and per-dimension resource
+disposition under those same owners. It adds explicit shared-pool admission and
+a fixed synthetic payload backend without promoting any complete capability.
+Source acceptance, actual-host qualification and live execution remain separate.

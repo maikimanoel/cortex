@@ -1,4 +1,5 @@
 //! Explicit read-only encrypted program inspection; no hidden recovery or dispatch.
+mod domains;
 use cortex_core::{
     parallel::*,
     program::{AttemptStatus, operational::EffectMode, supervision::*},
@@ -127,6 +128,24 @@ fn view(k: &CoordinationKernel) -> Value {
             "Live executor budgets/reserves, provider disclosure, credential mediation and retention",
             "Applicable host qualification and live execution grant",
             "Protected integration approval"
+        ]);
+    }
+    if let Some(projection) = k.domains() {
+        result["fixture_projection"] = Value::Null;
+        result["supervised_projection"] = Value::Null;
+        result["domain_projection"] = domains::view(projection);
+        result["registered_member_programs"] = json!(
+            k.domain_members()
+                .iter()
+                .map(|m| m.state().definition().id().as_str())
+                .collect::<Vec<_>>()
+        );
+        result["resource_reservations"] = Value::Null;
+        result["execution_authority"] = json!("INSPECTION_CONFERS_NONE");
+        result["owner_decisions_required"] = json!([
+            "Applicable historical allocation disposition and physical pool correspondence",
+            "Actual host qualification, finite budgets and execution authority",
+            "Separate protected integration or live provider authorization"
         ]);
     }
     result
@@ -356,6 +375,25 @@ pub fn run(args: impl Iterator<Item = OsString>, out: &mut impl Write) -> Result
                 out,
                 "Scope: local coordination metadata. Execution authority: UNAVAILABLE. Live verification: NOT_RUN."
             )?;
+        }
+        if let Some(projection) = value.get("domain_projection") {
+            writeln!(
+                out,
+                "Recoverable domain fixtures: one shared pool; retained observations only. Current host liveness: NOT_OBSERVED."
+            )?;
+            for domain in projection["domains"].as_array().expect("domain array") {
+                writeln!(
+                    out,
+                    "Domain {}: historical={} phase={} disposition={} capacity={} consumption={} next={} (no retry or artifact acceptance)",
+                    domain["domain"].as_str().expect("domain ID"),
+                    domain["historical_outcome"],
+                    domain["retained_domain_phase"],
+                    domain["administrative_disposition"],
+                    domain["reusable_capacity"],
+                    domain["cumulative_consumption"],
+                    domain["next_permissible_action"]
+                )?;
+            }
         }
         for m in value["missions"].as_array().expect("array") {
             writeln!(

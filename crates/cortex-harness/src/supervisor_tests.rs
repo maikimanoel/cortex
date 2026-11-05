@@ -560,7 +560,7 @@ fn authority_read_delay_cannot_refresh_idle_or_startup_deadlines() {
 }
 
 #[path = "../../cortex-evidence/tests/support/program.rs"]
-mod fixture;
+pub(crate) mod fixture;
 #[path = "../../cortex-evidence/tests/support/supervision.rs"]
 mod support;
 use cortex_storage::program_store::ReadLimits;

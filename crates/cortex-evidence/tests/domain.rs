@@ -1,0 +1,575 @@
+//! Controlled state-machine tests, never actual host qualification.
+#[path = "support/program.rs"]
+mod program_fixture;
+#[path = "support/domain.rs"]
+mod support;
+use cortex_core::program::{domain::*, operational::*, scheduling::*, *};
+use cortex_evidence::program::*;
+use support::*;
+
+#[test]
+fn unknown_closure_releases_covered_capacity_once_but_keeps_debt_and_disk() {
+    let (mut k, i) = coordinator();
+    bound(&mut k, &i);
+    event(
+        &mut k,
+        "closure",
+        DomainEvent::Closed {
+            receipt: closure(&i, None),
+            at: 4,
+        },
+    );
+    let p = k.domains().unwrap();
+    let r = p.domain(&i.id).unwrap();
+    assert_eq!(r.outcome, HistoricalOutcome::Unknown);
+    assert!(!r.holds(Resource::Workers));
+    assert!(r.holds(Resource::DiskBytes));
+    assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
+    let j = setup(&mut k, "D");
+    let before = k.revision();
+    let op = domain_operation(
+        &k,
+        "held-next",
+        Command::Domain(Box::new(DomainEvent::Reserve { intent: j, at: 5 })),
+    );
+    assert!(matches!(
+        k.admit(op),
+        Err(KernelError::Domain(DomainError::Debt(
+            Consumption::CpuExecutionMillis
+        )))
+    ));
+    assert_eq!(k.revision(), before);
+    let mut later = closure(&i, Some(7));
+    later.released = vec![];
+    event(
+        &mut k,
+        "settle-cpu",
+        DomainEvent::Settle {
+            receipt: later,
+            at: 5,
+        },
+    );
+    let mut duplicate = closure(&i, Some(7));
+    duplicate.released = vec![];
+    let op = domain_operation(
+        &k,
+        "duplicate-measurement",
+        Command::Domain(Box::new(DomainEvent::Settle {
+            receipt: duplicate,
+            at: 6,
+        })),
+    );
+    assert!(k.admit(op).is_err());
+    assert_eq!(
+        k.domains()
+            .unwrap()
+            .consumed_or_reserved(Consumption::CpuExecutionMillis),
+        Ok(7)
+    );
+}
+#[test]
+fn measured_consumption_and_closed_capacity_allow_independent_next_work() {
+    let (mut k, i) = coordinator();
+    bound(&mut k, &i);
+    event(
+        &mut k,
+        "closed",
+        DomainEvent::Closed {
+            receipt: closure(&i, Some(7)),
+            at: 4,
+        },
+    );
+    let j = setup(&mut k, "D");
+    event(
+        &mut k,
+        "next",
+        DomainEvent::Reserve {
+            intent: j.clone(),
+            at: 5,
+        },
+    );
+    assert_eq!(k.domains().unwrap().held(Resource::Workers), Ok(1));
+    assert_eq!(k.domains().unwrap().held(Resource::DiskBytes), Ok(64));
+    assert_eq!(
+        k.domains()
+            .unwrap()
+            .consumed_or_reserved(Consumption::CpuExecutionMillis),
+        Ok(37)
+    );
+    assert_eq!(
+        k.domains().unwrap().domain(&i.id).unwrap().outcome,
+        HistoricalOutcome::Unknown
+    );
+    assert_eq!(
+        k.domains().unwrap().domain(&j.id).unwrap().phase,
+        DomainPhase::Reserved
+    );
+}
+#[test]
+fn global_pool_refuses_two_programs_double_allocating() {
+    let (mut k, i) = coordinator();
+    let j = add_member(&mut k, "other-program");
+    event(
+        &mut k,
+        "reserve-one",
+        DomainEvent::Reserve { intent: i, at: 1 },
+    );
+    let op = domain_operation(
+        &k,
+        "reserve-two",
+        Command::Domain(Box::new(DomainEvent::Reserve { intent: j, at: 1 })),
+    );
+    assert!(matches!(
+        k.admit(op),
+        Err(KernelError::Domain(DomainError::Capacity(
+            Resource::Workers
+        )))
+    ));
+    assert_eq!(k.domains().unwrap().domains().len(), 1);
+}
+#[test]
+fn missing_creation_reply_reconstruction_never_returns_to_reserved() {
+    let (mut k, i) = coordinator();
+    event(
+        &mut k,
+        "reserve",
+        DomainEvent::Reserve {
+            intent: i.clone(),
+            at: 1,
+        },
+    );
+    event(
+        &mut k,
+        "create",
+        DomainEvent::CreateRequested {
+            domain: i.id.clone(),
+            at: 2,
+        },
+    );
+    let mut replay = CoordinationKernel::new_domain_fixture(k.initial().clone()).unwrap();
+    for o in k.operations() {
+        replay.admit(o.clone()).unwrap();
+    }
+    assert_eq!(
+        replay.domains().unwrap().domain(&i.id).unwrap().phase,
+        DomainPhase::CreateUncertain
+    );
+    let op = domain_operation(
+        &replay,
+        "recreate",
+        Command::Domain(Box::new(DomainEvent::CreateRequested {
+            domain: i.id,
+            at: 3,
+        })),
+    );
+    assert!(replay.admit(op).is_err());
+}
+#[test]
+fn stale_receipts_missing_helpers_and_wrong_epochs_never_release() {
+    let (mut k, i) = coordinator();
+    bound(&mut k, &i);
+    for which in 0..7 {
+        let mut r = closure(&i, Some(0));
+        match which {
+            0 => r.identity.boot = "other".into(),
+            1 => r.identity.invocation = "reused-name".into(),
+            2 => r.identity.cgroup_inode += 1,
+            3 => r.whole_domain = false,
+            4 => r.restart_prevented = false,
+            5 => r.snapshot_safe = false,
+            _ => r.quiescent = false,
+        };
+        let op = domain_operation(
+            &k,
+            &format!("bad-{which}"),
+            Command::Domain(Box::new(DomainEvent::Closed { receipt: r, at: 4 })),
+        );
+        assert!(k.admit(op).is_err());
+    }
+    assert_eq!(k.domains().unwrap().held(Resource::Workers), Ok(1));
+}
+#[test]
+fn admin_disposition_and_cancel_never_claim_cleanup() {
+    let (mut k, i) = coordinator();
+    bound(&mut k, &i);
+    event(
+        &mut k,
+        "cancel",
+        DomainEvent::Cancel {
+            domain: i.id.clone(),
+            at: 4,
+            basis: source("cancel"),
+        },
+    );
+    event(
+        &mut k,
+        "archive",
+        DomainEvent::Disposition {
+            domain: i.id.clone(),
+            disposition: AdministrativeDisposition::Abandoned,
+            at: 5,
+            basis: source("archive"),
+        },
+    );
+    let r = k.domains().unwrap().domain(&i.id).unwrap();
+    assert_eq!(r.outcome, HistoricalOutcome::Unknown);
+    assert_eq!(r.phase, DomainPhase::Bound);
+    assert!(r.holds(Resource::Workers));
+    let op = domain_operation(
+        &k,
+        "late",
+        Command::Domain(Box::new(DomainEvent::ReleaseRequested {
+            domain: i.id.clone(),
+            identity: identity(&i),
+            at: 6,
+        })),
+    );
+    assert!(k.admit(op).is_err());
+}
+#[test]
+fn cancellation_before_creation_cannot_be_restarted_and_refunds_only_future_allocation() {
+    let (mut k, i) = coordinator();
+    event(
+        &mut k,
+        "reserve",
+        DomainEvent::Reserve {
+            intent: i.clone(),
+            at: 1,
+        },
+    );
+    event(
+        &mut k,
+        "cancel",
+        DomainEvent::Cancel {
+            domain: i.id.clone(),
+            at: 2,
+            basis: source("cancel"),
+        },
+    );
+    let r = k.domains().unwrap().domain(&i.id).unwrap();
+    assert_eq!(r.phase, DomainPhase::CancelledBeforeCreate);
+    assert_eq!(r.outcome, HistoricalOutcome::NotDispatched);
+    assert!(!r.holds(Resource::Workers));
+    assert_eq!(
+        r.measured_consumption(Consumption::CpuExecutionMillis),
+        None
+    );
+    let op = domain_operation(
+        &k,
+        "create",
+        Command::Domain(Box::new(DomainEvent::CreateRequested {
+            domain: i.id,
+            at: 3,
+        })),
+    );
+    assert!(k.admit(op).is_err());
+}
+#[test]
+fn old_effect_path_and_member_recursion_are_unavailable() {
+    let (mut k, i) = coordinator();
+    let op = domain_operation(
+        &k,
+        "legacy",
+        Command::SupervisedEffect(Box::new(EffectEvent::Reserve {
+            intent: i.effect,
+            at: 1,
+        })),
+    );
+    assert!(k.admit(op).is_err());
+    let j = add_member(&mut k, "member");
+    let member = k.domain_member(&j.effect.scope.program).unwrap();
+    let nested = domain_operation(
+        member,
+        "nested",
+        Command::RegisterDomainMember(Box::new(named_definition("nested"))),
+    );
+    let op = domain_operation(
+        &k,
+        "outer",
+        Command::DomainMember {
+            program: j.effect.scope.program,
+            operation: Box::new(nested),
+        },
+    );
+    assert!(k.admit(op).is_err());
+}
+#[test]
+fn pending_and_closed_unknown_domains_keep_metadata_ownership() {
+    for closed in [false, true] {
+        let (mut k, i) = coordinator();
+        bound(&mut k, &i);
+        if closed {
+            event(
+                &mut k,
+                "close",
+                DomainEvent::Closed {
+                    receipt: closure(&i, Some(7)),
+                    at: 4,
+                },
+            );
+        }
+        let op = domain_operation(
+            &k,
+            "discard-attempt",
+            Command::Attempt {
+                id: i.effect.scope.attempt,
+                generation: rev(1),
+                status: AttemptStatus::Cancelled,
+                basis: source("no-proof"),
+            },
+        );
+        assert!(k.admit(op).is_err());
+    }
+    let (mut k, _) = coordinator();
+    let j = add_member(&mut k, "member");
+    bound(&mut k, &j);
+    let member = k.domain_member(&j.effect.scope.program).unwrap();
+    let op = domain_operation(
+        member,
+        "discard",
+        Command::Attempt {
+            id: j.effect.scope.attempt.clone(),
+            generation: rev(1),
+            status: AttemptStatus::Cancelled,
+            basis: source("no-proof"),
+        },
+    );
+    let outer = domain_operation(
+        &k,
+        "outer",
+        Command::DomainMember {
+            program: j.effect.scope.program,
+            operation: Box::new(op),
+        },
+    );
+    assert!(k.admit(outer).is_err());
+}
+#[test]
+fn stale_authority_blocks_binding_and_release_without_resetting_history() {
+    let (mut k, i) = coordinator();
+    event(
+        &mut k,
+        "reserve",
+        DomainEvent::Reserve {
+            intent: i.clone(),
+            at: 1,
+        },
+    );
+    event(
+        &mut k,
+        "create",
+        DomainEvent::CreateRequested {
+            domain: i.id.clone(),
+            at: 2,
+        },
+    );
+    submit(
+        &mut k,
+        "revoke",
+        Command::SupervisedEffect(Box::new(EffectEvent::Revoke {
+            grant: i.effect.grant.clone(),
+            at: 3,
+            basis: source("revoke"),
+        })),
+    );
+    let op = domain_operation(
+        &k,
+        "bind",
+        Command::Domain(Box::new(DomainEvent::Bound {
+            domain: i.id.clone(),
+            identity: identity(&i),
+            at: 4,
+        })),
+    );
+    assert!(k.admit(op).is_err());
+    assert_eq!(
+        k.domains().unwrap().domain(&i.id).unwrap().phase,
+        DomainPhase::CreateUncertain
+    );
+}
+#[test]
+fn exact_recovered_closure_after_lost_identity_and_revocation_never_reopens_payload() {
+    let (mut k, i) = coordinator();
+    event(
+        &mut k,
+        "reserve",
+        DomainEvent::Reserve {
+            intent: i.clone(),
+            at: 1,
+        },
+    );
+    event(
+        &mut k,
+        "create",
+        DomainEvent::CreateRequested {
+            domain: i.id.clone(),
+            at: 2,
+        },
+    );
+    submit(
+        &mut k,
+        "revoke",
+        Command::SupervisedEffect(Box::new(EffectEvent::Revoke {
+            grant: i.effect.grant.clone(),
+            at: 3,
+            basis: source("revoke"),
+        })),
+    );
+    event(
+        &mut k,
+        "cancel",
+        DomainEvent::Cancel {
+            domain: i.id.clone(),
+            at: 4,
+            basis: source("cancel"),
+        },
+    );
+    let mut forged = closure(&i, Some(7));
+    forged.identity.request = OperationId::new("unrelated-request").unwrap();
+    let op = domain_operation(
+        &k,
+        "wrong-proof",
+        Command::Domain(Box::new(DomainEvent::RecoveredClosed {
+            receipt: forged,
+            at: 5,
+        })),
+    );
+    assert!(k.admit(op).is_err());
+    event(
+        &mut k,
+        "recover-closed",
+        DomainEvent::RecoveredClosed {
+            receipt: closure(&i, Some(7)),
+            at: 5,
+        },
+    );
+    let r = k.domains().unwrap().domain(&i.id).unwrap();
+    assert_eq!(r.outcome, HistoricalOutcome::Unknown);
+    assert_eq!(r.phase, DomainPhase::Closed);
+    assert!(r.cancelled);
+    assert_eq!(k.domains().unwrap().held(Resource::Workers), Ok(0));
+    assert!(k.check_domain_current(&i.id, 6).is_err());
+    let j = setup(&mut k, "D");
+    event(
+        &mut k,
+        "next-independent",
+        DomainEvent::Reserve { intent: j, at: 6 },
+    );
+}
+#[test]
+fn measured_use_over_declared_reservation_is_retained_not_clamped() {
+    let (mut k, i) = coordinator();
+    bound(&mut k, &i);
+    event(
+        &mut k,
+        "closed",
+        DomainEvent::Closed {
+            receipt: closure(&i, Some(100)),
+            at: 4,
+        },
+    );
+    assert_eq!(
+        k.domains()
+            .unwrap()
+            .consumed_or_reserved(Consumption::CpuExecutionMillis),
+        Ok(100)
+    );
+    let j = setup(&mut k, "D");
+    let input = domain_operation(
+        &k,
+        "next",
+        Command::Domain(Box::new(DomainEvent::Reserve { intent: j, at: 5 })),
+    );
+    assert!(matches!(
+        k.admit(input),
+        Err(KernelError::Domain(DomainError::Budget(
+            Consumption::CpuExecutionMillis
+        )))
+    ));
+}
+#[test]
+fn member_aggregate_capacity_is_not_reinterpreted_as_a_per_attempt_limit() {
+    let mut k = CoordinationKernel::new_domain_fixture(definition()).unwrap();
+    let mut p = pool();
+    p.capacities[0].available = Some(4);
+    event(&mut k, "pool", DomainEvent::ConfigurePool(p));
+    let i = setup(&mut k, "A");
+    let j = setup(&mut k, "D");
+    // Member's existing policy has one available worker after reserve, whereas
+    // this physical pool has three. Same-program allocations still cannot exceed one.
+    event(&mut k, "one", DomainEvent::Reserve { intent: i, at: 1 });
+    let op = domain_operation(
+        &k,
+        "two",
+        Command::Domain(Box::new(DomainEvent::Reserve { intent: j, at: 1 })),
+    );
+    assert!(matches!(
+        k.admit(op),
+        Err(KernelError::Operational(OperationalError::ResourceLimit(
+            Resource::Workers
+        )))
+    ));
+    let j = add_member(&mut k, "independent-member");
+    event(
+        &mut k,
+        "independent",
+        DomainEvent::Reserve { intent: j, at: 1 },
+    );
+    assert_eq!(k.domains().unwrap().held(Resource::Workers), Ok(2));
+}
+#[test]
+fn cumulative_member_output_requires_exact_shared_consumption_budget() {
+    for shared in [false, true] {
+        let (base, mut i) = coordinator();
+        let mut k = CoordinationKernel::new_domain_fixture(base.initial().clone()).unwrap();
+        for input in base.operations() {
+            let mut input = input.clone();
+            match &mut input.command {
+                Command::SupervisedEffect(e) => match e.as_mut() {
+                    EffectEvent::Policy(p) => {
+                        p.capacities.push(Capacity {
+                            resource: Resource::OutputBytes,
+                            available: Some(20),
+                            verification_reserve: 0,
+                            declared_enforceable: true,
+                        });
+                        p.cumulative = vec![Resource::OutputBytes];
+                    }
+                    EffectEvent::Grant(g) => g.ceilings.push(Demand {
+                        resource: Resource::OutputBytes,
+                        amount: Some(10),
+                    }),
+                    _ => {}
+                },
+                Command::Domain(e) => {
+                    if let DomainEvent::ConfigurePool(p) = e.as_mut()
+                        && shared
+                    {
+                        p.consumption.push(ConsumptionBudget {
+                            dimension: Consumption::OutputBytes,
+                            total: 100,
+                            reserve: 20,
+                            per_operation: 10,
+                        });
+                    }
+                }
+                _ => {}
+            }
+            k.admit(input).unwrap();
+        }
+        i.effect.demand.push(Demand {
+            resource: Resource::OutputBytes,
+            amount: Some(10),
+        });
+        i.consumption.push(ConsumptionReservation {
+            dimension: Consumption::OutputBytes,
+            amount: 10,
+        });
+        let op = domain_operation(
+            &k,
+            "shared-output",
+            Command::Domain(Box::new(DomainEvent::Reserve { intent: i, at: 1 })),
+        );
+        assert_eq!(k.admit(op).is_ok(), shared);
+    }
+}

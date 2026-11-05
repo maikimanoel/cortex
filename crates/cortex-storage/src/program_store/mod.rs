@@ -45,6 +45,8 @@ pub enum ProgramProfile {
     FixturesV2,
     /// Explicit Stage 2B trusted local process fixtures; never an AI executor grant.
     SupervisedFixturesV3,
+    /// One shared-pool coordinator with recoverable provider-free domain records.
+    RecoverableDomainsV4,
 }
 impl ProgramProfile {
     fn format(self) -> i64 {
@@ -52,6 +54,7 @@ impl ProgramProfile {
             Self::MetadataV1 => 1,
             Self::FixturesV2 => 2,
             Self::SupervisedFixturesV3 => 3,
+            Self::RecoverableDomainsV4 => 4,
         }
     }
     fn policy(self) -> &'static str {
@@ -59,14 +62,38 @@ impl ProgramProfile {
             Self::MetadataV1 => "local-operator-program-metadata-v1",
             Self::FixturesV2 => "local-operator-program-fixtures-v2",
             Self::SupervisedFixturesV3 => "local-operator-program-supervised-fixtures-v3",
+            Self::RecoverableDomainsV4 => "local-operator-recoverable-domains-v4",
         }
     }
     fn check(self, input: &Operation) -> Result<(), ProgramStoreError> {
         use cortex_evidence::program::Command;
+        if let Command::DomainMember { operation, .. } = &input.command
+            && matches!(
+                operation.command,
+                Command::Domain(_)
+                    | Command::DomainMember { .. }
+                    | Command::RegisterDomainMember(_)
+            )
+        {
+            return Err(ProgramStoreError::Unsupported);
+        }
+        if matches!(
+            input.command,
+            Command::Domain(_) | Command::DomainMember { .. } | Command::RegisterDomainMember(_)
+        ) && self != Self::RecoverableDomainsV4
+        {
+            return Err(ProgramStoreError::Unsupported);
+        }
         if matches!(input.command, Command::SupervisedEffect(_))
-            && self != Self::SupervisedFixturesV3
+            && !matches!(
+                self,
+                Self::SupervisedFixturesV3 | Self::RecoverableDomainsV4
+            )
             || matches!(input.command, Command::FixtureEffect(_))
-                && self == Self::SupervisedFixturesV3
+                && matches!(
+                    self,
+                    Self::SupervisedFixturesV3 | Self::RecoverableDomainsV4
+                )
         {
             return Err(ProgramStoreError::Unsupported);
         }
@@ -85,6 +112,7 @@ impl ProgramProfile {
     fn kernel(self, initial: ProgramDefinition) -> Result<CoordinationKernel, KernelError> {
         match self {
             Self::SupervisedFixturesV3 => CoordinationKernel::new_supervised_fixture(initial),
+            Self::RecoverableDomainsV4 => CoordinationKernel::new_domain_fixture(initial),
             _ => CoordinationKernel::new(initial),
         }
     }
@@ -317,6 +345,23 @@ impl ProgramStore {
             ProgramProfile::SupervisedFixturesV3,
         )
     }
+    /// Create one explicit shared-pool fixture coordinator. It must be the sole
+    /// registered journal for its physical pool under the cooperating-operator
+    /// contract; copying a store creates no additional capacity or permission.
+    pub fn create_domain_fixture(
+        path: &Path,
+        key: &StoreKey,
+        initial: ProgramDefinition,
+        limits: ReadLimits,
+    ) -> Result<Self, ProgramStoreError> {
+        Self::create_profile(
+            path,
+            key,
+            initial,
+            limits,
+            ProgramProfile::RecoverableDomainsV4,
+        )
+    }
     fn create_profile(
         path: &Path,
         key: &StoreKey,
@@ -497,6 +542,24 @@ impl ProgramStore {
         }
         self.admit_coordinated(key, input, |_, _| {}, launch)
     }
+    /// Commit a version-four creation/release/cancellation intent before one short trusted
+    /// callback, under the existing lifecycle lock. Duplicate or uncertain
+    /// admission never calls it; replay only reconstructs the retained intent.
+    /// No transaction spans the manager. A lost external reply stays uncertain.
+    pub fn dispatch_domain<R>(
+        &self,
+        key: &StoreKey,
+        input: Operation,
+        launch: impl FnOnce(&CoordinationKernel) -> R,
+    ) -> Result<(Receipt, Option<R>), AdmissionFailure> {
+        use cortex_core::program::domain::DomainEvent;
+        if self.profile != ProgramProfile::RecoverableDomainsV4
+            || !matches!(&input.command, cortex_evidence::program::Command::Domain(e) if matches!(e.as_ref(), DomainEvent::CreateRequested { .. } | DomainEvent::ReleaseRequested { .. } | DomainEvent::Cancel { .. }))
+        {
+            return Err(AdmissionFailure::rejected(ProgramStoreError::Unsupported));
+        }
+        self.admit_coordinated(key, input, |_, _| {}, launch)
+    }
     fn admit_coordinated<R>(
         &self,
         key: &StoreKey,
@@ -537,7 +600,7 @@ impl ProgramStore {
                         return Err(ProgramStoreError::Capacity);
                     }
                 }
-                check_source_exclusion(self.location.path(), draft.state().definition())?;
+                check_kernel_source_exclusion(self.location.path(), &draft)?;
                 Ok((receipt, encoded, draft))
             };
         let (receipt, encoded, draft) = match validation() {
@@ -764,6 +827,7 @@ fn identity(
         ProgramProfile::MetadataV1,
         ProgramProfile::FixturesV2,
         ProgramProfile::SupervisedFixturesV3,
+        ProgramProfile::RecoverableDomainsV4,
     ]
     .into_iter()
     .find(|p| p.format() == format && p.policy() == policy)
@@ -774,6 +838,21 @@ fn identity(
         profile,
     ))
 }
+fn check_kernel_source_exclusion(
+    path: &Path,
+    kernel: &CoordinationKernel,
+) -> Result<(), ProgramStoreError> {
+    for definition in kernel.state().definitions() {
+        check_source_exclusion(path, definition)?;
+    }
+    for member in kernel.domain_members() {
+        for definition in member.state().definitions() {
+            check_source_exclusion(path, definition)?;
+        }
+    }
+    Ok(())
+}
+
 fn load(
     c: &Connection,
     location: &Location,
@@ -819,6 +898,8 @@ fn load(
         let amendment = matches!(
             input.command,
             cortex_evidence::program::Command::Amend { .. }
+                | cortex_evidence::program::Command::RegisterDomainMember(_)
+                | cortex_evidence::program::Command::DomainMember { .. }
         );
         if row
             .get_ref(1)
@@ -836,7 +917,7 @@ fn load(
             return Err(ProgramStoreError::Corrupt);
         }
         if amendment {
-            check_source_exclusion(location.path(), kernel.state().definition())?;
+            check_kernel_source_exclusion(location.path(), &kernel)?;
         }
     }
     budget.check()?;

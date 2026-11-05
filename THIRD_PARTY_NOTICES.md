@@ -11,6 +11,22 @@ OpenSSL or compile the source package's alternative LibTomCrypt provider. SQLite
 components retain their public-domain dedication. Other targets and redistribution
 configurations require their own dependency/license review.
 
+The Linux recoverable-domain bootstrap additionally uses `rustix` 1.1.6 and
+`linux-raw-sys` 0.12.1 under their MIT licensing alternative. Their upstream
+packages include the complete license and copyright notices. `rustix` provides
+safe ownership-based syscall interfaces for bounded nonblocking local transport;
+it is not an orchestration framework or an isolation guarantee. Source packages
+remain fetched through the tracked Cargo lockfile; no third-party implementation
+is copied into Cortex's source tree. Binary redistribution must preserve their
+applicable notices alongside the other linked dependencies.
+
+The same backend uses `zbus` 5.19.0 for typed local D-Bus IPC and `sha2` 0.10.9
+for executable/configuration correspondence. The selected graph's packages offer
+MIT licensing alternatives; each retains its own upstream notices. The IPC and
+cryptographic libraries supply infrastructure, not workflow authority. The
+tracked lockfile identifies their exact transitive versions, including packages
+resolved for platforms outside Cortex's supported Linux profile.
+
 ## SQLCipher Community 4.19.0 — BSD-3-Clause
 
 ```text

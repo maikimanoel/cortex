@@ -508,3 +508,21 @@ opt-in durable scope identity checkpoints and read-only reconciliation inspectio
 under the existing supervised-fixture responsibilities. Historical Unknown and
 reservations are preserved; no operational host release or milestone/status
 advance follows from source verification.
+
+### Recoverable execution continuation
+
+The owner-approved [recoverable-domain amendment](../architecture/recoverable-domains.md)
+refines E1/AUTH1, H1/T1-contract and I1/F1-host construction dependencies within
+the existing 27-increment program. M1 extends E1/AUTH1 with separate outcome,
+domain capability, resource consumption/debt, reusable capacity and administrative
+disposition, persisted and inspected through the existing owners. M2 consumes M1
+for a recoverable outer manager/bootstrap boundary and a fixed provider-free
+synthetic payload. M3 consumes independently accepted M1/M2 plus an applicable
+host grant, physical allocation and bounded qualification procedure. Contract and
+fixture preparation may proceed independently before those operational gates.
+
+This source-level amendment does not retroactively settle historical effects,
+refund budgets, merge source, qualify isolation or authorize provider execution.
+The original operational graph obligations remain; the versioned construction
+overlay refines their prerequisites rather than replacing the roadmap. All
+milestone states and complete capability statuses remain unchanged.

@@ -1,7 +1,10 @@
 #![cfg(target_os = "linux")]
 //! GPE-B I1/O: real CLI output, key deadline and absence of recovery mutations.
+#[path = "../../cortex-evidence/tests/support/domain.rs"]
+mod domain_fixture;
 #[path = "../../cortex-evidence/tests/support/program.rs"]
 mod fixture;
+use fixture as program_fixture;
 #[path = "../../cortex-evidence/tests/support/supervision.rs"]
 mod supervised_fixture;
 use cortex_core::program::*;
@@ -830,4 +833,133 @@ fn recovery_proof_candidate_does_not_release_a_valid_pre_spawn_reservation() {
     assert_eq!(effect["recovery"]["reservation_held"], true);
     assert_eq!(effect["pending_reconciliation"], true);
     assert_eq!(snapshot(&f), before);
+}
+
+#[test]
+fn domain_inspection_keeps_unknown_debt_and_disk_after_process_closure() {
+    use cortex_core::program::{domain::*, scheduling::Resource};
+    let f = Temp::new();
+    let (mut kernel, intent) = domain_fixture::coordinator();
+    domain_fixture::bound(&mut kernel, &intent);
+    domain_fixture::event(
+        &mut kernel,
+        "close-domain",
+        DomainEvent::Closed {
+            receipt: domain_fixture::closure(&intent, None),
+            at: 4,
+        },
+    );
+    let store =
+        ProgramStore::create_domain_fixture(&f.store(), &key(), kernel.initial().clone(), limits())
+            .unwrap();
+    for operation in kernel.operations() {
+        store.admit(&key(), operation.clone()).unwrap();
+    }
+    let before = snapshot(&f);
+    let mut c = command(&f);
+    c.arg("--json");
+    let output = run(c, &[0x57; 32]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let projection = &report["domain_projection"];
+    let record = &projection["domains"][0];
+    assert_eq!(record["historical_outcome"]["kind"], "UNKNOWN");
+    assert_eq!(record["retained_domain_phase"], "Closed");
+    assert_eq!(record["retry_authorized"], false);
+    assert_eq!(projection["host_reinspection"], false);
+    assert_eq!(projection["current_liveness"], "NOT_OBSERVED");
+    let resources = record["reusable_capacity"].as_array().unwrap();
+    for (dimension, held) in [
+        (Resource::Workers, false),
+        (Resource::RamBytes, false),
+        (Resource::DiskBytes, true),
+    ] {
+        assert_eq!(
+            resources
+                .iter()
+                .find(|r| r["dimension"] == format!("{dimension:?}"))
+                .unwrap()["held"],
+            held
+        );
+    }
+    assert_eq!(record["cumulative_consumption"][0]["unresolved_debt"], true);
+    assert!(record["cumulative_consumption"][0]["measured_final"].is_null());
+    assert!(projection["cumulative_consumption"][0]["known_consumption_or_future_debit"].is_null());
+    assert!(
+        projection["cumulative_consumption"][0]["blocked_by"]
+            .as_str()
+            .unwrap()
+            .contains("Debt")
+    );
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(!text.contains("/owned/"));
+    assert!(!text.contains("synthetic-host"));
+    assert!(!text.contains("invocation-domain"));
+    let human = run(command(&f), &[0x57; 32]);
+    assert!(human.status.success());
+    let text = String::from_utf8(human.stdout).unwrap();
+    assert!(text.contains("UNKNOWN"));
+    assert!(text.contains("no retry or artifact acceptance"));
+    assert_eq!(before, snapshot(&f));
+}
+
+#[test]
+fn domain_inspection_projects_later_measurement_without_rewriting_unknown() {
+    use cortex_core::program::domain::*;
+    let f = Temp::new();
+    let (mut kernel, intent) = domain_fixture::coordinator();
+    domain_fixture::bound(&mut kernel, &intent);
+    domain_fixture::event(
+        &mut kernel,
+        "close",
+        DomainEvent::Closed {
+            receipt: domain_fixture::closure(&intent, None),
+            at: 4,
+        },
+    );
+    let mut measurement = domain_fixture::closure(&intent, Some(7));
+    measurement.released.clear();
+    measurement.evidence = fixture::source("later-independent-measurement");
+    domain_fixture::event(
+        &mut kernel,
+        "measurement",
+        DomainEvent::Settle {
+            receipt: measurement,
+            at: 5,
+        },
+    );
+    domain_fixture::event(
+        &mut kernel,
+        "archive",
+        DomainEvent::Disposition {
+            domain: intent.id,
+            disposition: AdministrativeDisposition::Abandoned,
+            at: 6,
+            basis: fixture::source("explicit-administrative-decision"),
+        },
+    );
+    let store =
+        ProgramStore::create_domain_fixture(&f.store(), &key(), kernel.initial().clone(), limits())
+            .unwrap();
+    for operation in kernel.operations() {
+        store.admit(&key(), operation.clone()).unwrap();
+    }
+    let before = snapshot(&f);
+    let mut c = command(&f);
+    c.arg("--json");
+    let output = run(c, &[0x57; 32]);
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let d = &report["domain_projection"]["domains"][0];
+    assert_eq!(d["historical_outcome"]["kind"], "UNKNOWN");
+    assert_eq!(d["administrative_disposition"], "Abandoned");
+    assert_eq!(d["additional_settlements"], 1);
+    assert_eq!(d["cumulative_consumption"][0]["measured_final"], 7);
+    assert_eq!(d["cumulative_consumption"][0]["unresolved_debt"], false);
+    assert_eq!(d["artifact_acceptance"], false);
+    assert_eq!(before, snapshot(&f));
 }

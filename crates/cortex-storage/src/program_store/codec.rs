@@ -874,7 +874,27 @@ fn release_read(v: &V, k: &CoordinationKernel) -> Result<ReleaseInput, ProgramSt
     })
 }
 fn command_write(c: &Command) -> Result<V, ProgramStoreError> {
+    if let Command::DomainMember { operation, .. } = c
+        && matches!(
+            operation.command,
+            Command::Domain(_) | Command::DomainMember { .. } | Command::RegisterDomainMember(_)
+        )
+    {
+        return Err(ProgramStoreError::Unsupported);
+    }
     Ok(match c {
+        Command::Domain(event) => json!(["domain-v1", event.write()?]),
+        Command::RegisterDomainMember(definition) => {
+            json!(["domain-member-v1", definition.write()?])
+        }
+        Command::DomainMember { program, operation } => json!([
+            "domain-member-input-v1",
+            program.write()?,
+            operation.id.write()?,
+            operation.expected,
+            operation.grant.write()?,
+            command_write(&operation.command)?
+        ]),
         Command::PrepareExecutorInput(request) => json!(["executor-input-v1", request.write()?]),
         Command::FixtureEffect(event) => json!(["fixture-effect-v1", event.write()?]),
         Command::SupervisedEffect(event) => json!(["supervised-effect-v1", event.write()?]),
@@ -913,7 +933,31 @@ fn command_write(c: &Command) -> Result<V, ProgramStoreError> {
 fn command_read(v: &V, k: &CoordinationKernel) -> Result<Command, ProgramStoreError> {
     let a = v.as_array().ok_or_else(bad)?;
     let tag = a.first().and_then(V::as_str).ok_or_else(bad)?;
+    if tag == "domain-member-input-v1" {
+        let a = arr(v, 6)?;
+        let program: ProgramId = read(&a[1])?;
+        let member = k.domain_member(&program).ok_or_else(bad)?;
+        if a[5].get(0).and_then(V::as_str).is_some_and(|tag| {
+            matches!(
+                tag,
+                "domain-v1" | "domain-member-v1" | "domain-member-input-v1"
+            )
+        }) {
+            return Err(bad());
+        }
+        return Ok(Command::DomainMember {
+            program,
+            operation: Box::new(Operation {
+                id: read(&a[2])?,
+                expected: read(&a[3])?,
+                grant: read(&a[4])?,
+                command: command_read(&a[5], member)?,
+            }),
+        });
+    }
     if [
+        "domain-v1",
+        "domain-member-v1",
         "notify",
         "observe",
         "assess",
@@ -930,6 +974,8 @@ fn command_read(v: &V, k: &CoordinationKernel) -> Result<Command, ProgramStoreEr
     {
         let a = arr(v, 2)?;
         return Ok(match tag {
+            "domain-v1" => Command::Domain(read(&a[1])?),
+            "domain-member-v1" => Command::RegisterDomainMember(read(&a[1])?),
             "executor-input-v1" => Command::PrepareExecutorInput(read(&a[1])?),
             "fixture-effect-v1" => Command::FixtureEffect(read(&a[1])?),
             "supervised-effect-v1" => Command::SupervisedEffect(read(&a[1])?),
@@ -1054,6 +1100,7 @@ pub(super) fn decode_operation(
     Ok(o)
 }
 
+mod domain;
 mod operational;
 
 mod executor;

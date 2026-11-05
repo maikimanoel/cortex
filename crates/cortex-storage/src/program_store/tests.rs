@@ -980,3 +980,5 @@ fn failed_skipped_and_unknown_original_evidence_survives_storage() {
 
 mod operational;
 mod supervised;
+
+mod domain;
