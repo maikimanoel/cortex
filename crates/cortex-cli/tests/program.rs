@@ -725,3 +725,109 @@ fn fixture_unknown_and_transport_preparation_are_explicit_and_inspection_has_no_
         k.revision()
     );
 }
+
+#[test]
+fn recovery_inspection_explains_missing_scope_and_helper_without_changing_the_journal() {
+    use cortex_core::program::{operational::*, supervision::*};
+    let f = Temp::new();
+    let (mut k, scope, spec) = supervised_fixture::configured_scope_kernel(None);
+    supervised_fixture::prepare(&mut k, &scope, &spec);
+    k.admit(supervised_fixture::dispatch_operation(&k, &scope))
+        .unwrap();
+    let mut o = supervised_fixture::observation(
+        &spec,
+        1,
+        ProcessCompletion::Interrupted {
+            reason: InterruptionReason::InputClosed,
+        },
+        Quiescence::Unknown,
+    );
+    o.input_bytes = 0;
+    o.unresolved_scope_helpers = vec![ScopeHelperIdentity {
+        pid: 12345,
+        start_ticks: Some(98765),
+    }];
+    supervised_fixture::effect(
+        &mut k,
+        "missing-scope-receipt",
+        EffectEvent::ProcessObserved {
+            effect: supervised_fixture::intent(&scope).id,
+            scope: scope.clone(),
+            at: 4,
+            observation: o,
+        },
+    );
+    let store =
+        ProgramStore::create_supervised_fixture(&f.store(), &key(), k.initial().clone(), limits())
+            .unwrap();
+    for op in k.operations() {
+        store.admit(&key(), op.clone()).unwrap();
+    }
+    let before = snapshot(&f);
+    let mut c = command(&f);
+    c.arg("--json");
+    let result = run(c, &[0x57; 32]);
+    assert!(result.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    let effect = &v["supervised_projection"]["effects"][0];
+    assert_eq!(effect["status"], "Unknown");
+    let recovery = &effect["recovery"];
+    assert_eq!(recovery["reservation_held"], true);
+    assert_eq!(recovery["scope_recorded"], false);
+    assert_eq!(recovery["identity_checkpoint_recorded"], false);
+    assert!(recovery["existing_proof_candidate"].is_null());
+    let reasons = recovery["blockers"].as_array().unwrap();
+    assert!(reasons.iter().any(|v| v == "MissingScopeIdentity"));
+    assert!(reasons.iter().any(|v| v == "UnresolvedHelper"));
+    assert_eq!(recovery["authority"], "NONE_INSPECTION_ONLY");
+    assert_eq!(recovery["host_reinspection"], false);
+    assert_eq!(recovery["current_process_liveness"], "NOT_OBSERVED");
+    assert_eq!(snapshot(&f), before);
+    assert_eq!(
+        store.load(&key(), Access::ReadOnly).unwrap().revision(),
+        k.revision()
+    );
+}
+
+#[test]
+fn recovery_proof_candidate_does_not_release_a_valid_pre_spawn_reservation() {
+    use cortex_core::program::{operational::*, supervision::*};
+    let f = Temp::new();
+    let (mut k, scope, spec) = supervised_fixture::configured_kernel(None);
+    supervised_fixture::prepare(&mut k, &scope, &spec);
+    k.admit(supervised_fixture::dispatch_operation(&k, &scope))
+        .unwrap();
+    let o = supervised_fixture::observation(
+        &spec,
+        1,
+        ProcessCompletion::StartFailed,
+        Quiescence::NoChildStarted,
+    );
+    supervised_fixture::effect(
+        &mut k,
+        "pre-spawn-refusal",
+        EffectEvent::ProcessObserved {
+            effect: supervised_fixture::intent(&scope).id,
+            scope: scope.clone(),
+            at: 4,
+            observation: o,
+        },
+    );
+    let store =
+        ProgramStore::create_supervised_fixture(&f.store(), &key(), k.initial().clone(), limits())
+            .unwrap();
+    for op in k.operations() {
+        store.admit(&key(), op.clone()).unwrap();
+    }
+    let before = snapshot(&f);
+    let mut c = command(&f);
+    c.arg("--json");
+    let result = run(c, &[0x57; 32]);
+    assert!(result.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    let effect = &v["supervised_projection"]["effects"][0];
+    assert_eq!(effect["recovery"]["existing_proof_candidate"], "ABSENT");
+    assert_eq!(effect["recovery"]["reservation_held"], true);
+    assert_eq!(effect["pending_reconciliation"], true);
+    assert_eq!(snapshot(&f), before);
+}

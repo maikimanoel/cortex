@@ -189,13 +189,24 @@ fn supervised_view(k: &CoordinationKernel) -> Value {
         let grant = projection.grants().iter().find(|g| g.id == effect.intent.grant).expect("effect grant");
         let limits = effect.process_spec.as_ref().map(|spec| {
             let l = &spec.limits;
-            json!({"wall_ms":l.wall_ms,"cleanup_ms":l.cleanup_ms,"input_bytes":l.input_bytes,"combined_output_bytes":l.output_bytes,"frame_bytes":l.frame_bytes,
+            json!({"identity_checkpoint_required":spec.identity_checkpoint.is_some(),"wall_ms":l.wall_ms,"cleanup_ms":l.cleanup_ms,"input_bytes":l.input_bytes,"combined_output_bytes":l.output_bytes,"frame_bytes":l.frame_bytes,
                 "transport":l.transport.as_ref().map(|t|json!({"startup_ms":t.startup_ms,"idle_ms":t.idle_ms,"stdout_bytes":t.stdout_bytes,"stderr_bytes":t.stderr_bytes,"records":t.records,"buffer_bytes":t.buffer_bytes})),
                 "enforcement_scope":"TRUSTED_FIXTURE_COOPERATIVE_TRANSPORT_NOT_HOST_ISOLATION"})
         });
+        let recovery = projection.inspect_process_recovery(&effect.intent.id, &effect.intent.scope)
+            .expect("validated supervised projection");
+        let recovery = json!({"reservation_held":recovery.reservation_held,
+            "specification_recorded":recovery.specification_recorded,"launcher_recorded":recovery.launcher_recorded,
+            "scope_recorded":recovery.scope_recorded,"identity_checkpoint_recorded":recovery.identity_checkpoint_recorded,
+            "blockers":recovery.blockers.iter().map(|b|format!("{b:?}")).collect::<Vec<_>>(),
+            "existing_proof_candidate":recovery.candidate.as_ref().map(|c|match c{
+                cortex_core::program::operational::Reconciliation::Absent=>"ABSENT",
+                cortex_core::program::operational::Reconciliation::Observed{..}=>"OBSERVED"}),
+            "authority":"NONE_INSPECTION_ONLY","current_process_liveness":"NOT_OBSERVED","host_reinspection":false,"adoption_supported":false});
         let observations: Vec<_> = effect.process_observations.iter().map(|o| {
             let completion = match o.completion {
                 ProcessCompletion::Spawned => json!({"kind":"SPAWNED"}),
+                ProcessCompletion::IdentityVerified => json!({"kind":"IDENTITY_VERIFIED","terminal":false}),
                 ProcessCompletion::StartFailed => json!({"kind":"PRE_SPAWN_REFUSAL"}),
                 ProcessCompletion::Exited { code, signal } => json!({"kind":"EXITED","code":code,"signal":signal}),
                 ProcessCompletion::Interrupted { reason } => json!({"kind":"INTERRUPTED","reason":format!("{reason:?}")}),
@@ -203,7 +214,7 @@ fn supervised_view(k: &CoordinationKernel) -> Value {
             };
             json!({"observation_scope":o.id.scope(),"observation_sequence":o.id.sequence(),"completion":completion,"quiescence":format!("{:?}",o.quiescence),"process":o.process.as_ref().map(|p|json!({"pid":p.pid,"start_ticks":p.start_ticks,"adoption_supported":false})),"input_bytes":o.input_bytes,"stdout_bytes":o.stdout_bytes,"stderr_bytes":o.stderr_bytes,"structured_records":o.structured_records,"malformed_output":o.malformed_output,"elapsed_ms":o.elapsed_ms,"containment":o.containment.as_deref().map(scope_observation_view),"unresolved_scope_helpers":o.unresolved_scope_helpers.iter().map(|h|json!({"pid":h.pid,"start_ticks":h.start_ticks,"adoption_supported":false})).collect::<Vec<_>>(),"raw_output_retained":false})
         }).collect();
-        json!({"effect":effect.intent.id.as_str(),"mission":effect.intent.scope.mission.as_str(),"attempt":effect.intent.scope.attempt.as_str(),"candidate":effect.intent.scope.candidate.commit().as_str(),"status":format!("{:?}",effect.status),"pending_reconciliation":effect.pending(),"cancellation_requested":effect.cancellation_requested,"grant_revoked":projection.revoked().contains(&grant.id),"grant_expired_at_observed_tick":projection.last_tick() >= grant.expires_before,"dispatch_intent_durable":effect.dispatch_at.is_some(),"dispatch_tick":effect.dispatch_at,"process_spec_retained":effect.process_spec.is_some(),"configured_process_limits":limits,"containment_request":effect.process_spec.as_ref().and_then(|s|s.containment.as_ref()).map(scope_spec_view),"reported_outcome":effect.report.map(|v|format!("{v:?}")),"observations":observations,"mission_acceptance":"NOT_INFERRED"})
+        json!({"effect":effect.intent.id.as_str(),"mission":effect.intent.scope.mission.as_str(),"attempt":effect.intent.scope.attempt.as_str(),"candidate":effect.intent.scope.candidate.commit().as_str(),"status":format!("{:?}",effect.status),"pending_reconciliation":effect.pending(),"cancellation_requested":effect.cancellation_requested,"grant_revoked":projection.revoked().contains(&grant.id),"grant_expired_at_observed_tick":projection.last_tick() >= grant.expires_before,"dispatch_intent_durable":effect.dispatch_at.is_some(),"dispatch_tick":effect.dispatch_at,"process_spec_retained":effect.process_spec.is_some(),"configured_process_limits":limits,"containment_request":effect.process_spec.as_ref().and_then(|s|s.containment.as_ref()).map(scope_spec_view),"reported_outcome":effect.report.map(|v|format!("{v:?}")),"recovery":recovery,"observations":observations,"mission_acceptance":"NOT_INFERRED"})
     }).collect();
     let scoped = projection.effects().iter().any(|e| {
         e.process_spec

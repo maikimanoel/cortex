@@ -55,6 +55,16 @@ pub struct CaptureIds {
     pub admission_attempts: usize,
 }
 
+/// Explicit identities for the opt-in pre-input publication. These are distinct
+/// from spawn/final receipts and confer no scope, grant or execution authority.
+#[derive(Clone)]
+pub struct IdentityCaptureIds {
+    /// Fresh canonical journal operation for this exact checkpoint.
+    pub checkpoint_operation: OperationId,
+    /// Fresh observation identity for the captured launcher/scope correspondence.
+    pub checkpoint_observation: ObservationId,
+}
+
 /// An executed or replayed dispatch and its retained observations. No result here
 /// reconciles resource reservations or releases an engineering dependency.
 pub struct RunResult {
@@ -62,6 +72,8 @@ pub struct RunResult {
     pub dispatch: Receipt,
     /// Positive spawn observation receipt, when durably retained.
     pub started: Option<Receipt>,
+    /// Committed opt-in identity checkpoint, if its exact receipt was confirmed.
+    pub identity_checkpoint: Option<Receipt>,
     /// Final observation, including unknown or interrupted cleanup.
     pub observation: Option<ProcessObservation>,
     /// Final observation receipt, when durably retained.
@@ -363,6 +375,36 @@ impl Drop for ChildGuard {
         }
     }
 }
+// Private observation boundary: production installs only PreparedScope. Tests
+// may supply controlled facts without activating a host isolation backend.
+trait ScopeRuntime {
+    fn observe(
+        &mut self,
+        process: Option<&ProcessIdentity>,
+        deadline: Instant,
+    ) -> Result<ScopeObservation, HarnessError>;
+    fn last_observation(&self) -> Option<ScopeObservation>;
+    fn unresolved_helpers(&self) -> Vec<ScopeHelperIdentity>;
+    fn terminate(&mut self, signal: ScopeSignal, deadline: Instant) -> Result<(), HarnessError>;
+}
+impl ScopeRuntime for PreparedScope {
+    fn observe(
+        &mut self,
+        process: Option<&ProcessIdentity>,
+        deadline: Instant,
+    ) -> Result<ScopeObservation, HarnessError> {
+        PreparedScope::observe(self, process, deadline)
+    }
+    fn last_observation(&self) -> Option<ScopeObservation> {
+        PreparedScope::last_observation(self)
+    }
+    fn unresolved_helpers(&self) -> Vec<ScopeHelperIdentity> {
+        PreparedScope::unresolved_helpers(self)
+    }
+    fn terminate(&mut self, signal: ScopeSignal, deadline: Instant) -> Result<(), HarnessError> {
+        PreparedScope::terminate(self, signal, deadline)
+    }
+}
 struct Running {
     child: ChildGuard,
     stdin: UnixStream,
@@ -370,7 +412,7 @@ struct Running {
     stderr: UnixStream,
     identity: Option<ProcessIdentity>,
     start: Instant,
-    scope: Option<PreparedScope>,
+    scope: Option<Box<dyn ScopeRuntime>>,
 }
 fn start_ticks(pid: u32) -> io::Result<u64> {
     let mut data = Vec::new();
@@ -500,7 +542,7 @@ fn spawn_checked(
         stderr,
         identity,
         start,
-        scope,
+        scope: scope.map(|scope| Box::new(scope) as Box<dyn ScopeRuntime>),
     })
 }
 fn elapsed(start: Instant) -> u64 {
@@ -692,13 +734,33 @@ impl Cleanup {
         }
     }
 }
+#[cfg(test)]
 fn supervise(
+    running: Running,
+    prepared: &PinnedFixture,
+    ids: &CaptureIds,
+    cancel: &AtomicBool,
+    authority: impl FnMut(u64) -> Result<(), InterruptionReason>,
+    initial_reason: Option<InterruptionReason>,
+) -> ProcessObservation {
+    supervise_with_checkpoint(
+        running,
+        prepared,
+        ids,
+        cancel,
+        authority,
+        initial_reason,
+        |_| Err(InterruptionReason::AuthorityUnknown),
+    )
+}
+fn supervise_with_checkpoint(
     mut running: Running,
     prepared: &PinnedFixture,
     ids: &CaptureIds,
     cancel: &AtomicBool,
     mut authority: impl FnMut(u64) -> Result<(), InterruptionReason>,
     initial_reason: Option<InterruptionReason>,
+    mut publish_identity: impl FnMut(&ProcessObservation) -> Result<(), InterruptionReason>,
 ) -> ProcessObservation {
     let spec = &prepared.spec;
     let limits = &spec.limits;
@@ -737,6 +799,7 @@ fn supervise(
     let mut last_progress = 0_u64;
     let mut first_record = None;
     let mut scope_ready = running.scope.is_none();
+    let mut identity_published = spec.identity_checkpoint.is_none();
     let mut next_scope = 0_u64;
     let wall_end = deadline(running.start, limits.wall_ms).expect("validated wall deadline");
     loop {
@@ -830,8 +893,69 @@ fn supervise(
                 transport_deadline(now_ms, first_record, last_progress)
             };
         }
+        if reason.is_none() && scope_ready && !identity_published {
+            // Acquisition itself may block while cancellation or current grant
+            // state changes. Recheck the publication boundary independently of
+            // the later input boundary; a checkpoint is not a harmless retry.
+            if cancel.load(Ordering::Acquire) {
+                reason = Some(InterruptionReason::Cancelled);
+            } else {
+                reason = authority(elapsed(running.start)).err();
+            }
+            if reason.is_none() {
+                let now = elapsed(running.start);
+                reason = if cancel.load(Ordering::Acquire) {
+                    Some(InterruptionReason::Cancelled)
+                } else if now >= limits.wall_ms {
+                    Some(InterruptionReason::Timeout)
+                } else {
+                    transport_deadline(now, first_record, last_progress)
+                };
+            }
+        }
+        if reason.is_none() && scope_ready && !identity_published {
+            let mut checkpoint = result.clone();
+            checkpoint.completion = ProcessCompletion::IdentityVerified;
+            checkpoint.elapsed_ms = elapsed(running.start);
+            checkpoint.structured_records = framing.records;
+            checkpoint.malformed_output = framing.malformed;
+            checkpoint.unresolved_scope_helpers = running
+                .scope
+                .as_ref()
+                .map_or_else(Vec::new, |scope| scope.unresolved_helpers());
+            if checkpoint.validate(spec).is_err() {
+                reason = Some(InterruptionReason::ContainmentUnknown);
+            } else if let Err(cause) = publish_identity(&checkpoint) {
+                reason = Some(cause);
+            } else {
+                identity_published = true;
+                // Publication never refreshes the launch clock or authority.
+                // A successful durable receipt alone cannot permit late input.
+                let now = elapsed(running.start);
+                reason = if cancel.load(Ordering::Acquire) {
+                    Some(InterruptionReason::Cancelled)
+                } else if now >= limits.wall_ms {
+                    Some(InterruptionReason::Timeout)
+                } else {
+                    transport_deadline(now, first_record, last_progress)
+                };
+                if reason.is_none() {
+                    reason = authority(now).err();
+                }
+                let now = elapsed(running.start);
+                if reason.is_none() && now >= limits.wall_ms {
+                    reason = Some(InterruptionReason::Timeout);
+                }
+                if reason.is_none() {
+                    reason = transport_deadline(now, first_record, last_progress);
+                }
+                if reason.is_none() && cancel.load(Ordering::Acquire) {
+                    reason = Some(InterruptionReason::Cancelled);
+                }
+            }
+        }
         let previous_counts = (result.input_bytes, result.stdout_bytes, result.stderr_bytes);
-        if reason.is_none() && scope_ready && !in_closed {
+        if reason.is_none() && scope_ready && identity_published && !in_closed {
             match running
                 .stdin
                 .write(&prepared.input[result.input_bytes as usize..])
@@ -1024,6 +1148,9 @@ impl ReceiptWriter<'_> {
                 Ok(receipt) => return Ok(receipt),
                 Err(failure) => {
                     if failure.completion == Completion::Indeterminate {
+                        if observation.completion == ProcessCompletion::IdentityVerified {
+                            return Err(failure);
+                        }
                         if let Ok(Reconciliation::Present(receipt)) =
                             store.reconcile(key, kernel.initial(), &input, Access::Recover)
                         {
@@ -1134,6 +1261,44 @@ pub fn execute_fixture(
     prepared: &PinnedFixture,
     cancel: &AtomicBool,
 ) -> Result<RunResult, HarnessError> {
+    execute_fixture_inner(store, key, dispatch, ids, None, prepared, cancel)
+}
+
+/// Execute the explicitly selected identity-checkpoint contract. The new IDs
+/// identify a canonical observation committed before any package byte is sent.
+/// Refused or uncertain publication withholds input; replay never launches.
+pub fn execute_fixture_with_identity_checkpoint(
+    store: &ProgramStore,
+    key: &StoreKey,
+    dispatch: Operation,
+    ids: CaptureIds,
+    identity_ids: IdentityCaptureIds,
+    prepared: &PinnedFixture,
+    cancel: &AtomicBool,
+) -> Result<RunResult, HarnessError> {
+    execute_fixture_inner(
+        store,
+        key,
+        dispatch,
+        ids,
+        Some(identity_ids),
+        prepared,
+        cancel,
+    )
+}
+
+fn execute_fixture_inner(
+    store: &ProgramStore,
+    key: &StoreKey,
+    dispatch: Operation,
+    ids: CaptureIds,
+    identity_ids: Option<IdentityCaptureIds>,
+    prepared: &PinnedFixture,
+    cancel: &AtomicBool,
+) -> Result<RunResult, HarnessError> {
+    if prepared.spec.identity_checkpoint.is_some() != identity_ids.is_some() {
+        return Err(HarnessError::Contract);
+    }
     let (effect, scope, at) = match &dispatch.command {
         WorkflowCommand::SupervisedEffect(event) => match &**event {
             EffectEvent::Dispatch {
@@ -1152,6 +1317,16 @@ pub fn execute_fixture(
         || ids.started_operation == dispatch.id
         || ids.finished_operation == dispatch.id
         || ids.started_observation == ids.finished_observation
+        || identity_ids.as_ref().is_some_and(|identity| {
+            [
+                &ids.started_operation,
+                &ids.finished_operation,
+                &dispatch.id,
+            ]
+            .contains(&&identity.checkpoint_operation)
+                || [&ids.started_observation, &ids.finished_observation]
+                    .contains(&&identity.checkpoint_observation)
+        })
     {
         return Err(HarnessError::Contract);
     }
@@ -1164,6 +1339,7 @@ pub fn execute_fixture(
         return Ok(RunResult {
             dispatch: receipt,
             started: None,
+            identity_checkpoint: None,
             observation: None,
             recorded: None,
             recording_failure: None,
@@ -1172,14 +1348,22 @@ pub fn execute_fixture(
         });
     }
     if kernel.operations().iter().any(|operation| {
-        operation.id == ids.started_operation || operation.id == ids.finished_operation
+        operation.id == ids.started_operation
+            || operation.id == ids.finished_operation
+            || identity_ids
+                .as_ref()
+                .is_some_and(|i| operation.id == i.checkpoint_operation)
     }) || kernel
         .fixture_effects()
         .effects()
         .iter()
         .flat_map(|effect| &effect.process_observations)
         .any(|observation| {
-            observation.id == ids.started_observation || observation.id == ids.finished_observation
+            observation.id == ids.started_observation
+                || observation.id == ids.finished_observation
+                || identity_ids
+                    .as_ref()
+                    .is_some_and(|i| observation.id == i.checkpoint_observation)
         })
     {
         return Err(HarnessError::Contract);
@@ -1206,6 +1390,7 @@ pub fn execute_fixture(
         return Ok(RunResult {
             dispatch: receipt,
             started: None,
+            identity_checkpoint: None,
             observation: None,
             recorded: None,
             recording_failure: None,
@@ -1224,6 +1409,7 @@ pub fn execute_fixture(
         reconciled: vec![],
     };
     let mut started = None;
+    let mut identity_checkpoint = None;
     let mut recording_failure = None;
     let observation = match launched {
         Ok(Some(running)) => {
@@ -1250,7 +1436,7 @@ pub fn execute_fixture(
             let initial = recording_failure
                 .as_ref()
                 .map(|_| InterruptionReason::AuthorityUnknown);
-            supervise(
+            supervise_with_checkpoint(
                 running,
                 prepared,
                 &ids,
@@ -1269,6 +1455,27 @@ pub fn execute_fixture(
                         .map_err(|_| InterruptionReason::AuthorityLost)
                 },
                 initial,
+                |captured| {
+                    let identity_ids = identity_ids
+                        .as_ref()
+                        .ok_or(InterruptionReason::AuthorityUnknown)?;
+                    let mut observation = captured.clone();
+                    observation.id = identity_ids.checkpoint_observation.clone();
+                    match writer.record(
+                        &identity_ids.checkpoint_operation,
+                        &observation,
+                        at.saturating_add(elapsed(start)),
+                    ) {
+                        Ok(receipt) => {
+                            identity_checkpoint = Some(receipt);
+                            Ok(())
+                        }
+                        Err(failure) => {
+                            recording_failure = Some(failure);
+                            Err(InterruptionReason::AuthorityUnknown)
+                        }
+                    }
+                },
             )
         }
         Ok(None) => {
@@ -1326,6 +1533,7 @@ pub fn execute_fixture(
     Ok(RunResult {
         dispatch: receipt,
         started,
+        identity_checkpoint,
         observation: Some(observation),
         recorded,
         recording_failure,

@@ -108,6 +108,12 @@ readbacks are inspectable through the program command; they are not independent
 host qualification. Hard cumulative CPU, independent scratch quotas, protected
 reserves and live execution retain their separate gates.
 
+The [process recovery extension](docs/architecture/process-recovery.md) adds an
+explicit durable identity checkpoint before input for opted-in owned fixtures,
+and read-only explanations of existing reconciliation proof requirements.
+Missing identity or unresolved cleanup preserves uncertainty and reservations; replay
+never relaunches. This does not qualify a host or resolve historical ambiguity.
+
 The bounded [native method inspector](docs/architecture/engineering-methods.md#native-method-inspection-p0)
 adds immutable `cortex_core::methods` definitions and advisory
 `cortex_evidence::methods::inspect_method` qualification views. Its two unassessed

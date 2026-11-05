@@ -230,7 +230,10 @@ pub fn observation(
     };
     let terminal = !matches!(
         completion,
-        ProcessCompletion::Spawned | ProcessCompletion::StartFailed | ProcessCompletion::Unknown
+        ProcessCompletion::Spawned
+            | ProcessCompletion::IdentityVerified
+            | ProcessCompletion::StartFailed
+            | ProcessCompletion::Unknown
     );
     ProcessObservation {
         id: ObservationId::new("process-fixture", n).unwrap(),

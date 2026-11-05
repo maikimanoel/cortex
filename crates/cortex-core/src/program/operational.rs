@@ -5,6 +5,9 @@
 //! boundary. Authority, time and enforcement references remain caller assertions;
 //! no general executor permission follows. Workflow owns retention and replay.
 
+mod recovery;
+pub use recovery::*;
+
 use super::supervision::*;
 use super::{
     scheduling::{Capacity, Demand, Resource},
@@ -862,9 +865,9 @@ impl OperationalProjection {
                 effect,
                 scope,
                 observation,
-                ..
+                at,
             } => {
-                self.process_observed(effect, scope, observation)?;
+                self.process_observed(state, effect, scope, *at, observation)?;
             }
             EffectEvent::Running { effect, scope, .. } => {
                 if self.mode == EffectMode::SupervisedFixture {
@@ -991,8 +994,10 @@ impl OperationalProjection {
     }
     fn process_observed(
         &mut self,
+        state: &ProgramState,
         effect: &EffectId,
         scope: &EffectScope,
+        at: u64,
         observation: &ProcessObservation,
     ) -> Result<(), OperationalError> {
         if self.mode != EffectMode::SupervisedFixture {
@@ -1011,6 +1016,33 @@ impl OperationalProjection {
         }
         let spec = record.process_spec.as_ref().ok_or(ProgramError::Missing)?;
         observation.validate(spec)?;
+        let checkpoint = record
+            .process_observations
+            .iter()
+            .any(|o| o.completion == ProcessCompletion::IdentityVerified);
+        if spec.identity_checkpoint.is_some() && observation.input_bytes > 0 && !checkpoint {
+            return Err(ProgramError::Transition.into());
+        }
+        if observation.completion == ProcessCompletion::IdentityVerified {
+            self.check_supervised_current(state, effect, scope, at)?;
+            if checkpoint
+                || record.cancellation_requested
+                || !record
+                    .process_observations
+                    .iter()
+                    .any(|o| o.completion == ProcessCompletion::Spawned)
+                || record.process_observations.iter().any(|o| {
+                    matches!(
+                        o.completion,
+                        ProcessCompletion::StartFailed
+                            | ProcessCompletion::Exited { .. }
+                            | ProcessCompletion::Interrupted { .. }
+                    )
+                })
+            {
+                return Err(ProgramError::Transition.into());
+            }
+        }
         if self
             .effects
             .iter()
@@ -1083,7 +1115,9 @@ impl OperationalProjection {
             ProcessCompletion::Spawned if record.cancellation_requested => {
                 EffectStatus::CancellationRequested
             }
-            ProcessCompletion::Spawned => EffectStatus::Running,
+            ProcessCompletion::Spawned | ProcessCompletion::IdentityVerified => {
+                EffectStatus::Running
+            }
             ProcessCompletion::StartFailed => EffectStatus::Reported,
             ProcessCompletion::Unknown => EffectStatus::Unknown,
             ProcessCompletion::Exited { .. } | ProcessCompletion::Interrupted { .. }
@@ -1135,6 +1169,15 @@ impl OperationalProjection {
                     || quantity(usage, Resource::OutputBytes)? != output
                 {
                     return Err(ProgramError::Structure.into());
+                }
+                if spec.identity_checkpoint.is_some()
+                    && observation.containment.as_ref().is_none_or(|captured| {
+                        captured.cpu_usage_us.is_none()
+                            || captured.memory_peak_bytes.is_none()
+                            || captured.tasks_peak.is_none()
+                    })
+                {
+                    return Err(ProgramError::Missing.into());
                 }
                 if let Some(scope) = &spec.containment {
                     let captured = observation

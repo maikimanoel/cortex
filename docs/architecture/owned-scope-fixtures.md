@@ -153,3 +153,8 @@ controller clears the environment and supplies explicit manager routing values.
 A trusted fixture must validate that identity against the observed owned unit;
 this is not permission to inherit arbitrary manager or user environment. The
 rootless namespace command clears its environment separately.
+
+The opt-in [process recovery extension](process-recovery.md) adds a durable
+identity checkpoint before input and typed inspection of existing reconciliation
+guards. Legacy records retain their original meaning; a new policy cannot clear
+an old missing scope identity or release its reservation.

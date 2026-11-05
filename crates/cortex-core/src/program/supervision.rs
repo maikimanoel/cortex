@@ -167,6 +167,14 @@ pub struct ScopeObservation {
     /// Latest retained process/thread peak, when available.
     pub tasks_peak: Option<u64>,
 }
+/// Explicit opt-in publication requirement. Existing specifications retain their
+/// historical meaning when this policy is absent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdentityCheckpointPolicy {
+    /// Commit one current owned-scope identity observation before the first
+    /// prepared input byte. The checkpoint confers no acceptance or retry right.
+    BeforeInputV1,
+}
 /// Immutable exact process intent. Ambient environment is cleared. The narrow
 /// scope-only inert profile adds only explicit manager routing metadata; rootless
 /// fixtures clear that metadata again. Shell/PATH expansion
@@ -200,6 +208,8 @@ pub struct ProcessSpec {
     /// Optional exact owned-scope fixture contract; absence preserves the
     /// historical trusted direct-child profile and its narrower cleanup meaning.
     pub containment: Option<OwnedScopeSpec>,
+    /// Optional durable identity publication obligation, immutable with the spec.
+    pub identity_checkpoint: Option<IdentityCheckpointPolicy>,
 }
 /// Observed child incarnation. PID alone can never identify or authorize adoption.
 #[derive(Clone, PartialEq, Eq)]
@@ -268,6 +278,9 @@ pub enum InterruptionReason {
 pub enum ProcessCompletion {
     /// Positive spawn observation with the exact owned child incarnation.
     Spawned,
+    /// Current launcher and populated owned-scope correspondence captured before
+    /// any input. Only its canonical committed record can satisfy the opt-in gate.
+    IdentityVerified,
     /// Explicit observed refusal before starting a fixture child.
     /// A generic spawn error alone does not establish this condition.
     StartFailed,
@@ -464,6 +477,10 @@ impl ProcessSpec {
     /// Validate finite, explicit shape before retention; actual paths, executable
     /// bytes and controls must still be checked at the supervisor boundary.
     pub fn validate(&self, bounds: ProgramLimits) -> Result<(), ProgramError> {
+        if self.identity_checkpoint.is_some() && self.containment.is_none() {
+            return Err(ProgramError::Structure);
+        }
+
         let l = &self.limits;
         if l.wall_ms == 0
             || l.cleanup_ms == 0
@@ -587,7 +604,27 @@ impl ProcessObservation {
                 }
             }
             ProcessCompletion::Spawned => {
-                if self.process.is_none() || self.quiescence != Quiescence::Unknown {
+                if self.process.is_none()
+                    || self.quiescence != Quiescence::Unknown
+                    || (spec.identity_checkpoint.is_some() && self.input_bytes != 0)
+                {
+                    return Err(ProgramError::Structure.into());
+                }
+            }
+            ProcessCompletion::IdentityVerified => {
+                if spec.identity_checkpoint != Some(IdentityCheckpointPolicy::BeforeInputV1)
+                    || self.process.is_none()
+                    || self.input_bytes != 0
+                    || self.quiescence != Quiescence::Unknown
+                    || !self.unresolved_scope_helpers.is_empty()
+                    || self
+                        .containment
+                        .as_ref()
+                        .zip(spec.containment.as_ref())
+                        .is_none_or(|(actual, expected)| {
+                            !actual.corresponds(expected) || actual.populated != Some(true)
+                        })
+                {
                     return Err(ProgramError::Structure.into());
                 }
             }
@@ -632,6 +669,7 @@ impl ProcessObservation {
     pub fn outcome(&self, spec: &ProcessSpec) -> Option<EffectOutcome> {
         match self.completion {
             ProcessCompletion::Spawned
+            | ProcessCompletion::IdentityVerified
             | ProcessCompletion::StartFailed
             | ProcessCompletion::Unknown => None,
             ProcessCompletion::Interrupted { .. } => Some(EffectOutcome::Interrupted),
