@@ -114,6 +114,12 @@ and read-only explanations of existing reconciliation proof requirements.
 Missing identity or unresolved cleanup preserves uncertainty and reservations; replay
 never relaunches. This does not qualify a host or resolve historical ambiguity.
 
+The [recoverable-domain extension](docs/architecture/recoverable-domains.md) separates
+historical outcome, present effect capability, cumulative debt, reusable capacity
+and administrative disposition. Its explicit pool-coordinator profile and native
+fixed-payload Linux backend remain bounded development mechanisms. Actual host
+qualification, historical resource disposition and live execution retain their gates.
+
 The bounded [native method inspector](docs/architecture/engineering-methods.md#native-method-inspection-p0)
 adds immutable `cortex_core::methods` definitions and advisory
 `cortex_evidence::methods::inspect_method` qualification views. Its two unassessed

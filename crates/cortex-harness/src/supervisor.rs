@@ -1544,4 +1544,4 @@ fn execute_fixture_inner(
 
 #[cfg(test)]
 #[path = "supervisor_tests.rs"]
-mod tests;
+pub(crate) mod tests;

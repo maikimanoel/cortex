@@ -116,6 +116,28 @@ private evidence; no provider disclosure or session adoption is selected. DEC-01
 retains independent acceptance and exact-operation integration authority. No broad
 operational capability or live decision is closed by this continuation.
 
+## Recoverable execution scoped amendment
+
+The owner approves [recoverable-domain semantics](../architecture/recoverable-domains.md)
+and native source implementation, independent review and bounded source delivery.
+DEC-007 now permits an explicitly versioned single-operator pool-coordinator
+profile within the existing encrypted journal, with compatible legacy readers
+refusing new records. DEC-005 distinguishes reusable occupancy, measured cumulative
+consumption, retained debit and unresolved debt; milli-CPU capacity keeps its
+existing meaning. Domain closure may settle covered reusable dimensions without
+changing a historical Unknown or accepting an artifact. Administrative disposition
+has no automatic technical effect.
+
+DEC-006 selects a bounded Linux systemd structured-manager/fixed-Rust-bootstrap
+implementation for a synthetic payload, with actual-host qualification conditional
+on effective permissions, finite authorized resources and an independently
+accepted safety envelope. This is not an arbitrary-executor or isolation guarantee.
+DEC-004 preserves explicit encrypted retention and bounded redacted diagnostics;
+new raw capture or provider disclosure remains gated. DEC-012 preserves one Core
+authority path and independent review. No historical journal rewrite, budget reset,
+protected merge, new system delegation, VM provisioning or live provider operation
+is authorized by this amendment. Broader decisions remain open.
+
 ## DEC-001
 
 **Open-source license — resolved by the owner.** Cortex uses the standard

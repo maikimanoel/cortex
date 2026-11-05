@@ -1,0 +1,70 @@
+//! Redacted retained facts. Inspection never contacts a manager.
+use cortex_core::program::domain::*;
+use serde_json::{Value, json};
+
+pub(super) fn view(projection: &DomainProjection) -> Value {
+    let pool = projection.pool();
+    let capacities: Vec<_> = pool
+        .into_iter()
+        .flat_map(|p| &p.capacities)
+        .map(|c| {
+            json!({"dimension":format!("{:?}",c.resource),
+            "declared_total":c.available,"verification_reserve":c.verification_reserve,
+            "held":projection.held(c.resource).ok(),
+            "enforcement":"NOT_ESTABLISHED_BY_JOURNAL"})
+        })
+        .collect();
+    let consumption: Vec<_> = pool
+        .into_iter()
+        .flat_map(|p| &p.consumption)
+        .map(|b| {
+            let accounted = projection.consumed_or_reserved(b.dimension);
+            json!({"dimension":format!("{:?}",b.dimension),"declared_total":b.total,
+            "reserve":b.reserve,"per_operation":b.per_operation,
+            "known_consumption_or_future_debit":accounted.as_ref().ok(),
+            "blocked_by":accounted.err().map(|e|format!("{e:?}")),
+            "reservation_is_proven_usage_bound":false})
+        })
+        .collect();
+    let records: Vec<_> = projection.domains().iter().map(|d| {
+        let capacity: Vec<_> = pool.into_iter().flat_map(|p| &p.capacities).map(|c| {
+            json!({"dimension":format!("{:?}",c.resource),"held":d.holds(c.resource),
+                "admitted_quantity":d.intent.effect.demand.iter().find(|r|r.resource==c.resource).and_then(|r|r.amount)})
+        }).collect();
+        let usage: Vec<_> = d.intent.consumption.iter().map(|r| {
+            let measured = d.measured(r.dimension);
+            json!({"dimension":format!("{:?}",r.dimension),"retained_declared_debit":r.amount,
+                "measured_final":measured,"unresolved_debt":d.unresolved_consumption(r.dimension),
+                "proven_upper_bound":null})
+        }).collect();
+        let historical = match d.outcome {
+            HistoricalOutcome::NotDispatched => json!({"kind":"NOT_DISPATCHED"}),
+            HistoricalOutcome::Unknown => json!({"kind":"UNKNOWN"}),
+            HistoricalOutcome::Reported(outcome) => json!({"kind":"REPORTED","observation":format!("{outcome:?}"),"accepted":false}),
+        };
+        let next = match d.phase {
+            DomainPhase::Reserved if !d.cancelled && d.disposition==AdministrativeDisposition::Active => "FRESH_AUTHORITY_AND_QUALIFICATION_REQUIRED_BEFORE_CREATION",
+            DomainPhase::Closed => "REVIEW_REMAINING_DEBT_AND_CAPACITY_BEFORE_DISTINCT_WORK",
+            DomainPhase::CancelledBeforeCreate => "NO_CREATION_REQUEST_RECORDED_NEW_WORK_REQUIRES_ALL_GATES",
+            _ => "OBSERVE_EXACT_DOMAIN_OR_RETAIN_HOLD_NEVER_BLIND_RETRY",
+        };
+        json!({"domain":d.intent.id.as_str(),"program":d.intent.effect.scope.program.as_str(),
+            "effect":d.intent.effect.id.as_str(),"attempt":d.intent.effect.scope.attempt.as_str(),
+            "generation":d.intent.effect.scope.generation.get(),
+            "historical_outcome":historical,"retained_domain_phase":format!("{:?}",d.phase),
+            "present_capability_evidence":if d.closure.is_some(){"CLOSURE_RECEIPT_RETAINED"}else{"NO_CLOSURE_PROOF"},
+            "domain_identity_recorded":d.identity.is_some(),"cancellation_requested":d.cancelled,
+            "administrative_disposition":format!("{:?}",d.disposition),
+            "reusable_capacity":capacity,"cumulative_consumption":usage,
+            "closure_evidence_recorded":d.closure.is_some(),"additional_settlements":d.settlements.len(),"closure_source":"CALLER_ASSERTION_NOT_AUTHENTICATED",
+            "artifact_acceptance":false,"retry_authorized":false,"next_permissible_action":next})
+    }).collect();
+    json!({"schema":"cortex.domains.v1","mode":"RECOVERABLE_DOMAIN_FIXTURES",
+        "pool_registered":pool.is_some(),"pool_identity":"PRIVATE_VALUES_OMITTED",
+        "pool_correspondence":"SINGLE_OPERATOR_ASSERTION_ONE_AUTHORITATIVE_COLLECTION",
+        "logical_tick":projection.last_tick(),"domains":records,
+        "reusable_capacity":capacities,"cumulative_consumption":consumption,
+        "inspection_authority":"NONE","host_reinspection":false,
+        "current_liveness":"NOT_OBSERVED","host_qualification":"NOT_INFERRED",
+        "live_provider":"UNAVAILABLE","physical_reserves":"NOT_ESTABLISHED"})
+}

@@ -425,6 +425,46 @@ impl OperationalProjection {
         }
         self.check_grant(state, self.grant(&record.intent.grant)?, scope, at)
     }
+    /// Validate existing grant, claim, candidate and per-operation ceilings for a
+    /// version-four domain. The single global pool coordinator owns occupancy;
+    /// this check neither reserves resources nor creates an alternate grant.
+    pub fn check_domain_intent(
+        &self,
+        state: &ProgramState,
+        intent: &EffectIntent,
+        at: u64,
+    ) -> Result<(), OperationalError> {
+        if self.mode != EffectMode::SupervisedFixture || at < self.last_tick {
+            return Err(OperationalError::GrantUnavailable);
+        }
+        let grant = self.grant(&intent.grant)?;
+        self.check_grant(state, grant, &intent.scope, at)?;
+        let policy = self.policy(&grant.policy)?;
+        validate_quantities(&intent.demand, &policy.capacities, false)?;
+        for demand in &intent.demand {
+            let cap = policy
+                .capacities
+                .iter()
+                .find(|c| c.resource == demand.resource)
+                .ok_or(ProgramError::Structure)?;
+            if !cap.declared_enforceable {
+                return Err(OperationalError::UnenforceableResource(demand.resource));
+            }
+            let available = cap
+                .available
+                .ok_or(OperationalError::UnknownResource(demand.resource))?
+                .checked_sub(cap.verification_reserve)
+                .ok_or(OperationalError::ResourceLimit(demand.resource))?;
+            let required = quantity(&intent.demand, demand.resource)?;
+            if required > quantity(&grant.ceilings, demand.resource)? || required > available {
+                return Err(OperationalError::ResourceLimit(demand.resource));
+            }
+        }
+        if intent.retry_of.is_some() {
+            return Err(ProgramError::Transition.into());
+        }
+        Ok(())
+    }
     /// Retained exact policies; only the last is current for new reservations.
     pub fn policies(&self) -> &[Policy] {
         &self.policies

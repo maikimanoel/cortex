@@ -9,6 +9,24 @@
 pub mod host_preflight;
 
 #[cfg(target_os = "linux")]
+pub mod domain_bootstrap;
+
+#[cfg(target_os = "linux")]
+mod domain_manager;
+#[cfg(target_os = "linux")]
+mod domain_runtime;
+#[cfg(target_os = "linux")]
+pub use domain_manager::{
+    DomainCause, DomainDiagnostic, DomainPhaseDiagnostic, ServiceLimits, ServiceSelection,
+    SystemdNonceDomain,
+};
+#[cfg(target_os = "linux")]
+pub use domain_runtime::{
+    DomainOperations, DomainRecoveryObservation, DomainRun, cancel_nonce_domain,
+    execute_nonce_domain, inspect_nonce_domain,
+};
+
+#[cfg(target_os = "linux")]
 mod owned_scope;
 #[cfg(target_os = "linux")]
 mod supervisor;
