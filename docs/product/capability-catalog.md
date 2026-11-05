@@ -1478,3 +1478,9 @@ is not independently observed external contributor acceptance. Completing prepar
 does not publish anything; absent owner authorization blocks launch.
 **Verification:** NOT_RUN; release-candidate/history review and distribution checks
 after decisions. No public repository, tag, release, or package is created here.
+
+The bounded [process recovery extension](../architecture/process-recovery.md) adds
+opt-in durable scope identity checkpoints and read-only reconciliation inspection
+under the existing supervised-fixture responsibilities. Historical Unknown and
+reservations are preserved; no operational host release or milestone/status
+advance follows from source verification.

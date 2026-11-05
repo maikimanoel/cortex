@@ -502,3 +502,9 @@ authorization; no fixed vendor, backend, budget, or public interface is chosen.
 
 These extensions cannot excuse missing mandatory baseline coverage in 002–006.
 Revisit catalog targets and this backlog together whenever approved scope changes.
+
+The bounded [process recovery extension](../architecture/process-recovery.md) adds
+opt-in durable scope identity checkpoints and read-only reconciliation inspection
+under the existing supervised-fixture responsibilities. Historical Unknown and
+reservations are preserved; no operational host release or milestone/status
+advance follows from source verification.

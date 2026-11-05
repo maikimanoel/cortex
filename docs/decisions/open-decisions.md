@@ -574,3 +574,11 @@ auditable classification rules for trivial/standard/critical work and the qualif
 review/approval obligations applicable to each contract. Keep contract-mandated
 reviews even when automation is convenient; do not impose multi-agent or formal
 methods on every task. Dependencies: CAP-WFL-002, CAP-CORE-003, and CAP-EVL-002.
+
+**Bounded process recovery continuation — DEC-007/012 remain open overall.**
+The owner authorized a compatible opt-in identity-checkpoint extension to the
+existing encrypted supervised-fixture journal and native read-only recovery
+inspection. The [contract](../architecture/process-recovery.md) preserves legacy
+records, canonical guards and historical uncertainty. It adds no recovery rule
+that treats missing processes or units as proof of absence, grants no retry or
+adoption authority, and leaves host qualification and live-provider decisions gated.

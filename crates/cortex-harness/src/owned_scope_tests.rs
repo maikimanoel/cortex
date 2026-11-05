@@ -33,6 +33,7 @@ fn process() -> ProcessSpec {
             argument_bytes: 100,
             transport: None,
         },
+        identity_checkpoint: None,
         containment: Some(OwnedScopeSpec {
             reference: source("scope"),
             unit: "cortex-qualification-test.scope".into(),

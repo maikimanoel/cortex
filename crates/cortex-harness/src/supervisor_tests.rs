@@ -76,6 +76,7 @@ fn pin(root: &Temp, mode: &str, input: Vec<u8>) -> PinnedFixture {
             transport: None,
         },
         containment: None,
+        identity_checkpoint: None,
     };
     let executable =
         PinnedExecutable::inspect(&spec.executable, spec.limits.executable_bytes).unwrap();
@@ -1112,4 +1113,202 @@ fn cleanup_queries_cannot_borrow_later_termination_phases() {
     assert_eq!(state.query_deadline(term, end), kill);
     assert_eq!(state.query_deadline(kill, end), end);
     assert_eq!(Cleanup::default().query_deadline(start, term), term);
+}
+
+struct ControlledScope {
+    facts: ScopeObservation,
+    acquired: Option<Arc<AtomicBool>>,
+}
+impl ScopeRuntime for ControlledScope {
+    fn observe(
+        &mut self,
+        _: Option<&ProcessIdentity>,
+        _: Instant,
+    ) -> Result<ScopeObservation, HarnessError> {
+        if let Some(acquired) = &self.acquired {
+            acquired.store(true, Ordering::Release);
+        }
+        Ok(self.facts.clone())
+    }
+    fn last_observation(&self) -> Option<ScopeObservation> {
+        Some(self.facts.clone())
+    }
+    fn unresolved_helpers(&self) -> Vec<ScopeHelperIdentity> {
+        vec![]
+    }
+    fn terminate(&mut self, _: ScopeSignal, _: Instant) -> Result<(), HarnessError> {
+        self.facts.populated = Some(false);
+        Ok(())
+    }
+}
+fn controlled_checkpoint(root: &Temp) -> (PinnedFixture, Running) {
+    let mut pin = pin(root, "one-record", b"synthetic-input".to_vec());
+    // Only the finite direct fixture is actually launched. Scope facts below
+    // are controlled observations, never real-host qualification evidence.
+    let mut running = spawn(&pin, Instant::now()).unwrap();
+    let scope = support::owned_scope();
+    running.scope = Some(Box::new(ControlledScope {
+        facts: support::scope_observation(&scope, Some(true)),
+        acquired: None,
+    }));
+    pin.spec.containment = Some(scope);
+    pin.spec.identity_checkpoint = Some(IdentityCheckpointPolicy::BeforeInputV1);
+    (pin, running)
+}
+#[test]
+fn controlled_checkpoint_refusal_and_lost_reply_withhold_every_input_byte() {
+    for lost_after_commit in [false, true] {
+        let root = Temp::new();
+        let (pin, running) = controlled_checkpoint(&root);
+        let mut publications = 0;
+        let mut retained = None;
+        let result = supervise_with_checkpoint(
+            running,
+            &pin,
+            &ids(),
+            &AtomicBool::new(false),
+            |_| Ok(()),
+            None,
+            |capture| {
+                publications += 1;
+                assert_eq!(capture.completion, ProcessCompletion::IdentityVerified);
+                assert_eq!(capture.input_bytes, 0);
+                if lost_after_commit {
+                    retained = Some(capture.clone());
+                }
+                Err(InterruptionReason::AuthorityUnknown)
+            },
+        );
+        assert_eq!(publications, 1);
+        assert_eq!(result.input_bytes, 0);
+        assert_eq!(
+            result.completion,
+            ProcessCompletion::Interrupted {
+                reason: InterruptionReason::AuthorityUnknown
+            }
+        );
+        assert_eq!(retained.is_some(), lost_after_commit);
+    }
+}
+#[test]
+fn checkpoint_publication_precedes_input_and_cannot_refresh_time_or_authority() {
+    for case in 0..4 {
+        let root = Temp::new();
+        let (mut pin, running) = controlled_checkpoint(&root);
+        if case == 2 {
+            pin.spec.limits.wall_ms = 40;
+        }
+        let cancel = AtomicBool::new(false);
+        let published = AtomicBool::new(false);
+        let result = supervise_with_checkpoint(
+            running,
+            &pin,
+            &ids(),
+            &cancel,
+            |_| {
+                if case == 3 && published.load(Ordering::Acquire) {
+                    Err(InterruptionReason::AuthorityLost)
+                } else {
+                    Ok(())
+                }
+            },
+            None,
+            |capture| {
+                assert_eq!(capture.input_bytes, 0);
+                assert!(!published.swap(true, Ordering::AcqRel));
+                if case == 1 {
+                    cancel.store(true, Ordering::Release);
+                }
+                if case == 2 {
+                    thread::sleep(Duration::from_millis(50));
+                }
+                Ok(())
+            },
+        );
+        assert!(published.load(Ordering::Acquire));
+        if case == 0 {
+            assert_eq!(result.input_bytes, pin.spec.input_len);
+        } else {
+            assert_eq!(result.input_bytes, 0);
+        }
+    }
+}
+#[test]
+fn old_execute_api_refuses_checkpoint_policy_before_durable_dispatch() {
+    let mut f = durable("count");
+    f.pin.spec.identity_checkpoint = Some(IdentityCheckpointPolicy::BeforeInputV1);
+    let before = f.store.load(&f.key, Access::ReadOnly).unwrap().revision();
+    assert!(matches!(
+        execute_fixture(
+            &f.store,
+            &f.key,
+            f.dispatch,
+            ids(),
+            &f.pin,
+            &AtomicBool::new(false)
+        ),
+        Err(HarnessError::Contract)
+    ));
+    assert_eq!(
+        f.store.load(&f.key, Access::ReadOnly).unwrap().revision(),
+        before
+    );
+    assert!(!f.root.0.join("launch-count").exists());
+}
+
+#[test]
+fn acquisition_cancellation_revocation_and_slow_authority_precede_publication() {
+    for case in 0..3 {
+        let root = Temp::new();
+        let (mut pin, mut running) = controlled_checkpoint(&root);
+        let acquired = Arc::new(AtomicBool::new(false));
+        running.scope = Some(Box::new(ControlledScope {
+            facts: support::scope_observation(pin.spec.containment.as_ref().unwrap(), Some(true)),
+            acquired: Some(acquired.clone()),
+        }));
+        if case == 2 {
+            pin.spec.limits.wall_ms = 40;
+        }
+        let uncancelled = AtomicBool::new(false);
+        let cancel = if case == 0 {
+            acquired.as_ref()
+        } else {
+            &uncancelled
+        };
+        let mut published = 0;
+        let result = supervise_with_checkpoint(
+            running,
+            &pin,
+            &ids(),
+            cancel,
+            |_| {
+                if acquired.load(Ordering::Acquire) {
+                    if case == 1 {
+                        return Err(InterruptionReason::AuthorityLost);
+                    }
+                    if case == 2 {
+                        thread::sleep(Duration::from_millis(50));
+                    }
+                }
+                Ok(())
+            },
+            None,
+            |_| {
+                published += 1;
+                Ok(())
+            },
+        );
+        assert_eq!(published, 0, "case {case}");
+        assert_eq!(result.input_bytes, 0);
+        assert_eq!(
+            result.completion,
+            ProcessCompletion::Interrupted {
+                reason: match case {
+                    0 => InterruptionReason::Cancelled,
+                    1 => InterruptionReason::AuthorityLost,
+                    _ => InterruptionReason::Timeout,
+                }
+            }
+        );
+    }
 }

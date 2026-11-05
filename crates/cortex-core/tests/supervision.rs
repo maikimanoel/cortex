@@ -779,3 +779,216 @@ fn owned_scope_resource_contract_separates_rate_from_cumulative_time() {
     containment.escalation_ms = u64::MAX;
     assert!(spec.validate(limits).is_err());
 }
+
+fn checkpoint_setup() -> (
+    ProgramState,
+    OperationalProjection,
+    EffectScope,
+    ProcessSpec,
+) {
+    let (state, _, scope) = setup();
+    let mut spec = contained_spec(&scope);
+    spec.identity_checkpoint = Some(IdentityCheckpointPolicy::BeforeInputV1);
+    let mut projection = OperationalProjection::new_supervised_fixture();
+    for event in [
+        EffectEvent::Policy(scope_policy()),
+        EffectEvent::Grant(scope_grant(&scope)),
+        EffectEvent::Reserve {
+            intent: scope_intent(&scope),
+            at: 1,
+        },
+        EffectEvent::PrepareProcess {
+            effect: intent(&scope).id,
+            scope: scope.clone(),
+            at: 2,
+            spec: Box::new(spec.clone()),
+        },
+        EffectEvent::Dispatch {
+            effect: intent(&scope).id,
+            scope: scope.clone(),
+            at: 3,
+            basis: source("checkpoint-dispatch"),
+        },
+    ] {
+        projection.apply(&state, event).unwrap();
+    }
+    (state, projection, scope, spec)
+}
+fn checkpoint_capture(scope: &EffectScope, spec: &ProcessSpec, n: u64) -> ProcessObservation {
+    let mut captured = observation(
+        scope,
+        n,
+        ProcessCompletion::IdentityVerified,
+        Quiescence::Unknown,
+    );
+    captured.containment = Some(Box::new(scope_observation(
+        spec.containment.as_ref().unwrap(),
+        Some(true),
+    )));
+    captured
+}
+fn captured_event(scope: &EffectScope, at: u64, observation: ProcessObservation) -> EffectEvent {
+    EffectEvent::ProcessObserved {
+        effect: intent(scope).id,
+        scope: scope.clone(),
+        at,
+        observation,
+    }
+}
+#[test]
+fn identity_checkpoint_requires_an_explicit_complete_nonterminal_preinput_contract() {
+    let (_, _, scope, mut spec) = checkpoint_setup();
+    let good = checkpoint_capture(&scope, &spec, 2);
+    assert!(good.validate(&spec).is_ok());
+    assert_eq!(good.outcome(&spec), None);
+    assert!(!good.quiescent(&spec));
+    for case in 0..8 {
+        let mut bad = good.clone();
+        match case {
+            0 => bad.input_bytes = 1,
+            1 => bad.process = None,
+            2 => bad.containment.as_mut().unwrap().populated = None,
+            3 => bad.containment.as_mut().unwrap().populated = Some(false),
+            4 => bad.containment.as_mut().unwrap().membership_verified = false,
+            5 => bad.containment.as_mut().unwrap().lifecycle_verified = false,
+            6 => bad.unresolved_scope_helpers.push(ScopeHelperIdentity {
+                pid: 777,
+                start_ticks: None,
+            }),
+            _ => bad.quiescence = Quiescence::OwnedScopeEmpty,
+        }
+        assert!(bad.validate(&spec).is_err(), "case {case}");
+    }
+    spec.identity_checkpoint = None;
+    assert!(good.validate(&spec).is_err());
+    spec.identity_checkpoint = Some(IdentityCheckpointPolicy::BeforeInputV1);
+    spec.containment = None;
+    assert!(spec.validate(definition().limits()).is_err());
+}
+#[test]
+fn checkpoint_is_once_after_spawn_and_before_any_input_with_atomic_refusals() {
+    let (state, mut projection, scope, spec) = checkpoint_setup();
+    let before = projection.clone();
+    assert!(
+        projection
+            .apply(
+                &state,
+                captured_event(&scope, 4, checkpoint_capture(&scope, &spec, 2))
+            )
+            .is_err()
+    );
+    assert!(projection == before);
+    let spawned = observation(&scope, 1, ProcessCompletion::Spawned, Quiescence::Unknown);
+    projection
+        .apply(&state, captured_event(&scope, 4, spawned))
+        .unwrap();
+    let before = projection.clone();
+    let mut wrong = checkpoint_capture(&scope, &spec, 2);
+    wrong.process.as_mut().unwrap().start_ticks += 1;
+    assert!(
+        projection
+            .apply(&state, captured_event(&scope, 5, wrong))
+            .is_err()
+    );
+    let mut terminal = observation(
+        &scope,
+        3,
+        ProcessCompletion::Exited {
+            code: Some(0),
+            signal: None,
+        },
+        Quiescence::OwnedScopeEmpty,
+    );
+    terminal.containment = Some(Box::new(scope_observation(
+        spec.containment.as_ref().unwrap(),
+        Some(false),
+    )));
+    assert!(
+        projection
+            .apply(&state, captured_event(&scope, 5, terminal.clone()))
+            .is_err()
+    );
+    assert!(projection == before);
+    projection
+        .apply(
+            &state,
+            captured_event(&scope, 5, checkpoint_capture(&scope, &spec, 2)),
+        )
+        .unwrap();
+    assert!(projection.effects()[0].pending());
+    assert_eq!(projection.effects()[0].report, None);
+    let before = projection.clone();
+    assert!(
+        projection
+            .apply(
+                &state,
+                captured_event(&scope, 6, checkpoint_capture(&scope, &spec, 3))
+            )
+            .is_err()
+    );
+    assert!(projection == before);
+    projection
+        .apply(&state, captured_event(&scope, 6, terminal))
+        .unwrap();
+    assert_eq!(
+        projection.effects()[0].report,
+        Some(EffectOutcome::Succeeded)
+    );
+    assert!(projection.effects()[0].pending());
+}
+#[test]
+fn cancellation_expiry_and_unknown_are_checkpoint_barriers() {
+    for case in 0..3 {
+        let (state, mut projection, scope, spec) = checkpoint_setup();
+        projection
+            .apply(
+                &state,
+                captured_event(
+                    &scope,
+                    4,
+                    observation(&scope, 1, ProcessCompletion::Spawned, Quiescence::Unknown),
+                ),
+            )
+            .unwrap();
+        let at = match case {
+            0 => {
+                projection
+                    .apply(
+                        &state,
+                        EffectEvent::Cancel {
+                            effect: intent(&scope).id,
+                            scope: scope.clone(),
+                            at: 5,
+                            basis: source("cancel-before-checkpoint"),
+                        },
+                    )
+                    .unwrap();
+                6
+            }
+            1 => scope_grant(&scope).expires_before,
+            _ => {
+                projection
+                    .apply(
+                        &state,
+                        captured_event(
+                            &scope,
+                            5,
+                            observation(&scope, 2, ProcessCompletion::Unknown, Quiescence::Unknown),
+                        ),
+                    )
+                    .unwrap();
+                6
+            }
+        };
+        let before = projection.clone();
+        assert!(
+            projection
+                .apply(
+                    &state,
+                    captured_event(&scope, at, checkpoint_capture(&scope, &spec, 3))
+                )
+                .is_err()
+        );
+        assert!(projection == before);
+    }
+}

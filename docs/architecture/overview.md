@@ -243,3 +243,8 @@ and manual requests using included standard Linux capacity under DEC-005. Its
 configuration is not evidence of a remote run. Completion of an engineering
 milestone does not authorize deployment, paid resources, package publication or
 public release.
+
+The [process recovery extension](process-recovery.md) retains the same Core,
+Evidence, Storage and Harness owners. Opted-in scope fixtures commit an identity
+checkpoint before input. Read-only recovery reasons project canonical guards;
+they neither reacquire host authority nor settle ambiguous historical effects.

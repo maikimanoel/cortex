@@ -327,6 +327,52 @@ pub(super) fn process_child(root: &Path, s: &ProgramStore, key: &StoreKey, mode:
             std::thread::sleep(Duration::from_millis(5));
         }
     };
+    if matches!(
+        mode,
+        "supervised-identity-before" | "supervised-identity-after"
+    ) {
+        let spec = k
+            .fixture_effects()
+            .process_spec(&supervised_fixture::intent(&scope).id)
+            .unwrap();
+        let mut observed = supervised_fixture::observation(
+            spec,
+            2,
+            ProcessCompletion::IdentityVerified,
+            Quiescence::Unknown,
+        );
+        observed.containment = Some(Box::new(supervised_fixture::scope_observation(
+            spec.containment.as_ref().unwrap(),
+            Some(true),
+        )));
+        let op = operation(
+            &k,
+            "identity-checkpoint",
+            Input::SupervisedEffect(Box::new(EffectEvent::ProcessObserved {
+                effect: supervised_fixture::intent(&scope).id,
+                scope: scope.clone(),
+                at: 5,
+                observation: observed,
+            })),
+        );
+        s.admit_coordinated(
+            key,
+            op,
+            |stage, _| {
+                if matches!(
+                    (mode, stage),
+                    ("supervised-identity-before", Stage::BeforeCommit)
+                        | ("supervised-identity-after", Stage::AfterCommit)
+                ) {
+                    fs::write(root.join("ready"), b"identity-boundary").unwrap();
+                    await_file("continue");
+                }
+            },
+            |_| (),
+        )
+        .unwrap();
+        return;
+    }
     if let Some(label) = mode.strip_prefix("supervised-race-") {
         fs::write(root.join(format!("ready-{label}")), b"ready").unwrap();
         await_file("go");
@@ -423,4 +469,70 @@ fn owned_scope_and_unknown_helpers_survive_encrypted_reopen_without_dispatch_rep
             .windows(b"cortex-qualification-fixture.scope".len())
             .any(|w| w == b"cortex-qualification-fixture.scope")
     );
+}
+
+#[test]
+fn identity_checkpoint_crash_cuts_reopen_exactly_without_releasing_or_relaunching() {
+    for mode in ["supervised-identity-before", "supervised-identity-after"] {
+        let f = Temp::new();
+        let (mut k, scope, mut spec) = supervised_fixture::configured_scope_kernel(None);
+        spec.identity_checkpoint = Some(IdentityCheckpointPolicy::BeforeInputV1);
+        supervised_fixture::prepare(&mut k, &scope, &spec);
+        let dispatch = supervised_fixture::dispatch_operation(&k, &scope);
+        k.admit(dispatch.clone()).unwrap();
+        let spawned = supervised_fixture::observation(
+            &spec,
+            1,
+            ProcessCompletion::Spawned,
+            Quiescence::Unknown,
+        );
+        supervised_fixture::effect(
+            &mut k,
+            "spawned",
+            EffectEvent::ProcessObserved {
+                effect: supervised_fixture::intent(&scope).id,
+                scope: scope.clone(),
+                at: 4,
+                observation: spawned,
+            },
+        );
+        let s = ProgramStore::create_supervised_fixture(
+            &f.store(),
+            &key(),
+            k.initial().clone(),
+            limits(),
+        )
+        .unwrap();
+        for op in k.operations() {
+            s.admit(&key(), op.clone()).unwrap();
+        }
+        let mut c = child(&f, mode);
+        wait_file(&f.0.join("ready"), &mut c);
+        c.kill().unwrap();
+        assert!(!c.wait_with_output().unwrap().status.success());
+        let actual = s.load(&key(), Access::Recover).unwrap();
+        assert!(
+            actual
+                .fixture_effects()
+                .process_spec(&supervised_fixture::intent(&scope).id)
+                .unwrap()
+                == &spec
+        );
+        let view = actual
+            .fixture_effects()
+            .inspect_process_recovery(&supervised_fixture::intent(&scope).id, &scope)
+            .unwrap();
+        assert_eq!(
+            view.identity_checkpoint_recorded,
+            mode == "supervised-identity-after"
+        );
+        assert!(view.reservation_held);
+        assert!(view.candidate.is_none());
+        let (_, duplicate) = s
+            .dispatch_fixture(&key(), dispatch, |_| {
+                panic!("checkpoint restart relaunched fixture")
+            })
+            .unwrap();
+        assert!(duplicate.is_none());
+    }
 }

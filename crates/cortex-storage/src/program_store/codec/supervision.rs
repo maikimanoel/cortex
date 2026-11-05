@@ -63,27 +63,6 @@ impl Wire for ProcessLimits {
         })
     }
 }
-// Retain the original prefix byte-for-byte when the extension is absent. An
-// older exact-length decoder rejects the additional mandatory field.
-macro_rules! optional_tail {
-    ($t:ident; $tail:ident; $($field:ident),+) => {
-        impl Wire for $t {
-            fn write(&self) -> Result<V, ProgramStoreError> {
-                let mut fields = vec![$(self.$field.write()?),+];
-                if let Some(tail) = &self.$tail { fields.push(tail.write()?); }
-                Ok(V::Array(fields))
-            }
-            fn read(v: &V) -> Result<Self, ProgramStoreError> {
-                let a = v.as_array().ok_or_else(bad)?;
-                let n = [$(stringify!($field)),+].len();
-                if a.len() != n && a.len() != n + 1 { return Err(bad()); }
-                let mut fields = a.iter();
-                Ok(Self { $($field: read(fields.next().ok_or_else(bad)?)?),+,
-                    $tail: if a.len() == n + 1 { Some(read(fields.next().ok_or_else(bad)?)?) } else { None } })
-            }
-        }
-    };
-}
 fields!(ReadOnlyMount;source,destination);
 fields!(ScopeControls;cpu_quota_us,cpu_period_us,memory_bytes,swap_bytes,tasks_max);
 fields!(OwnedScopeSpec;reference,unit,delegated_root,runtime_dir,launcher,launcher_identity,manager,manager_identity,controls,cpu_time_ms,cancellation_grace_ms,escalation_ms,isolation);
@@ -126,7 +105,65 @@ impl Wire for ScopeIsolation {
         })
     }
 }
-optional_tail!(ProcessSpec;containment;reference,executable,executable_identity,cwd,args,prepared_input,input_len,host,profile,privacy,approval,limits);
+symbols!(IdentityCheckpointPolicy;BeforeInputV1);
+impl Wire for ProcessSpec {
+    fn write(&self) -> Result<V, ProgramStoreError> {
+        let mut fields = vec![
+            self.reference.write()?,
+            self.executable.write()?,
+            self.executable_identity.write()?,
+            self.cwd.write()?,
+            self.args.write()?,
+            self.prepared_input.write()?,
+            self.input_len.write()?,
+            self.host.write()?,
+            self.profile.write()?,
+            self.privacy.write()?,
+            self.approval.write()?,
+            self.limits.write()?,
+        ];
+        if let Some(scope) = &self.containment {
+            fields.push(scope.write()?);
+        }
+        if let Some(policy) = &self.identity_checkpoint {
+            if self.containment.is_none() {
+                return Err(bad());
+            }
+            fields.push(policy.write()?);
+        }
+        Ok(V::Array(fields))
+    }
+    fn read(v: &V) -> Result<Self, ProgramStoreError> {
+        let a = v.as_array().ok_or_else(bad)?;
+        if !matches!(a.len(), 12..=14) {
+            return Err(bad());
+        }
+        Ok(Self {
+            reference: read(&a[0])?,
+            executable: read(&a[1])?,
+            executable_identity: read(&a[2])?,
+            cwd: read(&a[3])?,
+            args: read(&a[4])?,
+            prepared_input: read(&a[5])?,
+            input_len: read(&a[6])?,
+            host: read(&a[7])?,
+            profile: read(&a[8])?,
+            privacy: read(&a[9])?,
+            approval: read(&a[10])?,
+            limits: read(&a[11])?,
+            containment: if a.len() >= 13 {
+                Some(read(&a[12])?)
+            } else {
+                None
+            },
+            identity_checkpoint: if a.len() == 14 {
+                Some(read(&a[13])?)
+            } else {
+                None
+            },
+        })
+    }
+}
 fields!(ProcessIdentity;launch,pid,start_ticks);
 fields!(ScopeHelperIdentity;pid,start_ticks);
 impl Wire for ProcessObservation {
@@ -192,6 +229,7 @@ impl Wire for ProcessCompletion {
     fn write(&self) -> Result<V, ProgramStoreError> {
         Ok(match self {
             Self::Spawned => json!(["spawned"]),
+            Self::IdentityVerified => json!(["identity-verified-v1"]),
             Self::StartFailed => json!(["start-failed"]),
             Self::Exited { code, signal } => json!(["exited", code.write()?, signal.write()?]),
             Self::Interrupted { reason } => json!(["interrupted", reason.write()?]),
@@ -203,6 +241,10 @@ impl Wire for ProcessCompletion {
             "spawned" => {
                 arr(v, 1)?;
                 Self::Spawned
+            }
+            "identity-verified-v1" => {
+                arr(v, 1)?;
+                Self::IdentityVerified
             }
             "start-failed" => {
                 arr(v, 1)?;
@@ -330,6 +372,22 @@ mod tests {
         let extended = spec.write().unwrap();
         assert!(arr(&extended, 12).is_err());
         assert!(ProcessSpec::read(&extended).unwrap() == spec);
+        spec.identity_checkpoint = Some(IdentityCheckpointPolicy::BeforeInputV1);
+        let checkpoint = spec.write().unwrap();
+        assert_eq!(checkpoint.as_array().unwrap().len(), 14);
+        assert!(arr(&checkpoint, 13).is_err());
+        assert!(ProcessSpec::read(&checkpoint).unwrap() == spec);
+        let mut malformed = checkpoint.as_array().unwrap().clone();
+        malformed[13] = V::Null;
+        assert!(ProcessSpec::read(&V::Array(malformed)).is_err());
+        let mut unknown = checkpoint.as_array().unwrap().clone();
+        unknown[13] = json!("future-policy");
+        assert!(ProcessSpec::read(&V::Array(unknown)).is_err());
+        let completion = ProcessCompletion::IdentityVerified;
+        assert_eq!(
+            ProcessCompletion::read(&completion.write().unwrap()).unwrap(),
+            completion
+        );
         let old_observation = json!([
             cortex_core::binding::ObservationId::new("codec", 1)
                 .unwrap()
