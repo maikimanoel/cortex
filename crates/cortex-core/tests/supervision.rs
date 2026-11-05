@@ -704,3 +704,78 @@ fn readonly_authority_check_cannot_reuse_a_historical_tick_after_time_advanced()
     );
     assert!(p.has_pending_attempt(&s.attempt));
 }
+
+#[test]
+fn owned_scope_requires_exact_incarnation_controls_membership_and_whole_set_cleanup() {
+    let (_, _, scope) = setup();
+    let spec = contained_spec(&scope);
+    let expected = spec.containment.as_ref().unwrap();
+    let mut observed = observation(
+        &scope,
+        1,
+        ProcessCompletion::Exited {
+            code: Some(0),
+            signal: None,
+        },
+        Quiescence::OwnedScopeEmpty,
+    );
+    observed.containment = Some(Box::new(scope_observation(expected, Some(false))));
+    assert!(observed.validate(&spec).is_ok());
+    assert_eq!(observed.outcome(&spec), Some(EffectOutcome::Succeeded));
+    for case in 0..9 {
+        let mut bad = observed.clone();
+        let facts = bad.containment.as_mut().unwrap();
+        match case {
+            0 => facts.populated = Some(true),
+            1 => facts.populated = None,
+            2 => facts.controls = None,
+            3 => facts.membership_verified = false,
+            4 => facts.helper_quiescent = false,
+            5 => facts.lifecycle_verified = false,
+            6 => facts.identity.invocation_id = "00000000000000000000000000000000".into(),
+            7 => facts.identity.unit.push_str("-foreign"),
+            _ => bad.quiescence = Quiescence::DirectChildReapedStreamsClosed,
+        }
+        assert!(bad.validate(&spec).is_err(), "case {case}");
+        assert_ne!(bad.outcome(&spec), Some(EffectOutcome::Succeeded));
+    }
+    observed.containment.as_mut().unwrap().memory_peak_bytes = None;
+    assert_eq!(observed.outcome(&spec), None);
+}
+
+#[test]
+fn unknown_controller_helper_cannot_certify_absence_or_cleanup() {
+    let (_, _, scope) = setup();
+    let spec = contained_spec(&scope);
+    let mut observed = observation(&scope, 1, ProcessCompletion::Unknown, Quiescence::Unknown);
+    observed.process = None;
+    observed.unresolved_scope_helpers = vec![ScopeHelperIdentity {
+        pid: 777,
+        start_ticks: None,
+    }];
+    assert!(observed.validate(&spec).is_ok());
+    assert!(!observed.quiescent(&spec));
+    assert_eq!(observed.outcome(&spec), None);
+    observed.completion = ProcessCompletion::StartFailed;
+    observed.quiescence = Quiescence::NoChildStarted;
+    assert!(observed.validate(&spec).is_err());
+    observed.unresolved_scope_helpers.clear();
+    assert!(observed.validate(&spec).is_ok());
+}
+
+#[test]
+fn owned_scope_resource_contract_separates_rate_from_cumulative_time() {
+    let (_, _, scope) = setup();
+    let mut spec = contained_spec(&scope);
+    let limits = definition().limits();
+    assert!(spec.validate(limits).is_ok());
+    let containment = spec.containment.as_mut().unwrap();
+    assert_eq!(containment.cpu_capacity_millis(), Some(1000));
+    assert_eq!(containment.elapsed_envelope_ms(&spec.limits), Some(7000));
+    containment.cpu_time_ms = 1500;
+    assert_eq!(containment.cpu_capacity_millis(), Some(1000));
+    containment.controls.cpu_quota_us = 50_000;
+    assert_eq!(containment.cpu_capacity_millis(), Some(500));
+    containment.escalation_ms = u64::MAX;
+    assert!(spec.validate(limits).is_err());
+}

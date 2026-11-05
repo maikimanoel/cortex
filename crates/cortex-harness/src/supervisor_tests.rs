@@ -75,6 +75,7 @@ fn pin(root: &Temp, mode: &str, input: Vec<u8>) -> PinnedFixture {
             argument_bytes: 4096,
             transport: None,
         },
+        containment: None,
     };
     let executable =
         PinnedExecutable::inspect(&spec.executable, spec.limits.executable_bytes).unwrap();
@@ -86,6 +87,7 @@ fn pin(root: &Temp, mode: &str, input: Vec<u8>) -> PinnedFixture {
         input,
         executable,
         cwd,
+        scope: Mutex::new(None),
     }
 }
 fn ids() -> CaptureIds {
@@ -1081,4 +1083,33 @@ fn already_used_capture_identity_refuses_before_launch_or_dispatch() {
         f.store.load(&f.key, Access::ReadOnly).unwrap().revision()
     );
     assert!(!f.root.0.join("launch-count").exists());
+}
+
+#[test]
+fn final_dispatch_guard_refuses_after_preparation_before_os_spawn() {
+    let root = Temp::new();
+    let pin = pin(&root, "silent", vec![]);
+    let refused = spawn_checked(&pin, Instant::now(), || false);
+    assert!(refused.is_err());
+    assert!(matches!(
+        refused.err().unwrap().error,
+        HarnessError::Contract
+    ));
+}
+
+#[test]
+fn cleanup_queries_cannot_borrow_later_termination_phases() {
+    let start = Instant::now();
+    let term = start + Duration::from_millis(500);
+    let kill = term + Duration::from_millis(500);
+    let end = kill + Duration::from_millis(1000);
+    let state = Cleanup {
+        end: Some(end),
+        phases: Some((term, kill)),
+        killed: false,
+    };
+    assert_eq!(state.query_deadline(start, end), term);
+    assert_eq!(state.query_deadline(term, end), kill);
+    assert_eq!(state.query_deadline(kill, end), end);
+    assert_eq!(Cleanup::default().query_deadline(start, term), term);
 }

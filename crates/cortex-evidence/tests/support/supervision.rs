@@ -5,7 +5,10 @@ pub use super::fixture::*;
 mod core_supervision;
 // Shared consumers exercise different fixture operations.
 #[allow(unused_imports)]
-pub use core_supervision::{demand, intent, policy, proposed_grant, usage};
+pub use core_supervision::{
+    demand, intent, owned_scope, policy, proposed_grant, scope_demand, scope_grant, scope_intent,
+    scope_observation, scope_policy, usage,
+};
 use cortex_core::{
     binding::*,
     parallel::*,
@@ -76,6 +79,19 @@ pub fn effect(k: &mut CoordinationKernel, id: &str, event: EffectEvent) {
 /// A current explicit trusted-fixture program and prepared stdin; no effect has yet
 /// been reserved or dispatched. The optional root supports real temporary fixtures.
 pub fn configured_kernel(root: Option<&Path>) -> (CoordinationKernel, EffectScope, ProcessSpec) {
+    configured(root, false)
+}
+/// Complete explicit owned-scope test inputs. No host operation is performed.
+/// The caller must replace synthetic paths/references and qualify the actual host.
+pub fn configured_scope_kernel(
+    root: Option<&Path>,
+) -> (CoordinationKernel, EffectScope, ProcessSpec) {
+    configured(root, true)
+}
+fn configured(
+    root: Option<&Path>,
+    contained: bool,
+) -> (CoordinationKernel, EffectScope, ProcessSpec) {
     let mut k = CoordinationKernel::new_supervised_fixture(definition_at(root)).unwrap();
     for m in ["A", "B", "C", "D", "E", "F"] {
         let n = notify(
@@ -134,13 +150,25 @@ pub fn configured_kernel(root: Option<&Path>) -> (CoordinationKernel, EffectScop
             max_bytes: 1_000_000,
         })),
     );
-    effect(&mut k, "supervised-policy", EffectEvent::Policy(policy()));
+    effect(
+        &mut k,
+        "supervised-policy",
+        EffectEvent::Policy(if contained { scope_policy() } else { policy() }),
+    );
     effect(
         &mut k,
         "supervised-grant",
-        EffectEvent::Grant(proposed_grant(&scope)),
+        EffectEvent::Grant(if contained {
+            scope_grant(&scope)
+        } else {
+            proposed_grant(&scope)
+        }),
     );
-    let mut spec = core_supervision::spec(&scope);
+    let mut spec = if contained {
+        core_supervision::contained_spec(&scope)
+    } else {
+        core_supervision::spec(&scope)
+    };
     spec.input_len = k.prepared_inputs()[0].1.bytes().len() as u64;
     (k, scope, spec)
 }
@@ -149,7 +177,11 @@ pub fn prepare(k: &mut CoordinationKernel, scope: &EffectScope, spec: &ProcessSp
         k,
         "reserve",
         EffectEvent::Reserve {
-            intent: intent(scope),
+            intent: if spec.containment.is_some() {
+                scope_intent(scope)
+            } else {
+                intent(scope)
+            },
             at: 1,
         },
     );
@@ -213,5 +245,7 @@ pub fn observation(
         malformed_output: false,
         elapsed_ms: n,
         basis: source("captured-fixture-observation"),
+        containment: None,
+        unresolved_scope_helpers: vec![],
     }
 }

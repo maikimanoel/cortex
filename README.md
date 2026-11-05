@@ -100,6 +100,14 @@ explicit journal-bound startup, idle, stream, record and transfer-buffer limits
 for trusted fixtures. Metadata inspection never activates or qualifies a backend.
 Actual containment-dependent probes remain blocked when required controls are absent.
 
+The [owned-scope fixture extension](docs/architecture/owned-scope-fixtures.md)
+adds exact temporary user-scope requests, manager/cgroup correspondence and staged
+termination to that same journal and Harness. It is restricted to explicitly
+approved inert fixtures and owned synthetic namespace canaries. Retained control
+readbacks are inspectable through the program command; they are not independent
+host qualification. Hard cumulative CPU, independent scratch quotas, protected
+reserves and live execution retain their separate gates.
+
 The bounded [native method inspector](docs/architecture/engineering-methods.md#native-method-inspection-p0)
 adds immutable `cortex_core::methods` definitions and advisory
 `cortex_evidence::methods::inspect_method` qualification views. Its two unassessed

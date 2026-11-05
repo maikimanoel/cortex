@@ -372,3 +372,55 @@ pub(super) fn process_child(root: &Path, s: &ProgramStore, key: &StoreKey, mode:
     )
     .unwrap();
 }
+
+#[test]
+fn owned_scope_and_unknown_helpers_survive_encrypted_reopen_without_dispatch_replay() {
+    let f = Temp::new();
+    let (mut k, scope, spec) = supervised_fixture::configured_scope_kernel(None);
+    supervised_fixture::prepare(&mut k, &scope, &spec);
+    let s =
+        ProgramStore::create_supervised_fixture(&f.store(), &key(), k.initial().clone(), limits())
+            .unwrap();
+    for op in k.operations() {
+        s.admit(&key(), op.clone()).unwrap();
+    }
+    let dispatch = supervised_fixture::dispatch_operation(&k, &scope);
+    s.admit(&key(), dispatch.clone()).unwrap();
+    k.admit(dispatch.clone()).unwrap();
+    let mut observation =
+        supervised_fixture::observation(&spec, 1, ProcessCompletion::Unknown, Quiescence::Unknown);
+    observation.process = None;
+    observation.unresolved_scope_helpers = vec![ScopeHelperIdentity {
+        pid: 456,
+        start_ticks: Some(789),
+    }];
+    let op = operation(
+        &k,
+        "unknown-helper",
+        Input::SupervisedEffect(Box::new(EffectEvent::ProcessObserved {
+            effect: supervised_fixture::intent(&scope).id,
+            scope: scope.clone(),
+            at: 4,
+            observation: observation.clone(),
+        })),
+    );
+    s.admit(&key(), op.clone()).unwrap();
+    k.admit(op).unwrap();
+    let reopened = ProgramStore::open(&f.store(), &key(), Access::ReadOnly, limits()).unwrap();
+    let actual = reopened.load(&key(), Access::ReadOnly).unwrap();
+    let retained = &actual.fixture_effects().effects()[0];
+    assert!(retained.process_spec.as_ref() == Some(&spec));
+    assert!(retained.process_observations[0] == observation);
+    assert_eq!(retained.status, EffectStatus::Unknown);
+    assert!(retained.pending());
+    let (_, replay) = reopened
+        .dispatch_fixture(&key(), dispatch, |_| panic!("uncertain scope relaunched"))
+        .unwrap();
+    assert!(replay.is_none());
+    let bytes = fs::read(f.store().join("program.db")).unwrap();
+    assert!(
+        !bytes
+            .windows(b"cortex-qualification-fixture.scope".len())
+            .any(|w| w == b"cortex-qualification-fixture.scope")
+    );
+}
