@@ -317,3 +317,57 @@ pub fn binding(i: &DomainIntent) -> DomainBindingObservation {
         basis: source("controlled-binding-observation"),
     }
 }
+
+/// Synthetic direct-member readback; it never supplies physical closure proof.
+pub fn closure_observation(i: &DomainIntent, at: u64) -> DomainClosureObservation {
+    DomainClosureObservation {
+        identity: identity(i),
+        configuration: i.configuration.clone(),
+        scope: i.effect.scope.clone(),
+        binding_main: binding(i).main,
+        observed_main: None,
+        direct_members: vec![],
+        populated: false,
+        restart_prevented: true,
+        cpu_micros: Some(7_000),
+        memory_peak: Some(256),
+        observed_at: at,
+        basis: source("controlled-post-cancellation-readback"),
+    }
+}
+pub fn observed_cancelled(k: &mut CoordinationKernel, i: &DomainIntent) {
+    event(
+        k,
+        "reserve",
+        DomainEvent::Reserve {
+            intent: i.clone(),
+            at: 1,
+        },
+    );
+    event(
+        k,
+        "create",
+        DomainEvent::CreateRequested {
+            domain: i.id.clone(),
+            at: 2,
+        },
+    );
+    event(
+        k,
+        "binding-observation",
+        DomainEvent::BoundObserved {
+            domain: i.id.clone(),
+            observation: binding(i),
+            at: 3,
+        },
+    );
+    event(
+        k,
+        "cancel",
+        DomainEvent::Cancel {
+            domain: i.id.clone(),
+            at: 4,
+            basis: source("controlled-cancel"),
+        },
+    );
+}

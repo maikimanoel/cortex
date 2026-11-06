@@ -589,7 +589,25 @@ fn normal_prepared_cancel_fixture_closure_allows_distinct_next_prepare_only_with
         )
         .unwrap();
         manager.finish();
+        observe_closure(
+            &store,
+            &key(),
+            &mut manager,
+            &ids,
+            OperationId::new("normal-partial-readback").unwrap(),
+        )
+        .unwrap();
         let mut k = store.load(&key(), Access::ReadOnly).unwrap();
+        let retained = k.domains().unwrap().domain(&intent.id).unwrap();
+        assert_eq!(retained.closure_observations.len(), 1);
+        assert!(retained.holds(cortex_core::program::scheduling::Resource::Workers));
+        assert!(retained.unresolved_consumption(Consumption::CpuExecutionMillis));
+        assert!(
+            retained
+                .closure_inspection()
+                .missing
+                .contains(&ClosureProofGap::StreamCoverage)
+        );
         let previous = k.revision();
         let at = k.domains().unwrap().last_tick();
         // An explicitly controlled fixture supplies its own closure oracle.
@@ -659,5 +677,103 @@ fn normal_prepared_cancel_fixture_closure_allows_distinct_next_prepare_only_with
         let second = k.domains().unwrap().domain(&next_ids.domain).unwrap();
         assert!(second.cancelled && second.closure.is_none());
         assert!(second.holds(cortex_core::program::scheduling::Resource::Workers));
+    }
+}
+
+#[test]
+fn post_cancel_observation_is_read_only_partial_and_never_settles_resources() {
+    let root = Temp::new();
+    let (store, intent, ids) = stored(&root);
+    let mut manager = FakeManager::new(&root);
+    let held = prepare_only(&store, &mut manager, &ids).prepared.unwrap();
+    let observations = manager.observed;
+    assert!(
+        observe_closure(
+            &store,
+            &key(),
+            &mut manager,
+            &ids,
+            OperationId::new("before-cancel").unwrap()
+        )
+        .is_err()
+    );
+    assert_eq!(manager.observed, observations);
+    cancel_prepared(
+        &store,
+        &key(),
+        &mut manager,
+        held,
+        cancellation(&store, &ids),
+    )
+    .unwrap();
+    manager.finish();
+    let created = manager.created;
+    let stopped = manager.stopped;
+    observe_closure(
+        &store,
+        &key(),
+        &mut manager,
+        &ids,
+        OperationId::new("post-cancel").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manager.created, created);
+    assert_eq!(manager.stopped, stopped);
+    let before = store.load(&key(), Access::ReadOnly).unwrap();
+    let r = before.domains().unwrap().domain(&intent.id).unwrap();
+    assert_eq!(r.closure_observations.len(), 1);
+    assert!(r.closure_observations[0].populated);
+    assert!(
+        r.closure_inspection()
+            .missing
+            .contains(&ClosureProofGap::RemainingMembers)
+    );
+    assert!(r.closure.is_none());
+    assert!(r.holds(cortex_core::program::scheduling::Resource::Workers));
+    assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
+    assert_eq!(r.outcome, HistoricalOutcome::Unknown);
+    let restored = store.load(&key(), Access::ReadOnly).unwrap();
+    assert!(before.domains() == restored.domains());
+    assert_eq!(manager.created, 1);
+    assert_eq!(manager.stopped, 1);
+}
+
+#[test]
+fn post_cancel_replaced_manager_identity_or_invalid_authority_cannot_publish_readback() {
+    for replaced in [true, false] {
+        let root = Temp::new();
+        let (store, _, mut ids) = stored(&root);
+        let mut manager = FakeManager::new(&root);
+        let held = prepare_only(&store, &mut manager, &ids).prepared.unwrap();
+        cancel_prepared(
+            &store,
+            &key(),
+            &mut manager,
+            held,
+            cancellation(&store, &ids),
+        )
+        .unwrap();
+        manager.finish();
+        if replaced {
+            manager.replace = true;
+        } else {
+            ids.grant.baseline = cortex_core::binding::ContractRevision::new(2).unwrap();
+        }
+        let before = store.load(&key(), Access::ReadOnly).unwrap();
+        assert!(
+            observe_closure(
+                &store,
+                &key(),
+                &mut manager,
+                &ids,
+                OperationId::new("refused-readback").unwrap()
+            )
+            .is_err()
+        );
+        let after = store.load(&key(), Access::ReadOnly).unwrap();
+        assert_eq!(before.revision(), after.revision());
+        assert!(before.domains() == after.domains());
+        assert_eq!(manager.created, 1);
+        assert_eq!(manager.stopped, 1);
     }
 }

@@ -537,3 +537,11 @@ evidence and a distinct actual next admission, before deliberate controller
 interruption. Source work may proceed while host, allocation-policy, closure-proof
 or environment prerequisites remain blocked. No operational debt exception,
 provider execution or protected-integration delegation follows from this step.
+
+The bounded closure-evidence source continuation retains post-cancellation native
+samples in the same journal and exposes their missing-proof reasons through the
+read-only CLI. These samples cannot settle occupancy, clear cumulative debt or
+supply whole-domain/snapshot proof. Controlled fixture continuity and actual-host
+qualification remain separate; the latter still needs its selected allocation,
+observer, finite procedure and explicit operational grant. No milestone state or
+live-execution authority advances from this source increment.

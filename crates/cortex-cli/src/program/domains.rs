@@ -56,6 +56,7 @@ pub(super) fn view(projection: &DomainProjection) -> Value {
             "present_capability_evidence":if d.closure.is_some(){"CLOSURE_RECEIPT_RETAINED"}else{"NO_CLOSURE_PROOF"},
             "domain_identity_recorded":d.identity.is_some(),"cancellation_requested":d.cancelled,
             "retained_binding_observation":binding_view(d.binding_observation.as_ref()),
+            "native_closure_inspection":closure_view(d),
             "administrative_disposition":format!("{:?}",d.disposition),
             "reusable_capacity":capacity,"cumulative_consumption":usage,
             "closure_evidence_recorded":d.closure.is_some(),"additional_settlements":d.settlements.len(),"closure_source":"CALLER_ASSERTION_NOT_AUTHENTICATED",
@@ -69,6 +70,35 @@ pub(super) fn view(projection: &DomainProjection) -> Value {
         "inspection_authority":"NONE","host_reinspection":false,
         "current_liveness":"NOT_OBSERVED","host_qualification":"NOT_INFERRED",
         "live_provider":"UNAVAILABLE","physical_reserves":"NOT_ESTABLISHED"})
+}
+
+fn closure_view(record: &DomainRecord) -> Value {
+    let inspection = record.closure_inspection();
+    let latest = record.closure_observations.last().map(|observation| {
+        json!({
+            "observed_at":observation.observed_at,
+            "direct_member_count":observation.direct_members.len(),
+            "main_present":observation.observed_main.is_some(),
+            "populated":observation.populated,
+            "restart_prevented_readback":observation.restart_prevented,
+            "sampled_cpu_micros":observation.cpu_micros,
+            "sampled_memory_peak_bytes":observation.memory_peak,
+            "measurement_is_final":false,
+            "private_identity_values":"OMITTED"
+        })
+    });
+    json!({
+        "status":"HOLD_INCOMPLETE_NATIVE_PROOF",
+        "retained_observations":inspection.retained_observations,
+        "latest":latest,
+        "native_observation_missing_proofs":inspection.missing.iter().map(|gap|format!("{gap:?}")).collect::<Vec<_>>(),
+        "separate_caller_receipt_recorded":inspection.receipt_recorded,
+        "source":"CALLER_OBSERVATION_NOT_AUTHENTICATED",
+        "membership_coverage":"BOUNDED_DIRECT_MEMBERS_NON_ATOMIC",
+        "current_liveness":"NOT_OBSERVED",
+        "settlement_authorized":false,
+        "next_action":"RETAIN_HOLDS_UNTIL_APPLICABLE_WHOLE_DOMAIN_AND_RESOURCE_PROOF"
+    })
 }
 
 fn binding_view(observation: Option<&DomainBindingObservation>) -> Value {

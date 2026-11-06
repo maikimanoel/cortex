@@ -1088,4 +1088,115 @@ fn prepared_domain_inspection_retains_bounded_observations_without_live_effects(
     assert!(retained.binding_observation.is_some());
     assert_eq!(retained.phase, DomainPhase::Bound);
     assert!(retained.closure.is_none());
+
+    // This is a controlled journal fixture, not a live manager observation.
+    let mut kernel = replay;
+    domain_fixture::event(
+        &mut kernel,
+        "cancel-before-closure-capture",
+        DomainEvent::Cancel {
+            domain: intent.id.clone(),
+            at: 4,
+            basis: fixture::source("private-cancel-source"),
+        },
+    );
+    domain_fixture::event(
+        &mut kernel,
+        "partial-closure-capture",
+        DomainEvent::ClosureObserved {
+            domain: intent.id.clone(),
+            observation: DomainClosureObservation {
+                identity: domain_fixture::identity(&intent),
+                configuration: intent.configuration.clone(),
+                scope: intent.effect.scope.clone(),
+                binding_main: DomainProcessObservation {
+                    pid: 100123,
+                    start_ticks: 200456,
+                },
+                observed_main: None,
+                direct_members: vec![],
+                populated: false,
+                restart_prevented: true,
+                cpu_micros: Some(7000),
+                memory_peak: Some(128),
+                observed_at: 5,
+                basis: fixture::source("private-closure-mechanism"),
+            },
+            at: 5,
+        },
+    );
+    for operation in kernel.operations().iter().skip(
+        store
+            .load(&key(), Access::ReadOnly)
+            .unwrap()
+            .operations()
+            .len(),
+    ) {
+        store.admit(&key(), operation.clone()).unwrap();
+    }
+    let before = snapshot(&f);
+    let mut cmd = self::command(&f);
+    cmd.arg("--json");
+    let output = run(cmd, &[0x57; 32]);
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let domain = &value["domain_projection"]["domains"][0];
+    let proof = &domain["native_closure_inspection"];
+    assert_eq!(proof["status"], "HOLD_INCOMPLETE_NATIVE_PROOF");
+    assert_eq!(proof["retained_observations"], 1);
+    assert_eq!(proof["latest"]["populated"], false);
+    assert_eq!(proof["latest"]["sampled_cpu_micros"], 7000);
+    assert_eq!(proof["latest"]["measurement_is_final"], false);
+    assert_eq!(proof["settlement_authorized"], false);
+    assert_eq!(proof["separate_caller_receipt_recorded"], false);
+    assert!(
+        proof["native_observation_missing_proofs"]
+            .as_array()
+            .unwrap()
+            .len()
+            >= 5
+    );
+    assert_eq!(domain["historical_outcome"]["kind"], "UNKNOWN");
+    assert_eq!(
+        domain["cumulative_consumption"][0]["measured_final"],
+        serde_json::Value::Null
+    );
+    assert_eq!(domain["cumulative_consumption"][0]["unresolved_debt"], true);
+    assert!(
+        domain["reusable_capacity"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["held"] == true)
+    );
+    let text = String::from_utf8(output.stdout).unwrap();
+    for private in [
+        "100123",
+        "200456",
+        "private-closure-mechanism",
+        "private-cancel-source",
+        "synthetic-host",
+        "/owned/",
+    ] {
+        assert!(!text.contains(private));
+    }
+    let human = run(self::command(&f), &[0x57; 32]);
+    assert!(human.status.success());
+    assert!(
+        String::from_utf8(human.stdout)
+            .unwrap()
+            .contains("HOLD_INCOMPLETE_NATIVE_PROOF")
+    );
+    assert_eq!(before, snapshot(&f));
+    assert!(
+        store
+            .load(&key(), Access::ReadOnly)
+            .unwrap()
+            .domains()
+            .unwrap()
+            .domain(&intent.id)
+            .unwrap()
+            .closure
+            .is_none()
+    );
 }

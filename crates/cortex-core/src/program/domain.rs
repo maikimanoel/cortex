@@ -239,6 +239,109 @@ impl DomainBindingObservation {
         Ok(())
     }
 }
+/// Bounded post-cancellation readback of the same native domain. These facts
+/// do not cover the whole subtree, helpers, retained streams or snapshot safety.
+/// They never become a closure receipt or final consumption merely by replay.
+#[derive(Clone, PartialEq, Eq)]
+pub struct DomainClosureObservation {
+    /// Exact actual manager, boot and cgroup incarnation.
+    pub identity: DomainIdentity,
+    /// Original immutable configuration.
+    pub configuration: SourceReference,
+    /// Exact program/effect attempt and generation correspondence.
+    pub scope: EffectScope,
+    /// Birth identity retained at the original channel binding.
+    pub binding_main: DomainProcessObservation,
+    /// Current main process if still observable, never guessed from the old PID.
+    pub observed_main: Option<DomainProcessObservation>,
+    /// Bounded direct members only; an empty list is not whole-domain proof.
+    pub direct_members: Vec<DomainProcessObservation>,
+    /// Kernel population readback, independent of parent exit or stop reply.
+    pub populated: bool,
+    /// Current restart policy readback, not complete resurrection prevention.
+    pub restart_prevented: bool,
+    /// Sampled CPU use in microseconds, not complete final consumption.
+    pub cpu_micros: Option<u64>,
+    /// Charged-memory peak readback, not reusable capacity disposition.
+    pub memory_peak: Option<u64>,
+    /// Logical observation tick, retained unchanged at publication and replay.
+    pub observed_at: u64,
+    /// Mechanism/version provenance; caller assertions are not authenticated.
+    pub basis: SourceReference,
+}
+impl DomainClosureObservation {
+    /// Validate the bounded sample without treating it as physical closure proof.
+    pub fn validate(&self) -> Result<(), DomainError> {
+        self.identity.validate()?;
+        if self.binding_main.pid == 0
+            || self.binding_main.start_ticks == 0
+            || self.direct_members.len() > 8
+            || (!self.populated && !self.direct_members.is_empty())
+        {
+            return Err(DomainError::Structure);
+        }
+        let mut seen = BTreeSet::new();
+        for member in self.direct_members.iter().chain(self.observed_main.iter()) {
+            if member.pid == 0 || member.start_ticks == 0 {
+                return Err(DomainError::Structure);
+            }
+            if member.pid == self.binding_main.pid && member != &self.binding_main {
+                return Err(DomainError::Correspondence);
+            }
+        }
+        for member in &self.direct_members {
+            if !seen.insert(member.pid) {
+                return Err(DomainError::Structure);
+            }
+        }
+        if self
+            .observed_main
+            .as_ref()
+            .is_some_and(|main| main != &self.binding_main || !self.direct_members.contains(main))
+        {
+            return Err(DomainError::Correspondence);
+        }
+        Ok(())
+    }
+}
+/// Missing proof within the native direct-member observation boundary. These
+/// reasons do not reinterpret a separately retained legacy closure receipt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClosureProofGap {
+    /// No matching post-create channel binding was retained.
+    BindingObservation,
+    /// Cancellation has not been durably requested.
+    DurableCancellation,
+    /// No matching post-cancellation readback was retained.
+    ClosureObservation,
+    /// Population still indicates possible live effects.
+    PopulatedDomain,
+    /// A direct member or main process remains observable.
+    RemainingMembers,
+    /// Restart prevention was not observed.
+    RestartPrevention,
+    /// Direct membership does not establish complete descendant coverage.
+    WholeDomainCoverage,
+    /// Launcher and helper coverage is not established by this readback.
+    HelperCoverage,
+    /// Retained handles and streams are outside this observation boundary.
+    StreamCoverage,
+    /// Snapshot/restoration exclusion has no applicable trusted proof.
+    SnapshotExclusion,
+    /// Sampled counters are not final, complete cumulative accounting.
+    FinalConsumption,
+}
+/// Read-only native proof-gap projection. It grants no closure, settlement,
+/// retry or authority; a retained receipt remains separately caller-asserted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DomainClosureInspection {
+    /// Number of immutable partial readbacks retained (at most 32).
+    pub retained_observations: usize,
+    /// A separate legacy closure decision already exists in the journal.
+    pub receipt_recorded: bool,
+    /// Properties not established by the latest native readback.
+    pub missing: Vec<ClosureProofGap>,
+}
 /// Independent historical outcome. Closure never writes this field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HistoricalOutcome {
@@ -388,6 +491,15 @@ pub enum DomainEvent {
         /// Decision reference.
         basis: SourceReference,
     },
+    /// Retain one partial post-cancellation observation without changing holds.
+    ClosureObserved {
+        /// Exact previously bound domain.
+        domain: DomainId,
+        /// Bounded native readback, never a closure receipt.
+        observation: DomainClosureObservation,
+        /// Must equal the unchanged observation tick.
+        at: u64,
+    },
     /// Settle covered present capacity without changing historical Unknown.
     Closed {
         /// Exact proof and resource coverage.
@@ -434,6 +546,7 @@ impl DomainEvent {
             Self::CreateRequested { domain, .. }
             | Self::Bound { domain, .. }
             | Self::BoundObserved { domain, .. }
+            | Self::ClosureObserved { domain, .. }
             | Self::ReleaseRequested { domain, .. }
             | Self::Unknown { domain, .. }
             | Self::Report { domain, .. }
@@ -449,6 +562,7 @@ impl DomainEvent {
             | Self::CreateRequested { at, .. }
             | Self::Bound { at, .. }
             | Self::BoundObserved { at, .. }
+            | Self::ClosureObserved { at, .. }
             | Self::ReleaseRequested { at, .. }
             | Self::Unknown { at, .. }
             | Self::Report { at, .. }
@@ -486,6 +600,10 @@ pub struct DomainRecord {
     pub binding_observation: Option<DomainBindingObservation>,
     /// Cancellation request retained independently from closure.
     pub cancelled: bool,
+    /// Original durable cancellation tick, reconstructed from the same event.
+    pub cancelled_at: Option<u64>,
+    /// Immutable bounded partial readbacks, separate from accepted closure.
+    pub closure_observations: Vec<DomainClosureObservation>,
     /// Explicit administrative decision only.
     pub disposition: AdministrativeDisposition,
     /// Applicable final closure and dimension-specific disposition, if present.
@@ -494,6 +612,44 @@ pub struct DomainRecord {
     pub settlements: Vec<ClosureReceipt>,
 }
 impl DomainRecord {
+    /// Explain what the native readback boundary has not established. This does
+    /// not authenticate captures or override a separate closure receipt.
+    pub fn closure_inspection(&self) -> DomainClosureInspection {
+        let mut missing = Vec::new();
+        if self.binding_observation.is_none() {
+            missing.push(ClosureProofGap::BindingObservation);
+        }
+        if !self.cancelled {
+            missing.push(ClosureProofGap::DurableCancellation);
+        }
+        match self.closure_observations.last() {
+            None => missing.push(ClosureProofGap::ClosureObservation),
+            Some(o) => {
+                if o.populated {
+                    missing.push(ClosureProofGap::PopulatedDomain);
+                }
+                if o.observed_main.is_some() || !o.direct_members.is_empty() {
+                    missing.push(ClosureProofGap::RemainingMembers);
+                }
+                if !o.restart_prevented {
+                    missing.push(ClosureProofGap::RestartPrevention);
+                }
+            }
+        }
+        missing.extend([
+            ClosureProofGap::WholeDomainCoverage,
+            ClosureProofGap::HelperCoverage,
+            ClosureProofGap::StreamCoverage,
+            ClosureProofGap::SnapshotExclusion,
+            ClosureProofGap::FinalConsumption,
+        ]);
+        DomainClosureInspection {
+            retained_observations: self.closure_observations.len(),
+            receipt_recorded: self.closure.is_some(),
+            missing,
+        }
+    }
+
     /// Whether this reusable dimension is still held.
     pub fn holds(&self, resource: Resource) -> bool {
         self.phase != DomainPhase::CancelledBeforeCreate
@@ -753,6 +909,8 @@ impl DomainProjection {
                     identity: None,
                     binding_observation: None,
                     cancelled: false,
+                    cancelled_at: None,
+                    closure_observations: vec![],
                     disposition: AdministrativeDisposition::Active,
                     closure: None,
                     settlements: vec![],
@@ -835,14 +993,52 @@ impl DomainProjection {
                         }
                         record.outcome = HistoricalOutcome::Reported(*outcome);
                     }
-                    DomainEvent::Cancel { .. } => {
+                    DomainEvent::Cancel { at, .. } => {
                         if record.cancelled || record.phase == DomainPhase::Closed {
                             return Err(DomainError::Transition);
                         }
                         record.cancelled = true;
+                        record.cancelled_at = Some(*at);
                         if record.phase == DomainPhase::Reserved {
                             record.phase = DomainPhase::CancelledBeforeCreate;
                         }
+                    }
+                    DomainEvent::ClosureObserved {
+                        observation, at, ..
+                    } => {
+                        observation.validate()?;
+                        let binding = record
+                            .binding_observation
+                            .as_ref()
+                            .ok_or(DomainError::Correspondence)?;
+                        if !record.cancelled
+                            || record.closure.is_some()
+                            || observation.observed_at != *at
+                            || record.cancelled_at.is_none_or(|cancel| *at < cancel)
+                            || record.identity.as_ref() != Some(&observation.identity)
+                            || observation.configuration != record.intent.configuration
+                            || observation.scope != record.intent.effect.scope
+                            || observation.binding_main != binding.main
+                            || record
+                                .closure_observations
+                                .last()
+                                .is_some_and(|old| old.observed_at >= *at)
+                        {
+                            return Err(DomainError::Correspondence);
+                        }
+                        if record.closure_observations.len() >= 32 {
+                            return Err(DomainError::Full);
+                        }
+                        for member in &observation.direct_members {
+                            if binding
+                                .direct_members
+                                .iter()
+                                .any(|old| old.pid == member.pid && old != member)
+                            {
+                                return Err(DomainError::Correspondence);
+                            }
+                        }
+                        record.closure_observations.push(observation.clone());
                     }
                     DomainEvent::Closed { receipt, .. }
                     | DomainEvent::RecoveredClosed { receipt, .. }

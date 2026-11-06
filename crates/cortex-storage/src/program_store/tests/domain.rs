@@ -453,3 +453,168 @@ fn observed_binding_write_and_commit_crash_cuts_preserve_unreleased_state() {
         assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
     }
 }
+
+#[test]
+fn closure_readback_roundtrip_and_version_guards_preserve_debt_and_legacy_bytes() {
+    let f = Temp::new();
+    let (mut k, i) = domain_fixture::coordinator();
+    domain_fixture::observed_cancelled(&mut k, &i);
+    let s = stored(&k, &f);
+    let input = op(
+        &k,
+        "closure-readback",
+        DomainEvent::ClosureObserved {
+            domain: i.id.clone(),
+            observation: domain_fixture::closure_observation(&i, 5),
+            at: 5,
+        },
+    );
+    let bytes = codec::operation(&input, k.initial().limits().bytes).unwrap();
+    let mut wire: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(wire[3][0], "domain-closure-observation-v1");
+    assert_eq!(wire[3][1][0], "closure-observed-v1");
+    assert!(codec::decode_operation(&bytes, &k).unwrap() == input);
+    for tag in [
+        "domain-v1",
+        "domain-observation-v1",
+        "domain-closure-observation-v2",
+    ] {
+        wire[3][0] = serde_json::json!(tag);
+        assert!(codec::decode_operation(&serde_json::to_vec(&wire).unwrap(), &k).is_err());
+    }
+    wire = serde_json::from_slice(&bytes).unwrap();
+    wire[3][1][2][3][1] = serde_json::json!(0); // Invalid bound process birth tick.
+    assert!(codec::decode_operation(&serde_json::to_vec(&wire).unwrap(), &k).is_err());
+    let old = op(
+        &k,
+        "legacy-cancel",
+        DomainEvent::Cancel {
+            domain: i.id.clone(),
+            at: 5,
+            basis: domain_fixture::source("legacy"),
+        },
+    );
+    let old_bytes = codec::operation(&old, k.initial().limits().bytes).unwrap();
+    let old_wire: serde_json::Value = serde_json::from_slice(&old_bytes).unwrap();
+    assert_eq!(old_wire[3][0], "domain-v1");
+    assert_eq!(old_wire[3][1][0], "cancel-v1");
+    assert!(codec::decode_operation(&old_bytes, &k).unwrap() == old);
+    s.admit(&key(), input.clone()).unwrap();
+    assert!(s.admit(&key(), input).unwrap().duplicate);
+    let reopened = ProgramStore::open(&f.store(), &key(), Access::ReadOnly, limits()).unwrap();
+    let restored = reopened.load(&key(), Access::ReadOnly).unwrap();
+    let r = restored.domains().unwrap().domain(&i.id).unwrap();
+    assert_eq!(r.closure_observations.len(), 1);
+    assert_eq!(r.cancelled_at, Some(4));
+    assert_eq!(r.outcome, HistoricalOutcome::Unknown);
+    assert!(r.holds(Resource::Workers));
+    assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
+}
+
+#[test]
+fn closure_observation_publication_crash_cuts_replay_without_refund_or_effects() {
+    for cut in [Stage::BeforeWrite, Stage::BeforeCommit, Stage::AfterCommit] {
+        let f = Temp::new();
+        let (mut k, i) = domain_fixture::coordinator();
+        domain_fixture::observed_cancelled(&mut k, &i);
+        let s = stored(&k, &f);
+        let input = op(
+            &k,
+            "closure-readback",
+            DomainEvent::ClosureObserved {
+                domain: i.id.clone(),
+                observation: domain_fixture::closure_observation(&i, 5),
+                at: 5,
+            },
+        );
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            s.admit_observed(&key(), input, |stage, _| {
+                if std::mem::discriminant(&stage) == std::mem::discriminant(&cut) {
+                    panic!("controlled closure readback publication cut");
+                }
+            })
+        }));
+        assert!(failed.is_err());
+        let restored = s.load(&key(), Access::ReadOnly).unwrap();
+        let r = restored.domains().unwrap().domain(&i.id).unwrap();
+        assert_eq!(
+            r.closure_observations.len(),
+            usize::from(matches!(cut, Stage::AfterCommit))
+        );
+        assert!(r.cancelled && r.closure.is_none());
+        assert_eq!(r.outcome, HistoricalOutcome::Unknown);
+        assert!(r.holds(Resource::Workers));
+        assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
+    }
+}
+
+#[test]
+fn cancel_publication_cut_requires_replayed_durable_cancel_before_readback() {
+    for cut in [Stage::BeforeWrite, Stage::BeforeCommit, Stage::AfterCommit] {
+        let f = Temp::new();
+        let (mut k, i) = domain_fixture::coordinator();
+        domain_fixture::event(
+            &mut k,
+            "reserve",
+            DomainEvent::Reserve {
+                intent: i.clone(),
+                at: 1,
+            },
+        );
+        domain_fixture::event(
+            &mut k,
+            "create",
+            DomainEvent::CreateRequested {
+                domain: i.id.clone(),
+                at: 2,
+            },
+        );
+        domain_fixture::event(
+            &mut k,
+            "bind",
+            DomainEvent::BoundObserved {
+                domain: i.id.clone(),
+                observation: domain_fixture::binding(&i),
+                at: 3,
+            },
+        );
+        let s = stored(&k, &f);
+        let cancel = op(
+            &k,
+            "cancel-cut",
+            DomainEvent::Cancel {
+                domain: i.id.clone(),
+                at: 4,
+                basis: domain_fixture::source("cancel-cut"),
+            },
+        );
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            s.admit_observed(&key(), cancel, |stage, _| {
+                if std::mem::discriminant(&stage) == std::mem::discriminant(&cut) {
+                    panic!("controlled cancellation publication cut");
+                }
+            })
+        }));
+        assert!(failed.is_err());
+        let restored = s.load(&key(), Access::ReadOnly).unwrap();
+        let committed = matches!(cut, Stage::AfterCommit);
+        let record = restored.domains().unwrap().domain(&i.id).unwrap();
+        assert_eq!(record.cancelled, committed);
+        assert_eq!(record.cancelled_at, committed.then_some(4));
+        let observation = op(
+            &restored,
+            "after-cancel-cut",
+            DomainEvent::ClosureObserved {
+                domain: i.id.clone(),
+                observation: domain_fixture::closure_observation(&i, 5),
+                at: 5,
+            },
+        );
+        assert_eq!(s.admit(&key(), observation).is_ok(), committed);
+        let after = s.load(&key(), Access::ReadOnly).unwrap();
+        let record = after.domains().unwrap().domain(&i.id).unwrap();
+        assert!(record.closure.is_none());
+        assert!(record.holds(Resource::Workers));
+        assert_eq!(record.outcome, HistoricalOutcome::Unknown);
+    }
+}
