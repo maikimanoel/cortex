@@ -321,3 +321,135 @@ fn nested_member_amendment_checks_private_source_roots_and_allows_disjoint_neigh
         rev(2)
     );
 }
+
+#[test]
+fn observed_binding_encoding_roundtrip_and_tampering_refuse_downgrade() {
+    let f = Temp::new();
+    let (mut k, i) = domain_fixture::coordinator();
+    domain_fixture::event(
+        &mut k,
+        "reserve",
+        DomainEvent::Reserve {
+            intent: i.clone(),
+            at: 1,
+        },
+    );
+    domain_fixture::event(
+        &mut k,
+        "create",
+        DomainEvent::CreateRequested {
+            domain: i.id.clone(),
+            at: 2,
+        },
+    );
+    let s = stored(&k, &f);
+    let input = op(
+        &k,
+        "observed",
+        DomainEvent::BoundObserved {
+            domain: i.id.clone(),
+            observation: domain_fixture::binding(&i),
+            at: 3,
+        },
+    );
+    let encoded = codec::operation(&input, k.initial().limits().bytes).unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(value[3][0], "domain-observation-v1");
+    assert_eq!(value[3][1][0], "bound-observed-v1");
+    assert!(codec::decode_operation(&encoded, &k).unwrap() == input);
+    for case in 0..5 {
+        let mut bad = value.clone();
+        match case {
+            0 => bad[3][0] = serde_json::json!("domain-v1"),
+            1 => bad[3][1][2][2][0] = serde_json::json!(0),
+            2 => bad[3][1][2][3] = serde_json::json!([]),
+            3 => bad[3][1][2][4][5] = serde_json::json!(0),
+            _ => bad[3][1][2][5] = serde_json::json!(false),
+        }
+        assert!(
+            codec::decode_operation(&serde_json::to_vec(&bad).unwrap(), &k).is_err(),
+            "case {case}"
+        );
+    }
+    let old = op(
+        &k,
+        "legacy",
+        DomainEvent::Bound {
+            domain: i.id.clone(),
+            identity: domain_fixture::identity(&i),
+            at: 3,
+        },
+    );
+    let old_bytes = codec::operation(&old, k.initial().limits().bytes).unwrap();
+    let mut old_value: serde_json::Value = serde_json::from_slice(&old_bytes).unwrap();
+    assert_eq!(old_value[3][0], "domain-v1");
+    assert_eq!(old_value[3][1][0], "bound-v1");
+    assert!(codec::decode_operation(&old_bytes, &k).unwrap() == old);
+    old_value[3][0] = serde_json::json!("domain-observation-v1");
+    assert!(codec::decode_operation(&serde_json::to_vec(&old_value).unwrap(), &k).is_err());
+    s.admit(&key(), input.clone()).unwrap();
+    let reopened = ProgramStore::open(&f.store(), &key(), Access::ReadOnly, limits()).unwrap();
+    let restored = reopened.load(&key(), Access::ReadOnly).unwrap();
+    let r = restored.domains().unwrap().domain(&i.id).unwrap();
+    assert!(r.binding_observation.as_ref() == Some(&domain_fixture::binding(&i)));
+    assert_eq!(r.phase, DomainPhase::Bound);
+    assert!(r.holds(Resource::Workers));
+    assert!(s.admit(&key(), input).unwrap().duplicate);
+}
+
+#[test]
+fn observed_binding_write_and_commit_crash_cuts_preserve_unreleased_state() {
+    for cut in [Stage::BeforeWrite, Stage::BeforeCommit, Stage::AfterCommit] {
+        let f = Temp::new();
+        let (mut k, i) = domain_fixture::coordinator();
+        domain_fixture::event(
+            &mut k,
+            "reserve",
+            DomainEvent::Reserve {
+                intent: i.clone(),
+                at: 1,
+            },
+        );
+        domain_fixture::event(
+            &mut k,
+            "create",
+            DomainEvent::CreateRequested {
+                domain: i.id.clone(),
+                at: 2,
+            },
+        );
+        let s = stored(&k, &f);
+        let input = op(
+            &k,
+            "bind",
+            DomainEvent::BoundObserved {
+                domain: i.id.clone(),
+                observation: domain_fixture::binding(&i),
+                at: 3,
+            },
+        );
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            s.admit_observed(&key(), input, |stage, _| {
+                if std::mem::discriminant(&stage) == std::mem::discriminant(&cut) {
+                    panic!("controlled binding publication cut");
+                }
+            })
+        }));
+        assert!(failed.is_err());
+        let restored = s.load(&key(), Access::ReadOnly).unwrap();
+        let r = restored.domains().unwrap().domain(&i.id).unwrap();
+        let committed = matches!(cut, Stage::AfterCommit);
+        assert_eq!(r.binding_observation.is_some(), committed);
+        assert_eq!(
+            r.phase,
+            if committed {
+                DomainPhase::Bound
+            } else {
+                DomainPhase::CreateUncertain
+            }
+        );
+        assert_eq!(r.outcome, HistoricalOutcome::Unknown);
+        assert!(r.holds(Resource::Workers));
+        assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
+    }
+}

@@ -147,6 +147,98 @@ impl DomainIdentity {
         Ok(())
     }
 }
+/// One observed process incarnation. A PID alone is not an identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DomainProcessObservation {
+    /// Kernel process identifier at observation.
+    pub pid: u32,
+    /// Process birth tick from the same boot's procfs.
+    pub start_ticks: u64,
+}
+/// Observed controls on the exact managed domain, not qualification evidence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DomainControlReadback {
+    /// CPU quota per period, in microseconds; not cumulative execution.
+    pub cpu_quota_us: u64,
+    /// CPU quota period in microseconds.
+    pub cpu_period_us: u64,
+    /// Charged-memory ceiling in bytes.
+    pub memory_bytes: u64,
+    /// Swap ceiling in bytes.
+    pub swap_bytes: u64,
+    /// Tasks/threads ceiling.
+    pub tasks: u64,
+    /// Manager runtime deadline in microseconds.
+    pub runtime_max_micros: u64,
+    /// Manager stop-action timeout in microseconds, not quiescence proof.
+    pub timeout_stop_micros: u64,
+    /// Manager restart policy forbids automatic restart.
+    pub restart_prevented: bool,
+    /// Stop policy covers the manager's control group.
+    pub kill_control_group: bool,
+    /// The service forbids acquiring new privileges.
+    pub no_new_privileges: bool,
+    /// Manager escalation is enabled.
+    pub send_sigkill: bool,
+    /// The fixed service retains its unit after its main process exits.
+    pub remain_after_exit: bool,
+}
+/// Immutable post-create binding evidence. Direct members are a bounded snapshot,
+/// not proof of descendants, atomic capture, cleanup, or snapshot exclusion.
+#[derive(Clone, PartialEq, Eq)]
+pub struct DomainBindingObservation {
+    /// Actual domain incarnation.
+    pub identity: DomainIdentity,
+    /// Exact intended immutable executable/configuration reference.
+    pub configuration: SourceReference,
+    /// Main process whose bootstrap channel was observed.
+    pub main: DomainProcessObservation,
+    /// Direct cgroup members with observed birth ticks and membership.
+    pub direct_members: Vec<DomainProcessObservation>,
+    /// Retained effective readbacks, independently from requested limits.
+    pub controls: DomainControlReadback,
+    /// Observed cgroup population at binding.
+    pub populated: bool,
+    /// Mechanism/version provenance, not authenticated capture or acceptance.
+    pub basis: SourceReference,
+}
+impl DomainBindingObservation {
+    /// Validate bounded correspondence without authenticating host assertions.
+    pub fn validate(&self) -> Result<(), DomainError> {
+        self.identity.validate()?;
+        let c = &self.controls;
+        if !self.populated
+            || self.main.pid == 0
+            || self.main.start_ticks == 0
+            || self.direct_members.is_empty()
+            || self.direct_members.len() > 8
+            || self.direct_members.len() as u64 > c.tasks
+            || c.tasks == 0
+            || c.tasks > 8
+            || c.cpu_quota_us == 0
+            || c.cpu_period_us == 0
+            || c.memory_bytes == 0
+            || c.swap_bytes != 0
+            || c.runtime_max_micros == 0
+            || c.timeout_stop_micros == 0
+            || !c.restart_prevented
+            || !c.kill_control_group
+            || !c.no_new_privileges
+            || !c.send_sigkill
+            || !c.remain_after_exit
+            || !self.direct_members.contains(&self.main)
+        {
+            return Err(DomainError::Structure);
+        }
+        let mut seen = BTreeSet::new();
+        for member in &self.direct_members {
+            if member.pid == 0 || member.start_ticks == 0 || !seen.insert(member.pid) {
+                return Err(DomainError::Structure);
+            }
+        }
+        Ok(())
+    }
+}
 /// Independent historical outcome. Closure never writes this field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HistoricalOutcome {
@@ -246,6 +338,16 @@ pub enum DomainEvent {
         /// Monotonic tick.
         at: u64,
     },
+    /// Bind a complete actual observation before returning a retained channel.
+    /// Encoded separately from the legacy identity-only binding event.
+    BoundObserved {
+        /// Exact domain.
+        domain: DomainId,
+        /// Actual identity, membership and control observations.
+        observation: DomainBindingObservation,
+        /// Monotonic tick.
+        at: u64,
+    },
     /// Durable intent before one payload release; not a claim that it ran.
     ReleaseRequested {
         /// Exact domain.
@@ -331,6 +433,7 @@ impl DomainEvent {
             | Self::Settle { receipt, .. } => Some(&receipt.domain),
             Self::CreateRequested { domain, .. }
             | Self::Bound { domain, .. }
+            | Self::BoundObserved { domain, .. }
             | Self::ReleaseRequested { domain, .. }
             | Self::Unknown { domain, .. }
             | Self::Report { domain, .. }
@@ -345,6 +448,7 @@ impl DomainEvent {
             Self::Reserve { at, .. }
             | Self::CreateRequested { at, .. }
             | Self::Bound { at, .. }
+            | Self::BoundObserved { at, .. }
             | Self::ReleaseRequested { at, .. }
             | Self::Unknown { at, .. }
             | Self::Report { at, .. }
@@ -362,6 +466,7 @@ impl DomainEvent {
             Self::Reserve { .. }
                 | Self::CreateRequested { .. }
                 | Self::Bound { .. }
+                | Self::BoundObserved { .. }
                 | Self::ReleaseRequested { .. }
         )
     }
@@ -377,6 +482,8 @@ pub struct DomainRecord {
     pub outcome: HistoricalOutcome,
     /// Exact captured incarnation, if any.
     pub identity: Option<DomainIdentity>,
+    /// Post-create facts, absent for legacy identity-only bindings.
+    pub binding_observation: Option<DomainBindingObservation>,
     /// Cancellation request retained independently from closure.
     pub cancelled: bool,
     /// Explicit administrative decision only.
@@ -644,6 +751,7 @@ impl DomainProjection {
                     phase: DomainPhase::Reserved,
                     outcome: HistoricalOutcome::NotDispatched,
                     identity: None,
+                    binding_observation: None,
                     cancelled: false,
                     disposition: AdministrativeDisposition::Active,
                     closure: None,
@@ -679,6 +787,19 @@ impl DomainProjection {
                             return Err(DomainError::Correspondence);
                         }
                         record.identity = Some(identity.clone());
+                        record.phase = DomainPhase::Bound;
+                    }
+                    DomainEvent::BoundObserved { observation, .. } => {
+                        observation.validate()?;
+                        if record.phase != DomainPhase::CreateUncertain
+                            || observation.identity.pool != record.intent.pool
+                            || observation.identity.request != record.intent.request
+                            || observation.configuration != record.intent.configuration
+                        {
+                            return Err(DomainError::Correspondence);
+                        }
+                        record.identity = Some(observation.identity.clone());
+                        record.binding_observation = Some(observation.clone());
                         record.phase = DomainPhase::Bound;
                     }
                     DomainEvent::ReleaseRequested { identity, .. } => {

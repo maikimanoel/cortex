@@ -22,8 +22,9 @@ pub use domain_manager::{
 };
 #[cfg(target_os = "linux")]
 pub use domain_runtime::{
-    DomainOperations, DomainRecoveryObservation, DomainRun, cancel_nonce_domain,
-    execute_nonce_domain, inspect_nonce_domain,
+    DomainOperations, DomainPreparation, DomainRecoveryObservation, DomainRun, PreparedNonceDomain,
+    cancel_nonce_domain, cancel_prepared_nonce_domain, execute_nonce_domain, inspect_nonce_domain,
+    prepare_nonce_domain, release_nonce_domain,
 };
 
 #[cfg(target_os = "linux")]

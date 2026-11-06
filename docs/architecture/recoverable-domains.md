@@ -140,6 +140,68 @@ service, namespace or container label.
 
 ## Persistence, privacy and compatibility
 
+### Prepared native lifecycle
+
+The fixed native consumer separates preparation from release. Preparation commits
+creation intent once, acquires the bootstrap's real channel and peer identity,
+and publishes a `BoundObserved` record before returning an owned prepared handle.
+That handle retains the channel and original deadline; it is neither clonable nor
+reconstructible from a journal. Returning from preparation does not publish a
+release request or send a nonce. The existing nonce executor composes preparation
+and explicit release rather than maintaining a second execution path.
+
+Explicit release consumes the handle and rechecks current grants, cancellation,
+generation, configuration, live incarnation and retained observations at the
+serialized publication/effect boundary. The deadline is not restarted by the
+handoff. Dropping the handle closes its controller-owned transport only: it
+does not stop the managed domain, establish closure, refund reservations or retry
+creation. Reconstruction has no handle to adopt and remains observation-only.
+
+The binding record retains main-process birth identity, bounded direct cgroup
+members, exact domain/configuration correspondence and resource/control readbacks.
+These are non-atomic observations of direct membership, not a whole-subtree
+fence or denial proof. Intended names remain distinct from actual observed
+identities. A partial or mismatched binding cannot permit release. CLI inspection
+reports the presence and coverage of these retained facts without contacting the
+manager or exposing private process, path or mechanism identities.
+
+`domain-observation-v1` is an explicit additional command encoding in the existing
+domain-coordinator journal. Legacy `Bound` records and their bytes retain their
+meaning; they do not acquire observations retrospectively. Readers without the
+new command tag refuse it as unsupported. No historical store migration, new
+effect ledger, allocation waiver or change to cumulative-debt guards is supplied.
+The added public enum variant and record field are pre-alpha Rust API additions:
+downstream exhaustive matches and record literals must be updated when rebuilding.
+The compatibility claim concerns retained wire bytes and meanings, not an unchanged
+binary ABI or a general source-stability promise.
+
+### Closure and subsequent admission
+
+Preparation is not closure. A normal cancellation must be durable before its
+exact stop request, but the acknowledgement establishes neither quiescence nor
+resource disposition. The current native observer still cannot prove snapshot
+exclusion or supply a complete `ClosureReceipt`. Parent exit, a missing unit,
+manager garbage collection and a lost reply retain uncertainty. Inspection must
+not copy proof flags from a fixture into a real observation.
+
+The existing closure guard requires exact domain/incarnation/configuration/scope,
+whole-member and helper coverage, independently supported quiescence, prevention
+of restart and snapshot resurrection, and dimension-specific resource evidence.
+A closure can preserve historical Unknown while settling only covered reusable
+capacity. Missing final consumption remains debt and blocks further admission.
+Even sufficient closure is not permission to retry the old operation or accept
+its artifacts. A distinct next attempt needs every current authority, dependency,
+pool, capacity and cumulative-budget guard. Administrative pause/archive changes
+none of those facts.
+
+Controlled fixtures exercise preparation, explicit release/cancellation, durable
+reconstruction and the existing positive/negative settlement rules. A real normal
+cycle and a second actual admission need separately accepted physical evidence.
+That normal control precedes deliberate controller interruption in a future
+qualification procedure; normal-path closure would not prove post-crash closure.
+No host qualification, policy exception or operational continuation is inferred
+from this source extension.
+
 New records use an explicitly selected versioned profile. Legacy bytes and meanings
 remain unchanged; older readers reject unsupported records. There is no automatic
 migration, retrospective checkpoint or rewrite of historical observations.

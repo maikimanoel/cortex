@@ -288,3 +288,32 @@ pub fn add_member(k: &mut CoordinationKernel, name: &str) -> DomainIntent {
     }
     i
 }
+
+pub fn binding(i: &DomainIntent) -> DomainBindingObservation {
+    let main = DomainProcessObservation {
+        pid: 7,
+        start_ticks: 11,
+    };
+    DomainBindingObservation {
+        identity: identity(i),
+        configuration: i.configuration.clone(),
+        main: main.clone(),
+        direct_members: vec![main],
+        controls: DomainControlReadback {
+            cpu_quota_us: 100_000,
+            cpu_period_us: 100_000,
+            memory_bytes: 512,
+            swap_bytes: 0,
+            tasks: 8,
+            runtime_max_micros: 1_000_000,
+            timeout_stop_micros: 500_000,
+            restart_prevented: true,
+            kill_control_group: true,
+            no_new_privileges: true,
+            send_sigkill: true,
+            remain_after_exit: true,
+        },
+        populated: true,
+        basis: source("controlled-binding-observation"),
+    }
+}

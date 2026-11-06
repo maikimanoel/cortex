@@ -526,3 +526,14 @@ refund budgets, merge source, qualify isolation or authorize provider execution.
 The original operational graph obligations remain; the versioned construction
 overlay refines their prerequisites rather than replacing the roadmap. All
 milestone states and complete capability statuses remain unchanged.
+
+The separately authorized source continuation adds the
+[prepared native lifecycle](../architecture/recoverable-domains.md#prepared-native-lifecycle)
+and durable binding observations to M2, consumed by read-only inspection and
+controlled verification. Preparation retains the real channel before explicit
+release; it does not resolve M3 or alter historical resource admission. A future
+qualification sequence first needs normal cancellation with sufficient closure
+evidence and a distinct actual next admission, before deliberate controller
+interruption. Source work may proceed while host, allocation-policy, closure-proof
+or environment prerequisites remain blocked. No operational debt exception,
+provider execution or protected-integration delegation follows from this step.

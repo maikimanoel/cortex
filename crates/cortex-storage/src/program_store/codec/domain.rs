@@ -10,6 +10,9 @@ fields!(ConsumptionReservation;dimension,amount);
 fields!(PoolContract;identity,basis,capacities,consumption,max_domains);
 fields!(DomainIntent;id,effect,pool,request,configuration,consumption);
 fields!(DomainIdentity;pool,request,manager,invocation,control_group,cgroup_device,cgroup_inode,boot);
+fields!(DomainProcessObservation;pid,start_ticks);
+fields!(DomainControlReadback;cpu_quota_us,cpu_period_us,memory_bytes,swap_bytes,tasks,runtime_max_micros,timeout_stop_micros,restart_prevented,kill_control_group,no_new_privileges,send_sigkill,remain_after_exit);
+fields!(DomainBindingObservation;identity,configuration,main,direct_members,controls,populated,basis);
 fields!(ConsumptionObservation;dimension,measured);
 fields!(ClosureReceipt;domain,identity,configuration,scope,whole_domain,restart_prevented,snapshot_safe,quiescent,released,consumption,evidence);
 impl Wire for DomainEvent {
@@ -23,6 +26,19 @@ impl Wire for DomainEvent {
                 identity,
                 at,
             } => json!(["bound-v1", domain.write()?, identity.write()?, at]),
+            Self::BoundObserved {
+                domain,
+                observation,
+                at,
+            } => {
+                observation.validate().map_err(|_| bad())?;
+                json!([
+                    "bound-observed-v1",
+                    domain.write()?,
+                    observation.write()?,
+                    at
+                ])
+            }
             Self::ReleaseRequested {
                 domain,
                 identity,
@@ -104,6 +120,16 @@ impl Wire for DomainEvent {
                         identity,
                         at,
                     }
+                }
+            }
+            "bound-observed-v1" => {
+                let a = arr(v, 4)?;
+                let observation: DomainBindingObservation = read(&a[2])?;
+                observation.validate().map_err(|_| bad())?;
+                Self::BoundObserved {
+                    domain: read(&a[1])?,
+                    observation,
+                    at: read(&a[3])?,
                 }
             }
             "unknown-v1" | "cancel-v1" => {

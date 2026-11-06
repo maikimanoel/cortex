@@ -44,6 +44,7 @@ pub(super) fn view(projection: &DomainProjection) -> Value {
         };
         let next = match d.phase {
             DomainPhase::Reserved if !d.cancelled && d.disposition==AdministrativeDisposition::Active => "FRESH_AUTHORITY_AND_QUALIFICATION_REQUIRED_BEFORE_CREATION",
+            DomainPhase::Bound if !d.cancelled && d.disposition==AdministrativeDisposition::Active && d.binding_observation.is_some() => "PREPARED_RELEASE_WITHHELD_EXPLICIT_OPERATION_REQUIRES_FRESH_AUTHORITY_AND_QUALIFICATION",
             DomainPhase::Closed => "REVIEW_REMAINING_DEBT_AND_CAPACITY_BEFORE_DISTINCT_WORK",
             DomainPhase::CancelledBeforeCreate => "NO_CREATION_REQUEST_RECORDED_NEW_WORK_REQUIRES_ALL_GATES",
             _ => "OBSERVE_EXACT_DOMAIN_OR_RETAIN_HOLD_NEVER_BLIND_RETRY",
@@ -54,6 +55,7 @@ pub(super) fn view(projection: &DomainProjection) -> Value {
             "historical_outcome":historical,"retained_domain_phase":format!("{:?}",d.phase),
             "present_capability_evidence":if d.closure.is_some(){"CLOSURE_RECEIPT_RETAINED"}else{"NO_CLOSURE_PROOF"},
             "domain_identity_recorded":d.identity.is_some(),"cancellation_requested":d.cancelled,
+            "retained_binding_observation":binding_view(d.binding_observation.as_ref()),
             "administrative_disposition":format!("{:?}",d.disposition),
             "reusable_capacity":capacity,"cumulative_consumption":usage,
             "closure_evidence_recorded":d.closure.is_some(),"additional_settlements":d.settlements.len(),"closure_source":"CALLER_ASSERTION_NOT_AUTHENTICATED",
@@ -67,4 +69,38 @@ pub(super) fn view(projection: &DomainProjection) -> Value {
         "inspection_authority":"NONE","host_reinspection":false,
         "current_liveness":"NOT_OBSERVED","host_qualification":"NOT_INFERRED",
         "live_provider":"UNAVAILABLE","physical_reserves":"NOT_ESTABLISHED"})
+}
+
+fn binding_view(observation: Option<&DomainBindingObservation>) -> Value {
+    match observation {
+        None => json!({"status":"NOT_RECORDED","current_liveness":"NOT_OBSERVED"}),
+        Some(observation) => json!({
+            "status":"RECORDED",
+            "source":"CALLER_OBSERVATION_NOT_AUTHENTICATED",
+            "configuration_correspondence_recorded":true,
+            "main_process_birth_identity_recorded":true,
+            "direct_member_count":observation.direct_members.len(),
+            "membership_coverage":"DIRECT_CGROUP_MEMBERS_NON_ATOMIC_OBSERVATION",
+            "populated_at_binding":observation.populated,
+            "current_liveness":"NOT_OBSERVED",
+            "private_identity_values":"OMITTED",
+            "controls":{
+                "cpu_quota_micros":observation.controls.cpu_quota_us,
+                "cpu_period_micros":observation.controls.cpu_period_us,
+                "charged_memory_bytes":observation.controls.memory_bytes,
+                "swap_bytes":observation.controls.swap_bytes,
+                "tasks":observation.controls.tasks,
+                "runtime_max_micros":observation.controls.runtime_max_micros,
+                "timeout_stop_micros":observation.controls.timeout_stop_micros,
+                "restart_prevented_readback":observation.controls.restart_prevented,
+                "kill_control_group_readback":observation.controls.kill_control_group,
+                "no_new_privileges_readback":observation.controls.no_new_privileges,
+                "send_sigkill_readback":observation.controls.send_sigkill,
+                "remain_after_exit_readback":observation.controls.remain_after_exit
+            },
+            "whole_domain_closure_proven":false,
+            "snapshot_exclusion_proven":false,
+            "qualification":"NOT_ESTABLISHED_BY_READBACK"
+        }),
+    }
 }

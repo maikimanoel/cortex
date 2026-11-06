@@ -90,7 +90,9 @@ fn stored(root: &Temp) -> (ProgramStore, DomainIntent, DomainOperations) {
 struct FakeManager {
     endpoint: PathBuf,
     created: usize,
+    stopped: usize,
     observed: usize,
+    change_on_observation: Option<usize>,
     lost: bool,
     replace: bool,
     cancel: Option<Arc<AtomicBool>>,
@@ -101,7 +103,9 @@ impl FakeManager {
         Self {
             endpoint: root.0.join("control"),
             created: 0,
+            stopped: 0,
             observed: 0,
+            change_on_observation: None,
             lost: false,
             replace: false,
             cancel: None,
@@ -148,7 +152,8 @@ impl DomainManager for FakeManager {
             c.store(true, Ordering::SeqCst)
         }
         let mut identity = fixture::identity(intent);
-        if self.replace && self.observed > 1 {
+        if (self.replace && self.observed > 1) || self.change_on_observation == Some(self.observed)
+        {
             identity.invocation = "replacement".into();
         }
         Ok(ManagedObservation {
@@ -156,10 +161,30 @@ impl DomainManager for FakeManager {
             main_pid: std::process::id(),
             start_ticks: crate::domain_bootstrap::ticks(std::process::id()).unwrap(),
             populated: true,
+            direct_members: vec![DomainProcessObservation {
+                pid: std::process::id(),
+                start_ticks: crate::domain_bootstrap::ticks(std::process::id()).unwrap(),
+            }],
+            controls: fixture::binding(intent).controls,
             cpu_micros: None,
             memory_peak: None,
             restart_prevented: true,
         })
+    }
+    fn stop(
+        &mut self,
+        intent: &DomainIntent,
+        identity: &DomainIdentity,
+        end: Instant,
+    ) -> Result<(), DomainDiagnostic> {
+        if self.observe(intent, end)?.identity != *identity {
+            return Err(issue(
+                DomainPhaseDiagnostic::Closure,
+                DomainCause::Correspondence,
+            ));
+        }
+        self.stopped += 1;
+        Ok(())
     }
 }
 fn run(
@@ -356,4 +381,283 @@ fn controlled_lost_reply_closure_preserves_unknown_and_admits_independent_next_n
 #[test]
 fn controlled_capacity_settlement_with_cpu_debt_cannot_admit_next_nonce() {
     controlled_recovery_continuation(None);
+}
+
+fn prepare_only(
+    store: &ProgramStore,
+    manager: &mut FakeManager,
+    ids: &DomainOperations,
+) -> DomainPreparation {
+    let endpoint = manager.endpoint.clone();
+    let start = Instant::now();
+    prepare(
+        store,
+        &key(),
+        manager,
+        ExecutionRequest {
+            ids,
+            nonce: "public-nonce",
+            cancel: &AtomicBool::new(false),
+            start,
+            end: start + Duration::from_secs(1),
+        },
+        || {
+            UnixListener::bind(endpoint)
+                .map_err(|e| issue(DomainPhaseDiagnostic::Creation, DomainCause::Io(e.kind())))
+        },
+    )
+}
+fn cancellation(store: &ProgramStore, ids: &DomainOperations) -> Operation {
+    let k = store.load(&key(), Access::ReadOnly).unwrap();
+    fixture::domain_operation(
+        &k,
+        "explicit-cancel",
+        Command::Domain(Box::new(DomainEvent::Cancel {
+            domain: ids.domain.clone(),
+            at: k.domains().unwrap().last_tick(),
+            basis: fixture::source("explicit-cancellation"),
+        })),
+    )
+}
+
+#[test]
+fn preparation_retains_real_channel_without_release_until_explicit_consumption() {
+    use std::io::Read;
+    let root = Temp::new();
+    let (store, intent, ids) = stored(&root);
+    let mut manager = FakeManager::new(&root);
+    let preparation = prepare_only(&store, &mut manager, &ids);
+    assert!(
+        preparation.run.diagnostic.is_none(),
+        "{:?}",
+        preparation.run.diagnostic
+    );
+    assert!(preparation.run.release.is_none() && preparation.run.nonce.is_none());
+    let mut held = preparation.prepared.unwrap();
+    held.channel.set_nonblocking(true).unwrap();
+    assert_eq!(
+        held.channel.read(&mut [0u8; 1]).unwrap_err().kind(),
+        io::ErrorKind::WouldBlock
+    );
+    held.channel.set_nonblocking(false).unwrap();
+    let restored = store.load(&key(), Access::ReadOnly).unwrap();
+    let r = restored.domains().unwrap().domain(&intent.id).unwrap();
+    assert_eq!(r.phase, DomainPhase::Bound);
+    assert!(r.binding_observation.as_ref() == Some(held.observation()));
+    assert!(!restored.operations().iter().any(|o| matches!(&o.command, Command::Domain(e) if matches!(e.as_ref(), DomainEvent::ReleaseRequested { .. }))));
+    // Reconstruction cannot create a second channel or duplicate the effect.
+    let duplicate = prepare_only(&store, &mut manager, &ids);
+    assert!(duplicate.run.recovery_only && duplicate.prepared.is_none());
+    assert_eq!(manager.created, 1);
+    let result = release(&store, &key(), &mut manager, held, &AtomicBool::new(false));
+    manager.finish();
+    assert!(result.diagnostic.is_none(), "{:?}", result.diagnostic);
+    assert_eq!(result.nonce.as_deref(), Some("public-nonce"));
+    assert!(result.release.is_some());
+}
+
+#[test]
+fn dropped_prepared_channel_preserves_bound_unknown_and_forbids_recreation() {
+    let root = Temp::new();
+    let (store, intent, ids) = stored(&root);
+    let mut manager = FakeManager::new(&root);
+    let preparation = prepare_only(&store, &mut manager, &ids);
+    assert!(preparation.prepared.is_some());
+    drop(preparation);
+    manager.finish();
+    let restored = store.load(&key(), Access::ReadOnly).unwrap();
+    let r = restored.domains().unwrap().domain(&intent.id).unwrap();
+    assert_eq!(r.phase, DomainPhase::Bound);
+    assert_eq!(r.outcome, HistoricalOutcome::Unknown);
+    assert!(!r.cancelled && r.closure.is_none());
+    assert!(r.holds(cortex_core::program::scheduling::Resource::Workers));
+    assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
+    let result = prepare_only(&store, &mut manager, &ids);
+    assert!(result.run.recovery_only && result.prepared.is_none());
+    assert_eq!(manager.created, 1);
+}
+
+#[test]
+fn owned_prepared_cancel_commits_request_but_does_not_infer_closure() {
+    let root = Temp::new();
+    let (store, intent, ids) = stored(&root);
+    let mut manager = FakeManager::new(&root);
+    let held = prepare_only(&store, &mut manager, &ids).prepared.unwrap();
+    let cancel = cancellation(&store, &ids);
+    let receipt = cancel_prepared(&store, &key(), &mut manager, held, cancel.clone()).unwrap();
+    manager.finish();
+    assert!(!receipt.duplicate);
+    assert_eq!(manager.stopped, 1);
+    let restored = store.load(&key(), Access::ReadOnly).unwrap();
+    let r = restored.domains().unwrap().domain(&intent.id).unwrap();
+    assert!(r.cancelled && r.binding_observation.is_some() && r.closure.is_none());
+    assert_eq!(r.outcome, HistoricalOutcome::Unknown);
+    assert!(r.holds(cortex_core::program::scheduling::Resource::Workers));
+    assert!(
+        cancel_domain(&store, &key(), &mut manager, cancel)
+            .unwrap()
+            .duplicate
+    );
+    assert_eq!(manager.stopped, 1); // A repeated receipt cannot repeat StopUnit.
+}
+
+#[test]
+fn explicit_release_refuses_revoked_cancelled_expired_and_wrong_store_handles() {
+    use cortex_core::program::operational::EffectEvent;
+    for case in 0..4 {
+        let root = Temp::new();
+        let (store, intent, ids) = stored(&root);
+        let other_root = Temp::new();
+        let (other_store, _, _) = stored(&other_root);
+        let mut manager = FakeManager::new(&root);
+        let mut held = prepare_only(&store, &mut manager, &ids).prepared.unwrap();
+        if case == 0 {
+            let k = store.load(&key(), Access::ReadOnly).unwrap();
+            let revoke = fixture::domain_operation(
+                &k,
+                "revoke-after-bind",
+                Command::SupervisedEffect(Box::new(EffectEvent::Revoke {
+                    grant: intent.effect.grant.clone(),
+                    at: k.domains().unwrap().last_tick(),
+                    basis: fixture::source("revoke"),
+                })),
+            );
+            store.admit(&key(), revoke).unwrap();
+        } else if case == 1 {
+            store.admit(&key(), cancellation(&store, &ids)).unwrap();
+        } else if case == 2 {
+            held.end = Instant::now(); // Deterministic expired-clock input; no scheduling sleep.
+        }
+        let target = if case == 3 { &other_store } else { &store };
+        let result = release(target, &key(), &mut manager, held, &AtomicBool::new(false));
+        manager.finish();
+        assert!(result.diagnostic.is_some(), "case {case}");
+        assert!(
+            result.release.is_none() && result.nonce.is_none(),
+            "case {case}"
+        );
+        assert_eq!(manager.created, 1);
+        assert_eq!(manager.stopped, 0);
+        assert_eq!(
+            store
+                .load(&key(), Access::ReadOnly)
+                .unwrap()
+                .domains()
+                .unwrap()
+                .domain(&intent.id)
+                .unwrap()
+                .phase,
+            DomainPhase::Bound
+        );
+    }
+}
+
+#[test]
+fn stale_membership_at_locked_release_retains_uncertainty_without_transmission() {
+    let root = Temp::new();
+    let (store, intent, ids) = stored(&root);
+    let mut manager = FakeManager::new(&root);
+    let held = prepare_only(&store, &mut manager, &ids).prepared.unwrap();
+    manager.change_on_observation = Some(manager.observed + 2); // The in-lock observation, after the precheck.
+    let result = release(&store, &key(), &mut manager, held, &AtomicBool::new(false));
+    manager.finish();
+    assert_eq!(
+        result.diagnostic.unwrap().cause,
+        DomainCause::Correspondence
+    );
+    assert!(result.release.is_some() && result.nonce.is_none());
+    let k = store.load(&key(), Access::ReadOnly).unwrap();
+    let r = k.domains().unwrap().domain(&intent.id).unwrap();
+    assert_eq!(r.phase, DomainPhase::ReleaseUncertain);
+    assert_eq!(r.outcome, HistoricalOutcome::Unknown);
+    assert!(r.holds(cortex_core::program::scheduling::Resource::Workers));
+}
+
+#[test]
+fn normal_prepared_cancel_fixture_closure_allows_distinct_next_prepare_only_with_measurement() {
+    for measured in [Some(1), None] {
+        let root = Temp::new();
+        let (store, intent, ids) = stored(&root);
+        let mut manager = FakeManager::new(&root);
+        let held = prepare_only(&store, &mut manager, &ids).prepared.unwrap();
+        cancel_prepared(
+            &store,
+            &key(),
+            &mut manager,
+            held,
+            cancellation(&store, &ids),
+        )
+        .unwrap();
+        manager.finish();
+        let mut k = store.load(&key(), Access::ReadOnly).unwrap();
+        let previous = k.revision();
+        let at = k.domains().unwrap().last_tick();
+        // An explicitly controlled fixture supplies its own closure oracle.
+        // This is not evidence that the systemd observer can establish closure.
+        fixture::event(
+            &mut k,
+            "fixture-close",
+            DomainEvent::Closed {
+                receipt: fixture::closure(&intent, measured),
+                at,
+            },
+        );
+        let mut next = fixture::add_member(&mut k, "normal-next");
+        next.pool = intent.pool.clone();
+        for input in &k.operations()[previous as usize..] {
+            store.admit(&key(), input.clone()).unwrap();
+        }
+        let reserve = fixture::domain_operation(
+            &k,
+            "next-reserve",
+            Command::Domain(Box::new(DomainEvent::Reserve {
+                intent: next.clone(),
+                at,
+            })),
+        );
+        if measured.is_none() {
+            assert!(store.admit(&key(), reserve).is_err());
+            continue;
+        }
+        store.admit(&key(), reserve).unwrap();
+        let next_root = Temp::new();
+        let mut next_manager = FakeManager::new(&next_root);
+        let mut next_ids = ids;
+        next_ids.domain = next.id;
+        next_ids.create = OperationId::new("second-create").unwrap();
+        next_ids.bind = OperationId::new("second-bind").unwrap();
+        next_ids.release = OperationId::new("second-release").unwrap();
+        next_ids.report = OperationId::new("second-report").unwrap();
+        next_ids.at = at;
+        let held = prepare_only(&store, &mut next_manager, &next_ids)
+            .prepared
+            .unwrap();
+        let next_cancel = {
+            let k = store.load(&key(), Access::ReadOnly).unwrap();
+            fixture::domain_operation(
+                &k,
+                "second-cancel",
+                Command::Domain(Box::new(DomainEvent::Cancel {
+                    domain: next_ids.domain.clone(),
+                    at: k.domains().unwrap().last_tick(),
+                    basis: fixture::source("second-cancel"),
+                })),
+            )
+        };
+        cancel_prepared(&store, &key(), &mut next_manager, held, next_cancel).unwrap();
+        next_manager.finish();
+        assert_eq!(manager.created, 1);
+        assert_eq!(next_manager.created, 1);
+        let k = store.load(&key(), Access::ReadOnly).unwrap();
+        let first = k.domains().unwrap().domain(&intent.id).unwrap();
+        assert_eq!(first.outcome, HistoricalOutcome::Unknown);
+        assert_eq!(
+            first.measured_consumption(Consumption::CpuExecutionMillis),
+            Some(1)
+        );
+        assert!(first.holds(cortex_core::program::scheduling::Resource::DiskBytes));
+        let second = k.domains().unwrap().domain(&next_ids.domain).unwrap();
+        assert!(second.cancelled && second.closure.is_none());
+        assert!(second.holds(cortex_core::program::scheduling::Resource::Workers));
+    }
 }

@@ -384,11 +384,12 @@ pub fn run(args: impl Iterator<Item = OsString>, out: &mut impl Write) -> Result
             for domain in projection["domains"].as_array().expect("domain array") {
                 writeln!(
                     out,
-                    "Domain {}: historical={} phase={} disposition={} capacity={} consumption={} next={} (no retry or artifact acceptance)",
+                    "Domain {}: historical={} phase={} disposition={} binding={} capacity={} consumption={} next={} (no retry or artifact acceptance)",
                     domain["domain"].as_str().expect("domain ID"),
                     domain["historical_outcome"],
                     domain["retained_domain_phase"],
                     domain["administrative_disposition"],
+                    domain["retained_binding_observation"],
                     domain["reusable_capacity"],
                     domain["cumulative_consumption"],
                     domain["next_permissible_action"]
