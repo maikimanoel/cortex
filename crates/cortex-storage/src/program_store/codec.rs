@@ -883,7 +883,17 @@ fn command_write(c: &Command) -> Result<V, ProgramStoreError> {
         return Err(ProgramStoreError::Unsupported);
     }
     Ok(match c {
-        Command::Domain(event) => json!(["domain-v1", event.write()?]),
+        Command::Domain(event) => {
+            let tag = if matches!(
+                event.as_ref(),
+                cortex_core::program::domain::DomainEvent::BoundObserved { .. }
+            ) {
+                "domain-observation-v1"
+            } else {
+                "domain-v1"
+            };
+            json!([tag, event.write()?])
+        }
         Command::RegisterDomainMember(definition) => {
             json!(["domain-member-v1", definition.write()?])
         }
@@ -940,7 +950,10 @@ fn command_read(v: &V, k: &CoordinationKernel) -> Result<Command, ProgramStoreEr
         if a[5].get(0).and_then(V::as_str).is_some_and(|tag| {
             matches!(
                 tag,
-                "domain-v1" | "domain-member-v1" | "domain-member-input-v1"
+                "domain-v1"
+                    | "domain-observation-v1"
+                    | "domain-member-v1"
+                    | "domain-member-input-v1"
             )
         }) {
             return Err(bad());
@@ -957,6 +970,7 @@ fn command_read(v: &V, k: &CoordinationKernel) -> Result<Command, ProgramStoreEr
     }
     if [
         "domain-v1",
+        "domain-observation-v1",
         "domain-member-v1",
         "notify",
         "observe",
@@ -974,7 +988,17 @@ fn command_read(v: &V, k: &CoordinationKernel) -> Result<Command, ProgramStoreEr
     {
         let a = arr(v, 2)?;
         return Ok(match tag {
-            "domain-v1" => Command::Domain(read(&a[1])?),
+            "domain-v1" | "domain-observation-v1" => {
+                let event: cortex_core::program::domain::DomainEvent = read(&a[1])?;
+                if matches!(
+                    event,
+                    cortex_core::program::domain::DomainEvent::BoundObserved { .. }
+                ) != (tag == "domain-observation-v1")
+                {
+                    return Err(bad());
+                }
+                Command::Domain(Box::new(event))
+            }
             "domain-member-v1" => Command::RegisterDomainMember(read(&a[1])?),
             "executor-input-v1" => Command::PrepareExecutorInput(read(&a[1])?),
             "fixture-effect-v1" => Command::FixtureEffect(read(&a[1])?),

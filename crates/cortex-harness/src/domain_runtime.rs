@@ -10,13 +10,13 @@ use cortex_core::{
 };
 use cortex_evidence::program::{Command, CoordinationKernel, Operation};
 use cortex_storage::{
-    history_store::{Access, StoreKey},
+    history_store::{Access, StoreId, StoreKey},
     program_store::{ProgramStore, Receipt},
 };
 use serde_json::json;
 use std::{
     io,
-    os::unix::net::UnixListener,
+    os::unix::net::{UnixListener, UnixStream},
     sync::atomic::{AtomicBool, Ordering},
     thread,
     time::{Duration, Instant},
@@ -100,6 +100,12 @@ trait DomainManager {
         intent: &DomainIntent,
         end: Instant,
     ) -> Result<ManagedObservation, DomainDiagnostic>;
+    fn stop(
+        &mut self,
+        intent: &DomainIntent,
+        identity: &DomainIdentity,
+        end: Instant,
+    ) -> Result<(), DomainDiagnostic>;
 }
 impl DomainManager for SystemdNonceDomain {
     fn corresponds(&self, i: &DomainIntent) -> Result<(), DomainDiagnostic> {
@@ -114,6 +120,14 @@ impl DomainManager for SystemdNonceDomain {
         end: Instant,
     ) -> Result<ManagedObservation, DomainDiagnostic> {
         self.observe(i, end)
+    }
+    fn stop(
+        &mut self,
+        i: &DomainIntent,
+        identity: &DomainIdentity,
+        end: Instant,
+    ) -> Result<(), DomainDiagnostic> {
+        self.stop(i, identity, end)
     }
 }
 
@@ -168,27 +182,54 @@ fn current(
     Ok(at)
 }
 
-/// Execute the one fixed public-synthetic nonce on a previously reserved domain.
-/// The owner must separately authorize and qualify any actual-host invocation.
-/// The real adapter is not called during replay, duplicate creation, inspection
-/// or uncertain publication. This API has no provider/arbitrary-executable path.
-pub fn execute_nonce_domain(
+/// A controller-owned live pre-release gate. The channel and original monotonic
+/// deadline cannot be cloned, deserialized or reconstructed from journal records.
+/// Dropping this value only closes its descriptor: it never releases, stops,
+/// settles, or changes the retained historical uncertainty.
+#[must_use = "retain the gate until explicit release or cancellation; dropping it does not prove cleanup"]
+pub struct PreparedNonceDomain {
+    channel: UnixStream,
+    store: StoreId,
+    intent: DomainIntent,
+    ids: DomainOperations,
+    observation: DomainBindingObservation,
+    creation: Receipt,
+    binding: Receipt,
+    nonce: String,
+    start: Instant,
+    end: Instant,
+}
+impl PreparedNonceDomain {
+    /// Exact retained domain, without exposing the channel or adding authority.
+    pub fn domain(&self) -> &DomainId {
+        &self.ids.domain
+    }
+    /// Durable observation corresponding to this channel, not live qualification.
+    pub fn observation(&self) -> &DomainBindingObservation {
+        &self.observation
+    }
+}
+/// Preparation observations plus the optional uniquely owned pre-release channel.
+/// Failure or recovery returns no channel and cannot repeat creation.
+pub struct DomainPreparation {
+    /// Durable receipts and bounded failure diagnostics; release/result stay absent.
+    pub run: DomainRun,
+    /// Present only after actual observation was durably bound.
+    pub prepared: Option<PreparedNonceDomain>,
+}
+
+/// Prepare one fixed bootstrap and durably bind its channel without releasing it.
+/// Actual-host invocation requires separate owner authority and qualification.
+/// Reconstruction never creates a new handle, adopts a process or repeats create.
+pub fn prepare_nonce_domain(
     store: &ProgramStore,
     key: &StoreKey,
     backend: &mut SystemdNonceDomain,
     ids: &DomainOperations,
-    nonce: &str,
     cancel: &AtomicBool,
-) -> DomainRun {
+) -> DomainPreparation {
     let start = Instant::now();
-    if nonce != backend.selection.nonce {
-        let mut r = DomainRun::empty();
-        r.diagnostic = Some(issue(
-            DomainPhaseDiagnostic::Preparation,
-            DomainCause::Correspondence,
-        ));
-        return r;
-    }
+    let nonce = backend.selection.nonce.clone();
     let end = start.checked_add(Duration::from_millis(backend.selection.limits.wall_ms));
     let endpoint = store
         .load(key, Access::ReadOnly)
@@ -196,13 +237,13 @@ pub fn execute_nonce_domain(
         .and_then(|k| record(&k, &ids.domain).ok())
         .and_then(|r| backend.endpoint(&r.intent.request).ok());
     match (end, endpoint) {
-        (Some(end), Some(endpoint)) => execute(
+        (Some(end), Some(endpoint)) => prepare(
             store,
             key,
             backend,
             ExecutionRequest {
                 ids,
-                nonce,
+                nonce: &nonce,
                 cancel,
                 start,
                 end,
@@ -213,13 +254,55 @@ pub fn execute_nonce_domain(
             },
         ),
         _ => {
-            let mut r = DomainRun::empty();
-            r.diagnostic = Some(issue(
+            let mut run = DomainRun::empty();
+            run.diagnostic = Some(issue(
                 DomainPhaseDiagnostic::Preparation,
                 DomainCause::Contract,
             ));
-            r
+            DomainPreparation {
+                run,
+                prepared: None,
+            }
         }
+    }
+}
+
+/// Explicitly release the fixed nonce on a uniquely held preparation. Checks use
+/// the original deadline, the current canonical authority and a fresh manager
+/// observation inside the commit-before-release lock. The handle is consumed;
+/// failure is not permission to reconstruct it or retransmit.
+pub fn release_nonce_domain(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut SystemdNonceDomain,
+    prepared: PreparedNonceDomain,
+    cancel: &AtomicBool,
+) -> DomainRun {
+    release(store, key, backend, prepared, cancel)
+}
+
+/// Convenience consumer of the same production preparation and explicit release
+/// paths. It cannot bypass the retained-channel boundary or use another nonce.
+pub fn execute_nonce_domain(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut SystemdNonceDomain,
+    ids: &DomainOperations,
+    nonce: &str,
+    cancel: &AtomicBool,
+) -> DomainRun {
+    if nonce != backend.selection.nonce {
+        let mut run = DomainRun::empty();
+        run.diagnostic = Some(issue(
+            DomainPhaseDiagnostic::Preparation,
+            DomainCause::Correspondence,
+        ));
+        return run;
+    }
+    let preparation = prepare_nonce_domain(store, key, backend, ids, cancel);
+    match preparation.prepared {
+        Some(prepared) => release_nonce_domain(store, key, backend, prepared, cancel),
+        None => preparation.run,
     }
 }
 
@@ -231,13 +314,36 @@ struct ExecutionRequest<'a> {
     end: Instant,
 }
 
-fn execute<M: DomainManager>(
+fn binding_observation(
+    actual: &ManagedObservation,
+    intent: &DomainIntent,
+    basis: &SourceReference,
+) -> Result<DomainBindingObservation, DomainDiagnostic> {
+    let observation = DomainBindingObservation {
+        identity: actual.identity.clone(),
+        configuration: intent.configuration.clone(),
+        main: DomainProcessObservation {
+            pid: actual.main_pid,
+            start_ticks: actual.start_ticks,
+        },
+        direct_members: actual.direct_members.clone(),
+        controls: actual.controls.clone(),
+        populated: actual.populated,
+        basis: basis.clone(),
+    };
+    observation
+        .validate()
+        .map_err(|_| issue(DomainPhaseDiagnostic::Identity, DomainCause::Correspondence))?;
+    Ok(observation)
+}
+
+fn prepare<M: DomainManager>(
     store: &ProgramStore,
     key: &StoreKey,
     manager: &mut M,
     request: ExecutionRequest<'_>,
     listener: impl FnOnce() -> Result<UnixListener, DomainDiagnostic>,
-) -> DomainRun {
+) -> DomainPreparation {
     let ExecutionRequest {
         ids,
         nonce,
@@ -245,195 +351,290 @@ fn execute<M: DomainManager>(
         start,
         end,
     } = request;
-    let mut result = DomainRun::empty();
-    let attempt =
-        || -> Result<(), DomainDiagnostic> {
-            if !token(nonce) {
-                return Err(issue(
-                    DomainPhaseDiagnostic::Preparation,
-                    DomainCause::Contract,
-                ));
-            }
-            let kernel = store
-                .load(key, Access::ReadOnly)
-                .map_err(|_| issue(DomainPhaseDiagnostic::Preparation, DomainCause::Journal))?;
-            let domain = record(&kernel, &ids.domain)?;
-            if domain.phase != DomainPhase::Reserved {
-                result.recovery_only = true;
-                return Ok(());
-            }
-            manager.corresponds(&domain.intent)?;
-            let at = current(&kernel, ids, start, end, cancel)?;
-            let create = operation(
-                &kernel,
-                ids,
-                ids.create.clone(),
-                DomainEvent::CreateRequested {
-                    domain: ids.domain.clone(),
-                    at,
-                },
-            );
-            let (receipt, created) = store
-                .dispatch_domain(key, create, |k| {
-                    current(k, ids, start, end, cancel)?;
-                    let listener = listener()?;
-                    listener.set_nonblocking(true).map_err(|e| {
-                        issue(DomainPhaseDiagnostic::Creation, DomainCause::Io(e.kind()))
-                    })?;
-                    manager.create(&domain.intent, end)?;
-                    Ok::<_, DomainDiagnostic>(listener)
-                })
-                .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))?;
-            result.creation = Some(receipt);
-            let Some(created) = created else {
-                result.recovery_only = true;
-                return Ok(());
-            };
-            let listener = created?;
-            let mut channel = loop {
-                current(
-                    &store.load(key, Access::ReadOnly).map_err(|_| {
-                        issue(DomainPhaseDiagnostic::Identity, DomainCause::Journal)
-                    })?,
-                    ids,
-                    start,
-                    end,
-                    cancel,
-                )?;
-                match listener.accept() {
-                    Ok((stream, _)) => break stream,
-                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(1))
-                    }
-                    Err(e) => {
-                        return Err(issue(
-                            DomainPhaseDiagnostic::Identity,
-                            DomainCause::Io(e.kind()),
-                        ));
-                    }
-                }
-            };
-            let peer = rustix::net::sockopt::socket_peercred(&channel).map_err(|e| {
-                issue(
-                    DomainPhaseDiagnostic::Identity,
-                    DomainCause::Io(io::Error::from(e).kind()),
-                )
-            })?;
-            let hello = frame_read(&mut channel, end)
-                .map_err(|e| issue(DomainPhaseDiagnostic::Identity, DomainCause::Io(e.kind())))?;
-            let actual = manager.observe(&domain.intent, end)?;
-            if peer.pid.as_raw_pid() as u32 != actual.main_pid
-                || !actual.populated
-                || hello.as_array().is_none_or(|a| a.len() != 6)
-                || hello[0] != 1
-                || hello[1] != "hello"
-                || hello[2] != domain.intent.request.as_str()
-                || hello[3] != actual.main_pid
-                || hello[4] != actual.start_ticks
-                || hello[5] != actual.identity.boot
-            {
-                return Err(issue(
-                    DomainPhaseDiagnostic::Identity,
-                    DomainCause::Correspondence,
-                ));
-            }
-            let kernel = store
-                .load(key, Access::ReadOnly)
-                .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))?;
-            let at = current(&kernel, ids, start, end, cancel)?;
-            let bound = operation(
-                &kernel,
-                ids,
-                ids.bind.clone(),
-                DomainEvent::Bound {
-                    domain: ids.domain.clone(),
-                    identity: actual.identity.clone(),
-                    at,
-                },
-            );
-            result.binding =
-                Some(store.admit(key, bound).map_err(|_| {
-                    issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal)
-                })?);
-            let kernel = store
-                .load(key, Access::ReadOnly)
-                .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))?;
-            let at = current(&kernel, ids, start, end, cancel)?;
-            // A fresh live manager read follows durable publication. The previous
-            // incarnation cannot authorize a replacement or a released/empty set.
-            let before_release = manager.observe(&domain.intent, end)?;
-            if before_release.identity != actual.identity
-                || !before_release.populated
-                || before_release.main_pid != actual.main_pid
-                || before_release.start_ticks != actual.start_ticks
-            {
-                return Err(issue(
-                    DomainPhaseDiagnostic::Release,
-                    DomainCause::Correspondence,
-                ));
-            }
-            let release = operation(
-                &kernel,
-                ids,
-                ids.release.clone(),
-                DomainEvent::ReleaseRequested {
-                    domain: ids.domain.clone(),
-                    identity: actual.identity.clone(),
-                    at,
-                },
-            );
-            let (receipt, released) = store
-                .dispatch_domain(key, release, |k| {
-                    current(k, ids, start, end, cancel)?;
-                    frame_write(
-                        &mut channel,
-                        &json!([1, "release", domain.intent.request.as_str(), nonce]),
-                        end,
-                    )
-                    .map_err(|e| issue(DomainPhaseDiagnostic::Release, DomainCause::Io(e.kind())))
-                })
-                .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))?;
-            result.release = Some(receipt);
-            let Some(released) = released else {
-                result.recovery_only = true;
-                return Ok(());
-            };
-            released?;
-            let reply = frame_read(&mut channel, end)
-                .map_err(|e| issue(DomainPhaseDiagnostic::Release, DomainCause::Io(e.kind())))?;
-            if reply != json!([1, "nonce", domain.intent.request.as_str(), nonce]) {
-                return Err(issue(DomainPhaseDiagnostic::Release, DomainCause::Protocol));
-            }
-            result.nonce = Some(nonce.into());
-            let kernel = store
-                .load(key, Access::ReadOnly)
-                .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))?;
-            let at = ids
-                .at
-                .checked_add(start.elapsed().as_millis() as u64)
-                .ok_or_else(|| issue(DomainPhaseDiagnostic::Publication, DomainCause::Deadline))?;
-            let report = operation(
-                &kernel,
-                ids,
-                ids.report.clone(),
-                DomainEvent::Report {
-                    domain: ids.domain.clone(),
-                    identity: actual.identity,
-                    outcome: cortex_core::program::operational::EffectOutcome::Succeeded,
-                    at,
-                    basis: ids.basis.clone(),
-                },
-            );
-            result.report =
-                Some(store.admit(key, report).map_err(|_| {
-                    issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal)
-                })?);
-            Ok(())
+    let mut run = DomainRun::empty();
+    let attempt = || -> Result<Option<PreparedNonceDomain>, DomainDiagnostic> {
+        if !token(nonce) {
+            return Err(issue(
+                DomainPhaseDiagnostic::Preparation,
+                DomainCause::Contract,
+            ));
+        }
+        let kernel = store
+            .load(key, Access::ReadOnly)
+            .map_err(|_| issue(DomainPhaseDiagnostic::Preparation, DomainCause::Journal))?;
+        let domain = record(&kernel, &ids.domain)?;
+        if domain.phase != DomainPhase::Reserved {
+            run.recovery_only = true;
+            return Ok(None);
+        }
+        manager.corresponds(&domain.intent)?;
+        let at = current(&kernel, ids, start, end, cancel)?;
+        let create = operation(
+            &kernel,
+            ids,
+            ids.create.clone(),
+            DomainEvent::CreateRequested {
+                domain: ids.domain.clone(),
+                at,
+            },
+        );
+        let (creation, created) = store
+            .dispatch_domain(key, create, |k| {
+                current(k, ids, start, end, cancel)?;
+                let listener = listener()?;
+                listener.set_nonblocking(true).map_err(|e| {
+                    issue(DomainPhaseDiagnostic::Creation, DomainCause::Io(e.kind()))
+                })?;
+                manager.create(&domain.intent, end)?;
+                Ok::<_, DomainDiagnostic>(listener)
+            })
+            .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))?;
+        run.creation = Some(creation);
+        let Some(created) = created else {
+            run.recovery_only = true;
+            return Ok(None);
         };
+        let listener = created?;
+        let mut channel = loop {
+            current(
+                &store
+                    .load(key, Access::ReadOnly)
+                    .map_err(|_| issue(DomainPhaseDiagnostic::Identity, DomainCause::Journal))?,
+                ids,
+                start,
+                end,
+                cancel,
+            )?;
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(1))
+                }
+                Err(e) => {
+                    return Err(issue(
+                        DomainPhaseDiagnostic::Identity,
+                        DomainCause::Io(e.kind()),
+                    ));
+                }
+            }
+        };
+        let peer = rustix::net::sockopt::socket_peercred(&channel).map_err(|e| {
+            issue(
+                DomainPhaseDiagnostic::Identity,
+                DomainCause::Io(io::Error::from(e).kind()),
+            )
+        })?;
+        let hello = frame_read(&mut channel, end)
+            .map_err(|e| issue(DomainPhaseDiagnostic::Identity, DomainCause::Io(e.kind())))?;
+        let actual = manager.observe(&domain.intent, end)?;
+        if peer.pid.as_raw_pid() as u32 != actual.main_pid
+            || !actual.populated
+            || hello.as_array().is_none_or(|a| a.len() != 6)
+            || hello[0] != 1
+            || hello[1] != "hello"
+            || hello[2] != domain.intent.request.as_str()
+            || hello[3] != actual.main_pid
+            || hello[4] != actual.start_ticks
+            || hello[5] != actual.identity.boot
+        {
+            return Err(issue(
+                DomainPhaseDiagnostic::Identity,
+                DomainCause::Correspondence,
+            ));
+        }
+        let observation = binding_observation(&actual, &domain.intent, &ids.basis)?;
+        let kernel = store
+            .load(key, Access::ReadOnly)
+            .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))?;
+        let at = current(&kernel, ids, start, end, cancel)?;
+        let bound = operation(
+            &kernel,
+            ids,
+            ids.bind.clone(),
+            DomainEvent::BoundObserved {
+                domain: ids.domain.clone(),
+                observation: observation.clone(),
+                at,
+            },
+        );
+        let binding = store
+            .admit(key, bound)
+            .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))?;
+        run.binding = Some(binding);
+        Ok(Some(PreparedNonceDomain {
+            channel,
+            store: store.id(),
+            intent: domain.intent,
+            ids: ids.clone(),
+            observation,
+            creation,
+            binding,
+            nonce: nonce.into(),
+            start,
+            end,
+        }))
+    };
+    let prepared = match attempt() {
+        Ok(handle) => handle,
+        Err(error) => {
+            run.diagnostic = Some(error);
+            None
+        }
+    };
+    DomainPreparation { run, prepared }
+}
+
+fn release<M: DomainManager>(
+    store: &ProgramStore,
+    key: &StoreKey,
+    manager: &mut M,
+    mut prepared: PreparedNonceDomain,
+    cancel: &AtomicBool,
+) -> DomainRun {
+    let mut run = DomainRun::empty();
+    run.creation = Some(prepared.creation);
+    run.binding = Some(prepared.binding);
+    let mut attempt = || -> Result<(), DomainDiagnostic> {
+        if store.id() != prepared.store {
+            return Err(issue(
+                DomainPhaseDiagnostic::Release,
+                DomainCause::Correspondence,
+            ));
+        }
+        let ids = &prepared.ids;
+        let kernel = store
+            .load(key, Access::ReadOnly)
+            .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))?;
+        let at = current(&kernel, ids, prepared.start, prepared.end, cancel)?;
+        let domain = record(&kernel, &ids.domain)?;
+        if domain.intent != prepared.intent
+            || domain.binding_observation.as_ref() != Some(&prepared.observation)
+            || domain.phase != DomainPhase::Bound
+        {
+            return Err(issue(
+                DomainPhaseDiagnostic::Release,
+                DomainCause::Correspondence,
+            ));
+        }
+        manager.corresponds(&prepared.intent)?;
+        let observed = manager.observe(&prepared.intent, prepared.end)?;
+        if binding_observation(&observed, &prepared.intent, &ids.basis)? != prepared.observation {
+            return Err(issue(
+                DomainPhaseDiagnostic::Release,
+                DomainCause::Correspondence,
+            ));
+        }
+        current(&kernel, ids, prepared.start, prepared.end, cancel)?;
+        let release = operation(
+            &kernel,
+            ids,
+            ids.release.clone(),
+            DomainEvent::ReleaseRequested {
+                domain: ids.domain.clone(),
+                identity: prepared.observation.identity.clone(),
+                at,
+            },
+        );
+        let (receipt, released) = store
+            .dispatch_domain(key, release, |k| {
+                current(k, ids, prepared.start, prepared.end, cancel)?;
+                let current_record = record(k, &ids.domain)?;
+                if current_record.intent != prepared.intent
+                    || current_record.binding_observation.as_ref() != Some(&prepared.observation)
+                {
+                    return Err(issue(
+                        DomainPhaseDiagnostic::Release,
+                        DomainCause::Correspondence,
+                    ));
+                }
+                // Reobserve after commit under the journal lifecycle lock, not before
+                // waiting for that lock. Revocation cannot interleave publication.
+                manager.corresponds(&prepared.intent)?;
+                let observed = manager.observe(&prepared.intent, prepared.end)?;
+                if binding_observation(&observed, &prepared.intent, &ids.basis)?
+                    != prepared.observation
+                {
+                    return Err(issue(
+                        DomainPhaseDiagnostic::Release,
+                        DomainCause::Correspondence,
+                    ));
+                }
+                current(k, ids, prepared.start, prepared.end, cancel)?;
+                frame_write(
+                    &mut prepared.channel,
+                    &json!([
+                        1,
+                        "release",
+                        prepared.intent.request.as_str(),
+                        prepared.nonce
+                    ]),
+                    prepared.end,
+                )
+                .map_err(|e| issue(DomainPhaseDiagnostic::Release, DomainCause::Io(e.kind())))
+            })
+            .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))?;
+        run.release = Some(receipt);
+        let Some(released) = released else {
+            run.recovery_only = true;
+            return Ok(());
+        };
+        released?;
+        let reply = frame_read(&mut prepared.channel, prepared.end)
+            .map_err(|e| issue(DomainPhaseDiagnostic::Release, DomainCause::Io(e.kind())))?;
+        if reply != json!([1, "nonce", prepared.intent.request.as_str(), prepared.nonce]) {
+            return Err(issue(DomainPhaseDiagnostic::Release, DomainCause::Protocol));
+        }
+        run.nonce = Some(prepared.nonce.clone());
+        let kernel = store
+            .load(key, Access::ReadOnly)
+            .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))?;
+        let at = ids
+            .at
+            .checked_add(
+                u64::try_from(prepared.start.elapsed().as_millis()).map_err(|_| {
+                    issue(DomainPhaseDiagnostic::Publication, DomainCause::Deadline)
+                })?,
+            )
+            .ok_or_else(|| issue(DomainPhaseDiagnostic::Publication, DomainCause::Deadline))?;
+        let report = operation(
+            &kernel,
+            ids,
+            ids.report.clone(),
+            DomainEvent::Report {
+                domain: ids.domain.clone(),
+                identity: prepared.observation.identity.clone(),
+                outcome: cortex_core::program::operational::EffectOutcome::Succeeded,
+                at,
+                basis: ids.basis.clone(),
+            },
+        );
+        run.report = Some(
+            store
+                .admit(key, report)
+                .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))?,
+        );
+        Ok(())
+    };
     if let Err(error) = attempt() {
-        result.diagnostic = Some(error)
+        run.diagnostic = Some(error);
     }
-    result
+    run
+}
+
+#[cfg(test)]
+fn execute<M: DomainManager>(
+    store: &ProgramStore,
+    key: &StoreKey,
+    manager: &mut M,
+    request: ExecutionRequest<'_>,
+    listener: impl FnOnce() -> Result<UnixListener, DomainDiagnostic>,
+) -> DomainRun {
+    let cancel = request.cancel;
+    let preparation = prepare(store, key, manager, request, listener);
+    match preparation.prepared {
+        Some(prepared) => release(store, key, manager, prepared, cancel),
+        None => preparation.run,
+    }
 }
 
 /// Reinspect only the exact retained request/incarnation. This never creates a
@@ -479,12 +680,67 @@ pub fn inspect_nonce_domain(
     })
 }
 
+/// Consume a retained pre-release channel through canonical cancellation. The
+/// channel stays owned until cancellation/stop returns, then closes even on error.
+/// Neither descriptor closure nor a stop acknowledgement proves domain closure.
+pub fn cancel_prepared_nonce_domain(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut SystemdNonceDomain,
+    prepared: PreparedNonceDomain,
+    operation: Operation,
+) -> Result<Receipt, DomainDiagnostic> {
+    cancel_prepared(store, key, backend, prepared, operation)
+}
+fn cancel_prepared<M: DomainManager>(
+    store: &ProgramStore,
+    key: &StoreKey,
+    manager: &mut M,
+    prepared: PreparedNonceDomain,
+    operation: Operation,
+) -> Result<Receipt, DomainDiagnostic> {
+    let Command::Domain(event) = &operation.command else {
+        return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Contract));
+    };
+    if store.id() != prepared.store
+        || !matches!(event.as_ref(), DomainEvent::Cancel { domain, .. } if domain == &prepared.ids.domain)
+    {
+        return Err(issue(
+            DomainPhaseDiagnostic::Closure,
+            DomainCause::Correspondence,
+        ));
+    }
+    let kernel = store
+        .load(key, Access::ReadOnly)
+        .map_err(|_| issue(DomainPhaseDiagnostic::Closure, DomainCause::Journal))?;
+    let domain = record(&kernel, &prepared.ids.domain)?;
+    if domain.intent != prepared.intent
+        || domain.binding_observation.as_ref() != Some(&prepared.observation)
+    {
+        return Err(issue(
+            DomainPhaseDiagnostic::Closure,
+            DomainCause::Correspondence,
+        ));
+    }
+    let result = cancel_domain(store, key, manager, operation);
+    drop(prepared); // Only this owned channel; retained uncertainty is unchanged.
+    result
+}
+
 /// Persist one cancellation request before targeting the exact still-matching
 /// manager incarnation. A stop request alone never records closure or a refund.
 pub fn cancel_nonce_domain(
     store: &ProgramStore,
     key: &StoreKey,
     backend: &mut SystemdNonceDomain,
+    operation: Operation,
+) -> Result<Receipt, DomainDiagnostic> {
+    cancel_domain(store, key, backend, operation)
+}
+fn cancel_domain<M: DomainManager>(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut M,
     operation: Operation,
 ) -> Result<Receipt, DomainDiagnostic> {
     let Command::Domain(event) = &operation.command else {

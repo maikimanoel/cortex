@@ -108,6 +108,16 @@ host qualification remain distinct. A cooperative CPU-time cutoff, a tmpfs byte
 size or an observed free-capacity margin cannot satisfy missing mandatory hard
 limits or protected reserves. No full capability status advances from this extension.
 
+The authorized [prepared domain lifecycle](../architecture/recoverable-domains.md#prepared-native-lifecycle)
+extends CAP-HRN-001/002 and CAP-WFL-001 with an owned pre-release channel,
+explicit release and durable binding observations through the same Core/Evidence
+guards and encrypted journal. CAP-CLI-004 projects retained observation coverage
+without live manager calls. It preserves legacy records, closure requirements and
+cumulative-debt guards; no historical allocation exception is implemented.
+Source verification is candidate-scoped and does not qualify host controls or
+demonstrate real subsequent admission. Capability IDs, owners and full statuses
+remain unchanged.
+
 ## A. Core, task contracts, and operational authority
 
 ### CAP-CORE-001

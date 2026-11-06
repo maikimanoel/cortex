@@ -870,6 +870,10 @@ fn domain_inspection_keeps_unknown_debt_and_disk_after_process_closure() {
     assert_eq!(record["historical_outcome"]["kind"], "UNKNOWN");
     assert_eq!(record["retained_domain_phase"], "Closed");
     assert_eq!(record["retry_authorized"], false);
+    assert_eq!(
+        record["retained_binding_observation"]["status"],
+        "NOT_RECORDED"
+    );
     assert_eq!(projection["host_reinspection"], false);
     assert_eq!(projection["current_liveness"], "NOT_OBSERVED");
     let resources = record["reusable_capacity"].as_array().unwrap();
@@ -962,4 +966,126 @@ fn domain_inspection_projects_later_measurement_without_rewriting_unknown() {
     assert_eq!(d["cumulative_consumption"][0]["unresolved_debt"], false);
     assert_eq!(d["artifact_acceptance"], false);
     assert_eq!(before, snapshot(&f));
+}
+
+#[test]
+fn prepared_domain_inspection_retains_bounded_observations_without_live_effects() {
+    use cortex_core::program::domain::*;
+    let f = Temp::new();
+    let (mut kernel, intent) = domain_fixture::coordinator();
+    domain_fixture::event(
+        &mut kernel,
+        "reserve",
+        DomainEvent::Reserve {
+            intent: intent.clone(),
+            at: 1,
+        },
+    );
+    domain_fixture::event(
+        &mut kernel,
+        "create",
+        DomainEvent::CreateRequested {
+            domain: intent.id.clone(),
+            at: 2,
+        },
+    );
+    let main = DomainProcessObservation {
+        pid: 100123,
+        start_ticks: 200456,
+    };
+    domain_fixture::event(
+        &mut kernel,
+        "bind-observed",
+        DomainEvent::BoundObserved {
+            domain: intent.id.clone(),
+            observation: DomainBindingObservation {
+                identity: domain_fixture::identity(&intent),
+                configuration: intent.configuration.clone(),
+                main: main.clone(),
+                direct_members: vec![main],
+                controls: DomainControlReadback {
+                    cpu_quota_us: 100_000,
+                    cpu_period_us: 100_000,
+                    memory_bytes: 256,
+                    swap_bytes: 0,
+                    tasks: 8,
+                    runtime_max_micros: 1_000_000,
+                    timeout_stop_micros: 500_000,
+                    restart_prevented: true,
+                    kill_control_group: true,
+                    no_new_privileges: true,
+                    send_sigkill: true,
+                    remain_after_exit: true,
+                },
+                populated: true,
+                basis: fixture::source("private-observation-mechanism"),
+            },
+            at: 3,
+        },
+    );
+    let store =
+        ProgramStore::create_domain_fixture(&f.store(), &key(), kernel.initial().clone(), limits())
+            .unwrap();
+    for operation in kernel.operations() {
+        store.admit(&key(), operation.clone()).unwrap();
+    }
+    let before = snapshot(&f);
+    let mut command = command(&f);
+    command.arg("--json");
+    let result = run(command, &[0x57; 32]);
+    assert!(result.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    let projection = &report["domain_projection"];
+    let domain = &projection["domains"][0];
+    let binding = &domain["retained_binding_observation"];
+    assert_eq!(domain["retained_domain_phase"], "Bound");
+    assert_eq!(domain["historical_outcome"]["kind"], "UNKNOWN");
+    assert_eq!(domain["cancellation_requested"], false);
+    assert_eq!(binding["status"], "RECORDED");
+    assert_eq!(binding["direct_member_count"], 1);
+    assert_eq!(binding["controls"]["cpu_quota_micros"], 100_000);
+    assert_eq!(binding["controls"]["charged_memory_bytes"], 256);
+    assert_eq!(binding["controls"]["tasks"], 8);
+    assert_eq!(binding["current_liveness"], "NOT_OBSERVED");
+    assert_eq!(binding["whole_domain_closure_proven"], false);
+    assert_eq!(binding["snapshot_exclusion_proven"], false);
+    assert_eq!(projection["host_reinspection"], false);
+    assert_eq!(projection["inspection_authority"], "NONE");
+    assert!(
+        domain["next_permissible_action"]
+            .as_str()
+            .unwrap()
+            .contains("RELEASE_WITHHELD")
+    );
+    assert!(
+        domain["reusable_capacity"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["held"] == true)
+    );
+    assert_eq!(domain["cumulative_consumption"][0]["unresolved_debt"], true);
+    let text = String::from_utf8(result.stdout).unwrap();
+    for private in [
+        "100123",
+        "200456",
+        "private-observation-mechanism",
+        "synthetic-host",
+        "/owned/",
+    ] {
+        assert!(!text.contains(private));
+    }
+    let human = run(self::command(&f), &[0x57; 32]);
+    assert!(human.status.success());
+    assert!(
+        String::from_utf8(human.stdout)
+            .unwrap()
+            .contains("RELEASE_WITHHELD")
+    );
+    assert_eq!(snapshot(&f), before);
+    let replay = store.load(&key(), Access::ReadOnly).unwrap();
+    let retained = replay.domains().unwrap().domain(&intent.id).unwrap();
+    assert!(retained.binding_observation.is_some());
+    assert_eq!(retained.phase, DomainPhase::Bound);
+    assert!(retained.closure.is_none());
 }

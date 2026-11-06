@@ -138,6 +138,8 @@ pub(crate) struct ManagedObservation {
     pub main_pid: u32,
     pub start_ticks: u64,
     pub populated: bool,
+    pub direct_members: Vec<DomainProcessObservation>,
+    pub controls: DomainControlReadback,
     pub cpu_micros: Option<u64>,
     pub memory_peak: Option<u64>,
     pub restart_prevented: bool,
@@ -456,6 +458,32 @@ impl SystemdNonceDomain {
                 DomainCause::Correspondence,
             ));
         }
+        let runtime_max: u64 = self
+            .property(&object, si, "RuntimeMaxUSec", end)?
+            .try_into()
+            .map_err(|_| issue(DomainPhaseDiagnostic::Identity, DomainCause::Protocol))?;
+        let timeout_stop: u64 = self
+            .property(&object, si, "TimeoutStopUSec", end)?
+            .try_into()
+            .map_err(|_| issue(DomainPhaseDiagnostic::Identity, DomainCause::Protocol))?;
+        let send_sigkill: bool = self
+            .property(&object, si, "SendSIGKILL", end)?
+            .try_into()
+            .map_err(|_| issue(DomainPhaseDiagnostic::Identity, DomainCause::Protocol))?;
+        let remain_after_exit: bool = self
+            .property(&object, si, "RemainAfterExit", end)?
+            .try_into()
+            .map_err(|_| issue(DomainPhaseDiagnostic::Identity, DomainCause::Protocol))?;
+        if runtime_max != self.selection.limits.wall_ms * 1000
+            || timeout_stop != 500_000
+            || !send_sigkill
+            || !remain_after_exit
+        {
+            return Err(issue(
+                DomainPhaseDiagnostic::Identity,
+                DomainCause::Correspondence,
+            ));
+        }
         let invocation: Vec<u8> = self
             .property(&object, ui, "InvocationID", end)?
             .try_into()
@@ -520,6 +548,45 @@ impl SystemdNonceDomain {
                 DomainCause::Correspondence,
             ));
         }
+        // Retain direct members only. This is not a whole-subtree or atomic
+        // process-set proof; a changed list or birth identity refuses binding.
+        let observed_members = member_ids(&bounded_metadata(&path.join("cgroup.procs"))?)?;
+        let mut direct_members = Vec::with_capacity(observed_members.len());
+        for pid in &observed_members {
+            if Instant::now() >= end {
+                return Err(issue(
+                    DomainPhaseDiagnostic::Identity,
+                    DomainCause::Deadline,
+                ));
+            }
+            let start_ticks = ticks(*pid)
+                .map_err(|e| issue(DomainPhaseDiagnostic::Identity, DomainCause::Io(e.kind())))?;
+            if bounded_metadata(&PathBuf::from(format!("/proc/{pid}/cgroup")))?.trim()
+                != format!("0::{cgroup}")
+                || ticks(*pid).ok() != Some(start_ticks)
+            {
+                return Err(issue(
+                    DomainPhaseDiagnostic::Identity,
+                    DomainCause::Correspondence,
+                ));
+            }
+            direct_members.push(DomainProcessObservation {
+                pid: *pid,
+                start_ticks,
+            });
+        }
+        if member_ids(&bounded_metadata(&path.join("cgroup.procs"))?)? != observed_members
+            || (populated
+                && !direct_members.contains(&DomainProcessObservation {
+                    pid: main,
+                    start_ticks: start,
+                }))
+        {
+            return Err(issue(
+                DomainPhaseDiagnostic::Identity,
+                DomainCause::Correspondence,
+            ));
+        }
         let l = &self.selection.limits;
         if bounded_metadata(&path.join("cpu.max"))?.trim()
             != format!("{} {}", l.cpu_quota_us, l.cpu_period_us)
@@ -558,6 +625,21 @@ impl SystemdNonceDomain {
             main_pid: main,
             start_ticks: start,
             populated,
+            direct_members,
+            controls: DomainControlReadback {
+                cpu_quota_us: l.cpu_quota_us,
+                cpu_period_us: l.cpu_period_us,
+                memory_bytes: l.memory_bytes,
+                swap_bytes: l.swap_bytes,
+                tasks: l.tasks,
+                runtime_max_micros: runtime_max,
+                timeout_stop_micros: timeout_stop,
+                restart_prevented: true,
+                kill_control_group: true,
+                no_new_privileges: nnp,
+                send_sigkill,
+                remain_after_exit,
+            },
             cpu_micros: cpu,
             memory_peak: memory,
             restart_prevented: true,
@@ -592,6 +674,21 @@ impl SystemdNonceDomain {
             .map_err(|_| issue(DomainPhaseDiagnostic::Closure, DomainCause::Protocol))?;
         Ok(())
     }
+}
+fn member_ids(value: &str) -> Result<Vec<u32>, DomainDiagnostic> {
+    let mut members = std::collections::BTreeSet::new();
+    for part in value.split_whitespace() {
+        let pid: u32 = part
+            .parse()
+            .map_err(|_| issue(DomainPhaseDiagnostic::Identity, DomainCause::Protocol))?;
+        if pid == 0 || !members.insert(pid) || members.len() > 8 {
+            return Err(issue(
+                DomainPhaseDiagnostic::Identity,
+                DomainCause::Capacity,
+            ));
+        }
+    }
+    Ok(members.into_iter().collect())
 }
 fn bounded<T>(
     future: impl Future<Output = zbus::Result<T>>,
@@ -966,6 +1063,14 @@ mod tests {
         let object = OwnedObjectPath::try_from("/org/freedesktop/systemd1/job/1").unwrap();
         let bytes = to_bytes(Context::new_dbus(LE, 0), &object).unwrap();
         assert_eq!(bytes.deserialize::<OwnedObjectPath>().unwrap().0, object);
+    }
+    #[test]
+    fn direct_member_parser_rejects_ambiguity_and_bounds_without_host_effects() {
+        assert_eq!(member_ids("7\n3\n").unwrap(), vec![3, 7]);
+        assert!(member_ids("").unwrap().is_empty());
+        for invalid in ["0", "7 7", "not-a-pid", "4294967296", "1 2 3 4 5 6 7 8 9"] {
+            assert!(member_ids(invalid).is_err());
+        }
     }
     #[test]
     fn expired_call_and_duplicate_kernel_counters_are_refused() {

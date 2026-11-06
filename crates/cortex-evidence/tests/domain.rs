@@ -573,3 +573,172 @@ fn cumulative_member_output_requires_exact_shared_consumption_budget() {
         assert_eq!(k.admit(op).is_ok(), shared);
     }
 }
+
+#[test]
+fn observed_binding_retains_facts_without_release_or_resource_refund() {
+    let (mut k, i) = coordinator();
+    event(
+        &mut k,
+        "reserve",
+        DomainEvent::Reserve {
+            intent: i.clone(),
+            at: 1,
+        },
+    );
+    event(
+        &mut k,
+        "create",
+        DomainEvent::CreateRequested {
+            domain: i.id.clone(),
+            at: 2,
+        },
+    );
+    let observation = binding(&i);
+    event(
+        &mut k,
+        "observed-bind",
+        DomainEvent::BoundObserved {
+            domain: i.id.clone(),
+            observation: observation.clone(),
+            at: 3,
+        },
+    );
+    let r = k.domains().unwrap().domain(&i.id).unwrap();
+    assert!(r.binding_observation.as_ref() == Some(&observation));
+    assert_eq!(r.phase, DomainPhase::Bound);
+    assert_eq!(r.outcome, HistoricalOutcome::Unknown);
+    assert!(r.holds(Resource::Workers));
+    assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
+    assert!(r.closure.is_none());
+    let duplicate = domain_operation(
+        &k,
+        "another-bind",
+        Command::Domain(Box::new(DomainEvent::BoundObserved {
+            domain: i.id.clone(),
+            observation,
+            at: 4,
+        })),
+    );
+    assert!(k.admit(duplicate).is_err());
+}
+
+#[test]
+fn malformed_or_mismatched_observed_bindings_refuse_atomically() {
+    let (mut k, i) = coordinator();
+    event(
+        &mut k,
+        "reserve",
+        DomainEvent::Reserve {
+            intent: i.clone(),
+            at: 1,
+        },
+    );
+    event(
+        &mut k,
+        "create",
+        DomainEvent::CreateRequested {
+            domain: i.id.clone(),
+            at: 2,
+        },
+    );
+    let before = k.domains().unwrap().clone();
+    for case in 0..16 {
+        let mut observation = binding(&i);
+        match case {
+            0 => observation.main.pid = 0,
+            1 => observation.main.start_ticks = 0,
+            2 => observation.direct_members.clear(),
+            3 => observation.direct_members.push(observation.main.clone()),
+            4 => observation.direct_members[0].start_ticks += 1,
+            5 => observation.identity.boot = "wrong-boot".into(),
+            6 => observation.configuration = source("wrong-config"),
+            7 => observation.controls.tasks = 0,
+            8 => observation.controls.cpu_period_us = 0,
+            9 => observation.controls.swap_bytes = 1,
+            10 => observation.controls.restart_prevented = false,
+            11 => observation.controls.kill_control_group = false,
+            12 => observation.controls.no_new_privileges = false,
+            13 => observation.controls.send_sigkill = false,
+            14 => observation.controls.runtime_max_micros = 0,
+            _ => observation.populated = false,
+        }
+        let input = domain_operation(
+            &k,
+            &format!("bad-observation-{case}"),
+            Command::Domain(Box::new(DomainEvent::BoundObserved {
+                domain: i.id.clone(),
+                observation,
+                at: 3,
+            })),
+        );
+        assert!(k.admit(input).is_err(), "case {case}");
+        assert!(k.domains().unwrap() == &before);
+    }
+    event(
+        &mut k,
+        "allowed-observation",
+        DomainEvent::BoundObserved {
+            domain: i.id.clone(),
+            observation: binding(&i),
+            at: 3,
+        },
+    );
+}
+
+#[test]
+fn cancellation_and_revocation_before_observed_binding_hold_identity_and_release() {
+    for cancel in [true, false] {
+        let (mut k, i) = coordinator();
+        event(
+            &mut k,
+            "reserve",
+            DomainEvent::Reserve {
+                intent: i.clone(),
+                at: 1,
+            },
+        );
+        event(
+            &mut k,
+            "create",
+            DomainEvent::CreateRequested {
+                domain: i.id.clone(),
+                at: 2,
+            },
+        );
+        if cancel {
+            event(
+                &mut k,
+                "cancel",
+                DomainEvent::Cancel {
+                    domain: i.id.clone(),
+                    at: 3,
+                    basis: source("cancel"),
+                },
+            );
+        } else {
+            submit(
+                &mut k,
+                "revoke",
+                Command::SupervisedEffect(Box::new(EffectEvent::Revoke {
+                    grant: i.effect.grant.clone(),
+                    at: 3,
+                    basis: source("revoke"),
+                })),
+            );
+        }
+        let input = domain_operation(
+            &k,
+            "late-observed-bind",
+            Command::Domain(Box::new(DomainEvent::BoundObserved {
+                domain: i.id.clone(),
+                observation: binding(&i),
+                at: 4,
+            })),
+        );
+        assert!(k.admit(input).is_err());
+        let r = k.domains().unwrap().domain(&i.id).unwrap();
+        assert_eq!(r.phase, DomainPhase::CreateUncertain);
+        assert!(r.binding_observation.is_none() && r.identity.is_none());
+        assert!(r.holds(Resource::Workers));
+    }
+}
