@@ -4,6 +4,8 @@ These are logical responsibilities, not existing crates, APIs, storage schemas,
 or service deployments. Actual crate ownership is in [the overview](overview.md).
 The [catalog](../product/capability-catalog.md) owns functional contracts and
 acceptance, while [core invariants](core-invariants.md) apply to every interaction.
+The [domain vocabulary](domain-vocabulary.md) supplies shared concept definitions;
+it does not change ownership or status.
 All planned record flows retain identity, candidate/version references, provenance,
 domain/recording times, validity, and explicit limitations as applicable.
 
@@ -45,8 +47,11 @@ and retrieval ([KNW](../product/capability-catalog.md#cap-knw-001), with initial
 inspection in [CAP-CLI-002](../product/capability-catalog.md#cap-cli-002)). Repository
 observation reports source identity/state; core binds it to a contract. Extraction
 produces typed spans/relations with separate origin and validation disposition.
-The [first reference slice](knowledge-references.md) implements one committed JSON
-source adapter and immutable Core model; full extraction/indexing remains incomplete.
+The [reference slice](knowledge-references.md) implements committed JSON extraction
+and selected JSON source sets over the immutable Core model. Bounded
+[Rust](knowledge-rust.md), [Markdown](knowledge-markdown.md) and
+[Cargo manifest](knowledge-cargo-manifest.md) lexical adapters use that shared
+model with their own profiles; full extraction/indexing remains incomplete.
 Canonical sources own their records; this subsystem owns only rebuildable
 projections and dependency indexes. It supplies shared context to memory,
 retrieval and prompting rather than proliferating independent indexes.
@@ -111,7 +116,7 @@ release operational work. Its immutable graph and retained in-memory notificatio
 are not a durable Workflow record or an additional Evidence store.
 
 The approved [GPE-B Stage 1](program-kernel.md) adds one replayable non-effectful
-coordination boundary: `cortex_core::program` owns validated baseline/plan/claim
+coordination boundary: `cortex_core::program` owns validated baseline/ordering-plan/claim
 contracts, `cortex_evidence::program` owns their composition with actual Evidence
 support, `cortex-storage` supplies transactional encrypted admission and reconstruction,
 and CLI projects the resulting state. Storage owns no policy or validity judgment.

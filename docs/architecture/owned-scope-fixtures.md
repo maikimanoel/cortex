@@ -49,7 +49,7 @@ CPU, charged-memory and task measurements. Missing observations remain unknown;
 they are not zeros. These are mechanism records, not authenticated statements or
 independent acceptance. A name, path or PID by itself cannot authorize adoption.
 
-CPU quota per period is rate capacity. `CpuMillis` in the existing resource
+CPU quota per period is rate capacity. `CpuMillicores` in the existing resource
 projection remains milli-CPU capacity, not elapsed CPU execution. Requested rate
 and memory must fit the corresponding retained reservation. Cumulative CPU usage
 is recorded in microseconds. A sampled CPU-time cutoff remains cooperative and

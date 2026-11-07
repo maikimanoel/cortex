@@ -116,7 +116,7 @@ fn configured(
     admit(&mut k, "capacity", Command::Notify(n));
     let a = attempt("attempt-A", "A", "operator");
     admit(&mut k, "claim-A", Command::Claim(a.clone()));
-    let request=PackageRequest{id:PackageId::new("package-A").unwrap(),revision:rev(1),mission:task("A"),baseline:rev(1),generation:rev(1),sources:vec![],methods:vec![],
+    let request=PackageRequest{id:PackageId::new("package-A").unwrap(),revision:rev(1),task:task("A"),baseline:rev(1),generation:rev(1),sources:vec![],methods:vec![],
         omissions:"Provider-free deterministic development fixture; no acquired private project content".into(),
         deliverable:"Bounded JSON-lines fixture output, with no engineering acceptance inference".into(),
         stop_rules:"Only the explicitly authorized trusted local development fixture; no provider, shell, network, sandbox claim or protected effect. Stop on timeout, cancellation, revoked or uncertain authority.".into()};
@@ -124,7 +124,7 @@ fn configured(
     let scope = EffectScope {
         program: k.state().definition().id().clone(),
         baseline: rev(1),
-        mission: task("A"),
+        task: task("A"),
         candidate: k
             .state()
             .readiness()

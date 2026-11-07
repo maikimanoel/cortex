@@ -1,0 +1,101 @@
+format 21
+cortex-instruction-v1
+assembler 21
+cortex-core-stage1-v1
+authority 86
+NONE: coordination metadata only; no execution, tools, adoption or provider submission
+privacy 81
+explicit local operator metadata; no automatic capture/export/provider disclosure
+program 15
+fixture-program
+package 11
+canonical-A
+mission 1
+A
+objective 53
+Retain intermediate delivery while producer continues
+acceptance 33
+Exact declared interface behavior
+candidate 40
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+baseline 1
+1
+generation 1
+1
+package-revision 1
+2
+contract-revision 1
+1
+plan-revision 1
+1
+operator-assertion 16
+fixture-operator
+source 17
+accepted-baseline
+source-version 1
+1
+program-objective 40
+Coordinate the connected fixture program
+program-acceptance 73
+Retain accepted scope, useful releases and unresolved work across restart
+repository-root 27
+/synthetic/cortex-program-A
+git-dir 32
+/synthetic/cortex-program-A/.git
+common-dir 32
+/synthetic/cortex-program-A/.git
+worktree-requirement 5
+CLEAN
+graph 13
+program-graph
+graph-revision 1
+1
+logical-input-byte-limit 8
+16000000
+operational-budgets 60
+UNAVAILABLE; no executor may consume this package as a grant
+increment 1
+A
+declared-responsibility 1
+A
+increment 7
+A-later
+declared-responsibility 1
+A
+dependency-ready 4
+true
+eligible 5
+false
+blocker 26
+MissionBlocker([redacted])
+blocker 26
+MissionBlocker([redacted])
+operator-assertion 16
+fixture-operator
+source 15
+synthetic-input
+source-version 1
+1
+source-bytes 29
+Public fixture
+authority NONE
+operator-assertion 16
+fixture-operator
+source 14
+fixture-method
+source-version 1
+1
+method-disposition 22
+EXPLICIT_PROPOSAL_ONLY
+applicability 34
+Inspect a finite synthetic package
+exceptions 4
+None
+qualification 10
+UNASSESSED
+omissions 19
+No live observation
+deliverable 18
+A bounded contract
+stop-rules 24
+Stop on missing evidence

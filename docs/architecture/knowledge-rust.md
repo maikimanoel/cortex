@@ -110,14 +110,14 @@ target. Neither implies complete Rust semantics. Errors independently distinguis
 and Core construction failures. All relationships remain `Extracted` and `Unverified`.
 No assessment, validation, consent or authority is inferred from extraction.
 
-## Qualification, limits and provenance
+## Contextual validity, limits and provenance
 
-`rust::qualify(index, latest)` performs no I/O. `rust::reinspect(repo, index, id)`
+`rust::inspect_validity(index, latest)` performs no I/O. `rust::reinspect(repo, index, id)`
 actually captures the repository again. Both return the existing `KnowledgeView`:
 matching profile and compatible later clean candidate with resolved lexical coverage
 may be `Some(Current)`; demonstrated candidate/profile change is `Some(Stale)`;
 missing/uncertain observation or unresolved targets is `None` (unestablished).
-The Rust qualifier checks its own exact profile. JSON qualification remains unchanged
+The Rust validity inspector checks its own exact profile. JSON validity inspection remains unchanged
 and rejects Rust profiles. Reusing the extraction ID does not establish freshness.
 Historical nodes, bytes, candidate and provenance remain immutable after staleness.
 

@@ -111,7 +111,7 @@ identifiers!(
     ActorId,
     OperationId,
     GrantId,
-    ResourceId,
+    ClaimScopeId,
     PackageId,
     GraphId,
     EdgeId,
@@ -136,20 +136,30 @@ impl Wire for ContractRevision {
         Self::new(read(v)?).map_err(|_| bad())
     }
 }
-macro_rules! symbols{($t:ty; $($name:ident),+)=>{impl Wire for $t{fn write(&self)->Result<V,ProgramStoreError>{Ok(V::String(match self{$(Self::$name=>stringify!($name)),+}.into()))}fn read(v:&V)->Result<Self,ProgramStoreError>{match v.as_str().ok_or_else(bad)?{$(stringify!($name)=>Ok(Self::$name)),+,_=>Err(bad())}}}};}
-symbols!(WorktreeRequirement;Clean,AllowChanges);
-symbols!(DependencyCoverage;DeclaredComplete,Unknown);
-symbols!(ConsumerKind;Preview,Effectful);
-symbols!(DependencyKind;Artifact,MissionAcceptance);
-symbols!(ReadinessLevel;ContractStable,ImplementationProvisional,IntegratedAccepted);
-symbols!(ReviewRole;Coordinator,Producer);
-symbols!(CoordinationPermission;Amend,Plan,Claim,Review);
-symbols!(AttemptStatus;Claimed,Unknown,Reported,Cancelled,HandedOver);
-symbols!(AssessmentResult;Pass,Fail,Unknown,NotRun,Blocked,NotApplicable);
-symbols!(Applicability;Applicable,NotApplicable,Uncertain);
-symbols!(OracleConclusion;Satisfied,Violated,Insufficient);
-symbols!(ScopeFinding;Present,Absent,Uncertain);
-symbols!(CriterionCoverage;ExactSingleCriterion,Unestablished);
+// These tokens belong to the retained wire format, not to Rust identifier spelling.
+macro_rules! symbols {
+    ($t:ty; $($name:ident => $token:literal),+)=>{impl Wire for $t {
+        fn write(&self)->Result<V,ProgramStoreError>{
+            Ok(V::String(match self {$(Self::$name=>$token),+}.into()))
+        }
+        fn read(v:&V)->Result<Self,ProgramStoreError>{
+            match v.as_str().ok_or_else(bad)? { $($token=>Ok(Self::$name)),+, _=>Err(bad()) }
+        }
+    }};
+}
+symbols!(WorktreeRequirement;Clean => "Clean",AllowChanges => "AllowChanges");
+symbols!(DependencyCoverage;DeclaredComplete => "DeclaredComplete",Unknown => "Unknown");
+symbols!(ConsumerKind;Preview => "Preview",Effectful => "Effectful");
+symbols!(DependencyKind;Artifact => "Artifact",TaskAcceptance => "MissionAcceptance");
+symbols!(ReadinessLevel;ContractStable => "ContractStable",ImplementationProvisional => "ImplementationProvisional",IntegratedAccepted => "IntegratedAccepted");
+symbols!(ReviewRole;Coordinator => "Coordinator",Producer => "Producer");
+symbols!(CoordinationPermission;Amend => "Amend",Plan => "Plan",Claim => "Claim",Review => "Review");
+symbols!(AttemptStatus;Claimed => "Claimed",Unknown => "Unknown",Reported => "Reported",Cancelled => "Cancelled",HandedOver => "HandedOver");
+symbols!(AssessmentResult;Pass => "Pass",Fail => "Fail",Unknown => "Unknown",NotRun => "NotRun",Blocked => "Blocked",NotApplicable => "NotApplicable");
+symbols!(Applicability;Applicable => "Applicable",NotApplicable => "NotApplicable",Uncertain => "Uncertain");
+symbols!(OracleConclusion;Satisfied => "Satisfied",Violated => "Violated",Insufficient => "Insufficient");
+symbols!(ScopeFinding;Present => "Present",Absent => "Absent",Uncertain => "Uncertain");
+symbols!(CriterionCoverage;ExactSingleCriterion => "ExactSingleCriterion",Unestablished => "Unestablished");
 macro_rules! fields {
     ($t:ty; $($field:ident),+)=>{impl Wire for $t {
         fn write(&self)->Result<V,ProgramStoreError>{list([$(self.$field.write()),+])}
@@ -157,17 +167,17 @@ macro_rules! fields {
     }};
 }
 fields!(ProgramLimits;revisions,entries,bytes);
-fields!(Workstream;id,responsibility,missions);
-fields!(Increment;id,mission,artifacts,resources);
-fields!(CoordinationGrant;id,program,baseline,actor,missions,permissions,basis);
+fields!(Workstream;id,responsibility,tasks);
+fields!(Increment;id,task,artifacts,claim_scopes);
+fields!(CoordinationGrant;id,program,baseline,actor,tasks,permissions,basis);
 fields!(Attempt;id,increment,owner,baseline,generation,status,basis);
-fields!(Plan;revision,order,basis);
+fields!(OrderingPlan;revision,order,basis);
 fields!(SourceInput;source,candidate,text);
 fields!(MethodProposal;method,applicability,qualification,exceptions);
-fields!(PackageRequest;id,revision,mission,baseline,generation,sources,methods,omissions,deliverable,stop_rules);
+fields!(PackageRequest;id,revision,task,baseline,generation,sources,methods,omissions,deliverable,stop_rules);
 fields!(Examination;observation,contract,candidate,profile);
 fields!(AssessmentInput;examination,id,at,result,applicability,rationale);
-fields!(NonImpact;missions,basis);
+fields!(NonImpact;tasks,basis);
 
 impl Wire for ObservationId {
     fn write(&self) -> Result<V, ProgramStoreError> {
@@ -266,7 +276,7 @@ impl Wire for CandidateObservation {
         )?)
     }
 }
-impl Wire for MissionContext {
+impl Wire for TaskContext {
     fn write(&self) -> Result<V, ProgramStoreError> {
         list([self.contract().write(), self.capture().cloned().write()])
     }
@@ -275,7 +285,7 @@ impl Wire for MissionContext {
         Self::new(read(&a[0])?, read(&a[1])?).map_err(|_| bad())
     }
 }
-impl Wire for MissionScope {
+impl Wire for TaskScope {
     fn write(&self) -> Result<V, ProgramStoreError> {
         list([self.context().write(), self.generation().write()])
     }
@@ -284,7 +294,7 @@ impl Wire for MissionScope {
         Ok(Self::new(read(&a[0])?, read(&a[1])?))
     }
 }
-impl Wire for Mission {
+impl Wire for Task {
     fn write(&self) -> Result<V, ProgramStoreError> {
         list([
             self.context().write(),
@@ -309,7 +319,7 @@ impl Wire for GraphReference {
 impl Wire for GraphLimits {
     fn write(&self) -> Result<V, ProgramStoreError> {
         Ok(json!([
-            self.get(LimitKind::Missions),
+            self.get(LimitKind::Tasks),
             self.get(LimitKind::Edges),
             self.get(LimitKind::Notifications),
             self.get(LimitKind::Supports),
@@ -378,7 +388,7 @@ impl Wire for DependencyGraph {
     fn write(&self) -> Result<V, ProgramStoreError> {
         list([
             self.reference().write(),
-            self.missions().to_vec().write(),
+            self.tasks().to_vec().write(),
             self.edges().to_vec().write(),
             self.limits().write(),
         ])
@@ -524,7 +534,7 @@ impl Wire for ArtifactReport {
 impl Wire for Notification {
     fn write(&self) -> Result<V, ProgramStoreError> {
         let event = match self.event() {
-            Event::Signal { mission, message } => json!(["signal", mission.write()?, message]),
+            Event::Signal { task, message } => json!(["signal", task.write()?, message]),
             Event::Artifact(r) => json!(["artifact", r.write()?]),
             Event::Review(r) => json!(["review", r.write()?]),
             Event::Invalidate {
@@ -562,7 +572,7 @@ impl Wire for Notification {
             "signal" => {
                 let e = arr(&a[2], 3)?;
                 Event::Signal {
-                    mission: read(&e[1])?,
+                    task: read(&e[1])?,
                     message: read(&e[2])?,
                 }
             }
@@ -918,7 +928,7 @@ fn command_write(c: &Command) -> Result<V, ProgramStoreError> {
             reason,
         } => json!(["invalidate-evidence", observation.write()?, reason]),
         Command::Release(r) => json!(["release", release_write(r)?]),
-        Command::Plan(p) => json!(["plan", p.write()?]),
+        Command::OrderingPlan(p) => json!(["plan", p.write()?]),
         Command::Claim(a) => json!(["claim", a.write()?]),
         Command::Attempt {
             id,
@@ -1016,7 +1026,7 @@ fn command_read(v: &V, k: &CoordinationKernel) -> Result<Command, ProgramStoreEr
             "assess" => Command::Assess(read(&a[1])?),
             "examine" => Command::Examine(read(&a[1])?),
             "release" => Command::Release(Box::new(release_read(&a[1], k)?)),
-            "plan" => Command::Plan(read(&a[1])?),
+            "plan" => Command::OrderingPlan(read(&a[1])?),
             "claim" => Command::Claim(read(&a[1])?),
             "package" => Command::Package(read(&a[1])?),
             _ => unreachable!(),
@@ -1137,3 +1147,6 @@ mod operational;
 
 mod executor;
 mod supervision;
+
+#[cfg(test)]
+mod compatibility;

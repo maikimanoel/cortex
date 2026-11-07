@@ -184,7 +184,7 @@ fn extract_between(
 ///
 /// Exact profile and candidate correspondence plus fully resolved relationships
 /// are needed for scoped CURRENT. This authenticates neither reports nor syntax.
-pub fn qualify<'a>(
+pub fn inspect_validity<'a>(
     index: &'a ReferenceIndex,
     latest: Option<&CandidateObservation>,
 ) -> Result<KnowledgeView<'a>, ExtractionError> {
@@ -197,7 +197,9 @@ pub fn qualify<'a>(
         Some(Validity::Stale)
     } else {
         match &correspondence {
-            BindingDecision::Compatible(_) if index.complete() => Some(Validity::Current),
+            BindingDecision::Compatible(_) if index.all_references_resolved() => {
+                Some(Validity::Current)
+            }
             BindingDecision::Incompatible(_) | BindingDecision::Stale(_) => Some(Validity::Stale),
             _ => None,
         }
@@ -210,14 +212,14 @@ pub fn qualify<'a>(
     })
 }
 
-/// Obtain an actual bounded later Git capture and qualify without changing history.
+/// Obtain an actual bounded later Git capture and inspect validity without changing history.
 pub fn reinspect<'a>(
     repo: &Path,
     index: &'a ReferenceIndex,
     id: ObservationId,
 ) -> Result<KnowledgeView<'a>, ExtractionError> {
     let latest = crate::inspect_candidate(repo, index.candidate().observation().contract(), id)?;
-    qualify(index, Some(&latest))
+    inspect_validity(index, Some(&latest))
 }
 
 #[cfg(test)]

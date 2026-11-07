@@ -244,7 +244,7 @@ fn current_profile_qualification_and_repeated_actual_captures_preserve_git_conte
         reinspect(&r.path, &g, id(5)).unwrap().validity(),
         Some(Validity::Current)
     );
-    assert_eq!(qualify(&g, None).unwrap().validity(), None);
+    assert_eq!(inspect_validity(&g, None).unwrap().validity(), None);
     assert_eq!(
         reinspect(&r.path, &g, id(3)).unwrap().validity(),
         Some(Validity::Stale)
@@ -284,7 +284,10 @@ fn current_profile_qualification_and_repeated_actual_captures_preserve_git_conte
         .unwrap(),
         None,
     );
-    assert_eq!(qualify(&g, Some(&unknown)).unwrap().validity(), None);
+    assert_eq!(
+        inspect_validity(&g, Some(&unknown)).unwrap().validity(),
+        None
+    );
 }
 #[test]
 fn detached_subdirectory_and_literal_non_utf8_source_paths_keep_candidate_identity() {

@@ -69,20 +69,20 @@ pub struct Policy {
     /// Maximum additional attempts in a proven-absent retry chain; zero disables retry.
     pub max_retries: u32,
 }
-/// Exact mission, candidate and ownership correspondence of an effect.
+/// Exact task, candidate and ownership correspondence of an effect.
 #[derive(Clone, PartialEq, Eq)]
 pub struct EffectScope {
     /// Accepted program identity.
     pub program: ProgramId,
     /// Exact protected baseline.
     pub baseline: ContractRevision,
-    /// Target mission.
-    pub mission: TaskId,
+    /// Target task.
+    pub task: TaskId,
     /// Full repository/worktree/commit requirement.
     pub candidate: CandidateRequirement,
     /// Current metadata ownership attempt.
     pub attempt: AttemptId,
-    /// Exact mission generation.
+    /// Exact task generation.
     pub generation: ContractRevision,
     /// Stored instruction package; the composing consumer checks its actual bytes.
     pub package: PackageId,
@@ -133,7 +133,7 @@ pub enum EffectOutcome {
     /// Fixture reported interruption with no success inference.
     Interrupted,
 }
-/// Distinct lifecycle states; none confers authority or mission completion.
+/// Distinct lifecycle states; none confers authority or task completion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EffectStatus {
     /// Intent and simulated quantities retained; dispatch has not been marked.
@@ -507,7 +507,7 @@ impl OperationalProjection {
                 let reserved = quantity(&e.intent.demand, resource)?;
                 let observed = if self.mode == EffectMode::SupervisedFixture {
                     match e.process_observations.last() {
-                        Some(o) if resource == Resource::TimeMillis => o.elapsed_ms,
+                        Some(o) if resource == Resource::ElapsedMillis => o.elapsed_ms,
                         Some(o) if resource == Resource::OutputBytes => o
                             .stdout_bytes
                             .checked_add(o.stderr_bytes)
@@ -534,7 +534,7 @@ impl OperationalProjection {
                     }
                     Some(Reconciliation::Absent)
                         if self.mode == EffectMode::SupervisedFixture
-                            && resource == Resource::TimeMillis
+                            && resource == Resource::ElapsedMillis
                             && self.policy(&e.policy)?.cumulative.contains(&resource) =>
                     {
                         // A measured pre-spawn refusal consumes controller time,
@@ -869,18 +869,18 @@ impl OperationalProjection {
                     return Err(ProgramError::IdentityConflict.into());
                 }
                 let mut supported = BTreeSet::from([
-                    Resource::Workers,
-                    Resource::TimeMillis,
+                    Resource::WorkerSlots,
+                    Resource::ElapsedMillis,
                     Resource::OutputBytes,
                 ]);
                 if spec.containment.is_some() {
-                    supported.extend([Resource::CpuMillis, Resource::RamBytes]);
+                    supported.extend([Resource::CpuMillicores, Resource::RamBytes]);
                 }
                 if resource_set(&policy.capacities) != supported {
                     return Err(ProgramError::EffectUnavailable.into());
                 }
-                if quantity(&record.intent.demand, Resource::Workers)? != 1
-                    || quantity(&record.intent.demand, Resource::TimeMillis)?
+                if quantity(&record.intent.demand, Resource::WorkerSlots)? != 1
+                    || quantity(&record.intent.demand, Resource::ElapsedMillis)?
                         < match &spec.containment {
                             Some(scope) => scope.elapsed_envelope_ms(&spec.limits),
                             None => spec.limits.wall_ms.checked_add(spec.limits.cleanup_ms),
@@ -892,8 +892,10 @@ impl OperationalProjection {
                     return Err(ProgramError::Capacity.into());
                 }
                 if let Some(scope) = &spec.containment
-                    && (quantity(&record.intent.demand, Resource::CpuMillis)?
-                        < scope.cpu_capacity_millis().ok_or(ProgramError::Capacity)?
+                    && (quantity(&record.intent.demand, Resource::CpuMillicores)?
+                        < scope
+                            .cpu_capacity_millicores()
+                            .ok_or(ProgramError::Capacity)?
                         || quantity(&record.intent.demand, Resource::RamBytes)?
                             < scope.controls.memory_bytes)
                 {
@@ -1204,8 +1206,8 @@ impl OperationalProjection {
                     .stdout_bytes
                     .checked_add(observation.stderr_bytes)
                     .ok_or(ProgramError::Capacity)?;
-                if quantity(usage, Resource::Workers)? != 1
-                    || quantity(usage, Resource::TimeMillis)? != observation.elapsed_ms
+                if quantity(usage, Resource::WorkerSlots)? != 1
+                    || quantity(usage, Resource::ElapsedMillis)? != observation.elapsed_ms
                     || quantity(usage, Resource::OutputBytes)? != output
                 {
                     return Err(ProgramError::Structure.into());
@@ -1224,8 +1226,10 @@ impl OperationalProjection {
                         .containment
                         .as_ref()
                         .ok_or(ProgramError::Missing)?;
-                    if quantity(usage, Resource::CpuMillis)?
-                        != scope.cpu_capacity_millis().ok_or(ProgramError::Capacity)?
+                    if quantity(usage, Resource::CpuMillicores)?
+                        != scope
+                            .cpu_capacity_millicores()
+                            .ok_or(ProgramError::Capacity)?
                         || quantity(usage, Resource::RamBytes)?
                             != captured.memory_peak_bytes.ok_or(ProgramError::Missing)?
                     {
@@ -1277,24 +1281,24 @@ impl EffectScope {
         {
             return Err(ProgramError::Stale.into());
         }
-        let scope = state.readiness().scope(&self.mission)?;
+        let scope = state.readiness().scope(&self.task)?;
         if scope.generation() != self.generation
             || scope.context().contract().candidate() != &self.candidate
         {
             return Err(ProgramError::Stale.into());
         }
-        let mission = state.readiness().mission(&self.mission)?;
-        // G1 slot observations concern starting another mission. This exact
+        let task = state.readiness().task(&self.task)?;
+        // G1 slot observations concern starting another task. This exact
         // ownership attempt is already active; the fixture policy below owns
         // resource admission, including verification reserves and unknown costs.
-        if mission.status() != MissionStatus::Active
-            || !mission.dependency_ready()
-            || mission.blockers().iter().any(|b| {
+        if task.status() != TaskStatus::Active
+            || !task.dependency_ready()
+            || task.blockers().iter().any(|b| {
                 !matches!(
                     b,
-                    MissionBlocker::NotPending
-                        | MissionBlocker::CapacityUnknown
-                        | MissionBlocker::NoCapacity
+                    TaskBlocker::NotPending
+                        | TaskBlocker::CapacityUnknown
+                        | TaskBlocker::NoCapacity
                 )
             })
         {
@@ -1318,7 +1322,7 @@ impl EffectScope {
             .iter()
             .find(|i| i.id == attempt.increment)
             .ok_or(ProgramError::Missing)?;
-        if increment.mission != self.mission {
+        if increment.task != self.task {
             return Err(ProgramError::Stale.into());
         }
         Ok(())

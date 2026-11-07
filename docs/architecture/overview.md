@@ -6,6 +6,8 @@ control. The [vision](../product/vision.md) owns product intent, the
 [invariants](core-invariants.md) own shared semantics, and the
 [roadmap](../product/roadmap.md) owns sequencing. This overview describes flow and
 boundaries; it does not define additional capabilities or freeze public APIs.
+The [domain vocabulary](domain-vocabulary.md) defines shared concept names and
+relationships without duplicating those normative owners.
 
 ## Observed implementation
 
@@ -39,6 +41,9 @@ SQLCipher adapter that reconstructs validated Core history; broader persistence,
 privacy lifecycle and recovery features remain planned.
 The [first 003-B reference adapter](knowledge-references.md) adds committed JSON
 source nodes/spans/local references, borrowed queries and contextual validity.
+The bounded [Rust](knowledge-rust.md), [Markdown](knowledge-markdown.md) and
+[Cargo manifest](knowledge-cargo-manifest.md) adapters add distinct lexical
+profiles; they do not supply complete semantic language analysis.
 Core owns the immutable model; CLI owns parsing/Git acquisition. It adds no
 knowledge database, inferred/validated relations or agent behavior.
 Its [additive source-set interface](knowledge-references.md#additive-source-set-contract)
@@ -193,7 +198,8 @@ not select another database, graph service, vector store or event-storage schema
 The [003-A temporal-record contract](temporal-records.md) defines the implemented
 first in-memory requirement/decision history slice and its separate privacy,
 persistence and snapshot gates. Logical memory ownership is implemented cohesively
-in Core, with the first qualified adapter in the CLI library. Existing evidence
+in Core, with the encrypted adapter in Storage and the compatible history
+facade in the CLI library. Existing evidence
 semantics remain unchanged, and full 003-A is not delivered.
 
 ## Foundation reconciliation and extension seams

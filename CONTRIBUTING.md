@@ -1,7 +1,7 @@
 # Contributing to CORTEX
 
 CORTEX is pre-alpha. Milestones 001 and 002 are delivered. Milestone 003 has begun
-with canonical history, bounded encrypted storage and JSON reference knowledge;
+with canonical history, bounded encrypted storage and lexical reference knowledge;
 003-A/003-B remain incomplete, and 003-C–003-F and 004–006 remain planned.
 Maiki Manoel maintains the project and reviews external contributions through
 GitHub pull requests. Automated checks support that review. There is no CLA or
@@ -56,11 +56,15 @@ explicitly; a passing count is not a general correctness or security guarantee.
   applicability and validity; depends on Core.
 - `cortex-storage`: explicit encrypted history/program persistence and replay;
   depends on Core and Evidence, preserving the CLI history compatibility facade.
+- `cortex-harness`: store-gated trusted fixture supervision and bounded host/domain
+  observations; depends on Core, Evidence and Storage.
 - `cortex-cli`: command parsing, bounded Git observation, task-to-evidence
-  integration and read-only program inspection; depends on Core, Evidence and Storage.
+  integration and read-only program inspection; depends on Core, Evidence, Storage
+  and Harness.
 
 Start with the [architecture overview](docs/architecture/overview.md),
 [subsystem ownership](docs/architecture/subsystems.md),
+[domain vocabulary](docs/architecture/domain-vocabulary.md),
 [core invariants](docs/architecture/core-invariants.md) and
 [engineering principles](docs/engineering-principles.md). The
 [capability catalog](docs/product/capability-catalog.md) owns contracts and status;
@@ -87,6 +91,13 @@ Keep changes cohesive, maintainable and proportional to their risk. Preserve
 dependency direction, resource/error semantics, read-only inspection, explicit
 candidate identity, evidence dimensions and the separation of evidence from
 permission. Do not infer PASS from missing execution or binding compatibility.
+
+For each new public concept, explain its definition, owning contract, nearest
+non-synonym, unit and accounting profile where relevant, identity and effects.
+Check its Rust, CLI and retained representation consumers separately. Preserve
+versioned byte contracts with exact mappings and compatibility tests; a spelling
+search alone cannot establish semantic consistency. Keep current implementation
+claims distinct from accepted planned responsibilities.
 
 Add tests that can reject plausible incorrect behavior: negative and boundary
 cases, regression tests for fixes, and integration or end-to-end tests across

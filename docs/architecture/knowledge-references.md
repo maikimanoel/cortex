@@ -77,7 +77,8 @@ whole captured candidate are declared dependencies. Every new candidate invalida
 current reuse conservatively; this slice supplies no transitive/non-impact proof.
 Old indexes remain inspectable against their original candidate without relabeling.
 
-`qualify` consumes an explicit later observation; `reinspect` actually obtains it.
+`inspect_validity` consumes an explicit later observation without acquiring
+source data; `reinspect` actually obtains the observation.
 Both reuse Core binding, without making a verification judgment:
 
 | Context | Existing Evidence validity |
@@ -141,11 +142,14 @@ semantics are inferred. The source-set single-separator subset also leaves a lit
 extra `#` in a pointer unresolved, while the old lexical single-source API can still
 resolve that exact key. This is an explicit new projection limit, not a legacy change.
 
-The original per-source `ReferenceTarget` values and `complete()` never change.
-A collection can resolve a selected cross-document occurrence while its original
-source correctly remains unresolved/incomplete. Every relationship is still
-Extracted/Unverified. Neither collection completeness nor CURRENT creates an
-assessment, PASS, semantic validation or permission.
+The original per-source `ReferenceTarget` values and
+`all_references_resolved()` results never change when constructing a set. A
+collection can resolve a selected cross-document occurrence while its original
+source correctly retains unresolved references. Every relationship is still
+Extracted/Unverified. Resolution of the emitted references neither establishes
+extraction completeness nor creates an assessment, PASS, semantic validation or
+permission. A valid index or collection with no emitted references satisfies this
+universal predicate; a zero-source `ReferenceSet` is invalid.
 
 ### Collection provenance, validity and bounds
 
@@ -156,7 +160,7 @@ conventionally n+M+3, strictly beyond all reserved extraction identities. IDs/ti
 remain caller assertions. The collection has its own adapter/profile, with exact
 per-source parser/profile dependencies; legacy ADAPTER/PROFILE values are unchanged.
 
-The source-set `qualify`/`reinspect` functions reuse Core correspondence and existing
+The source-set `inspect_validity`/`reinspect` functions reuse Core correspondence and existing
 Evidence `Validity`. Matching later capture, matching collection and all source
 profiles, and fully resolved declared-set coverage can establish scoped CURRENT.
 Known candidate/profile mismatch is STALE; missing/uncertain capture or unresolved
@@ -201,9 +205,9 @@ is not a recoverable-memory guarantee.
 
 Refresh collection/source mechanisms and profiles are distinct from legacy profiles.
 They declare the resolver dependency and actual parsed/reused provenance. Refresh
-`qualify`/`reinspect` use existing correspondence and Evidence validity: matching
+`inspect_validity`/`reinspect` use existing correspondence and Evidence validity: matching
 supported complete coverage can be CURRENT, known mismatch is STALE, and missing or
-uncertain coverage is unestablished. Legacy source-set qualification deliberately
+uncertain coverage is unestablished. Legacy source-set validity inspection deliberately
 rejects the new profile. Parse reuse does not re-execute parsing, authenticate an
 origin, establish semantic truth or grant authority. Historical snapshots stay intact.
 

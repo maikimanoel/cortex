@@ -2,8 +2,8 @@
 use super::*;
 use cortex_core::program::domain::*;
 identifiers!(DomainId);
-symbols!(Consumption;CpuExecutionMillis,ElapsedMillis,InputBytes,OutputBytes,Events);
-symbols!(AdministrativeDisposition;Active,Paused,Abandoned);
+symbols!(Consumption;CpuExecutionMillis => "CpuExecutionMillis",ElapsedMillis => "ElapsedMillis",InputBytes => "InputBytes",OutputBytes => "OutputBytes",Events => "Events");
+symbols!(AdministrativeDisposition;Active => "Active",Paused => "Paused",Abandoned => "Abandoned");
 fields!(PoolIdentity;physical,incarnation,host,boot);
 fields!(ConsumptionBudget;dimension,total,reserve,per_operation);
 fields!(ConsumptionReservation;dimension,amount);

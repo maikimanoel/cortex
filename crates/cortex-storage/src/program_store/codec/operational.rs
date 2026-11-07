@@ -6,9 +6,9 @@ use cortex_core::program::{
 };
 
 identifiers!(EffectId);
-symbols!(Resource;Workers,Builds,Tests,CpuMillis,RamBytes,DiskBytes,TimeMillis,OutputBytes,CiJobs,ModelTokens);
-symbols!(EffectMode;ControlledFixture,SupervisedFixture,ExternalExecutor);
-symbols!(EffectOutcome;Succeeded,Failed,Interrupted);
+symbols!(Resource;WorkerSlots => "Workers",BuildJobs => "Builds",TestProcesses => "Tests",CpuMillicores => "CpuMillis",RamBytes => "RamBytes",DiskBytes => "DiskBytes",ElapsedMillis => "TimeMillis",OutputBytes => "OutputBytes",CiJobs => "CiJobs",ModelTokens => "ModelTokens");
+symbols!(EffectMode;ControlledFixture => "ControlledFixture",SupervisedFixture => "SupervisedFixture",ExternalExecutor => "ExternalExecutor");
+symbols!(EffectOutcome;Succeeded => "Succeeded",Failed => "Failed",Interrupted => "Interrupted");
 impl Wire for u32 {
     fn write(&self) -> Result<V, ProgramStoreError> {
         u64::from(*self).write()
@@ -20,7 +20,7 @@ impl Wire for u32 {
 fields!(Capacity;resource,available,verification_reserve,declared_enforceable);
 fields!(Demand;resource,amount);
 fields!(Policy;reference,program,baseline,mode,host,privacy,capacities,cumulative,max_effects,max_retries);
-fields!(EffectScope;program,baseline,mission,candidate,attempt,generation,package,package_revision);
+fields!(EffectScope;program,baseline,task,candidate,attempt,generation,package,package_revision);
 fields!(OperationalGrant;id,principal,policy,scope,not_before,expires_before,ceilings,basis);
 fields!(EffectIntent;id,grant,scope,demand,retry_of);
 

@@ -137,7 +137,7 @@ fn exact_endpoints_spans_cycles_and_order_preserve_the_single_source_contract_re
     assert_eq!(set.sources()[1].id(), &id(4));
     assert_eq!(set.id(), &id(5));
     assert_eq!(set.references().len(), 6);
-    assert!(set.complete());
+    assert!(set.all_references_resolved());
     let incoming: Vec<_> = set.incoming(&path(b"b.json"), "/Id").unwrap().collect();
     assert_eq!(incoming.len(), 1);
     let occurrence = incoming[0];
@@ -194,7 +194,7 @@ fn exact_endpoints_spans_cycles_and_order_preserve_the_single_source_contract_re
         knowledge::PROFILE,
         "v1;serde_json=1.0.154;raw_value;local-pointer-fragments;depth=32"
     );
-    assert!(!legacy.complete());
+    assert!(!legacy.all_references_resolved());
     assert_eq!(
         legacy.references()[0].target(),
         &ReferenceTarget::Unresolved(UnresolvedReference::OutsideCoverage)
@@ -302,7 +302,7 @@ fn unsupported_forms_unselected_documents_and_missing_locators_stay_explicit() {
     let before = snapshot(&r);
     let set = extract(&r, &c, &[b"a.json", b"common.json"]).unwrap();
     assert_eq!(set.references().len(), cases.len());
-    assert!(!set.complete());
+    assert!(!set.all_references_resolved());
     for o in set.references() {
         let (_, reason) = cases
             .iter()
@@ -665,7 +665,7 @@ fn actual_reinspection_is_later_and_distinguishes_incomplete_stale_and_current()
     let c = contract(&r);
     let set = extract(&r, &c, &[b"a.json", b"b.json"]).unwrap();
     let original = set.clone();
-    assert_eq!(qualify(&set, None).unwrap().validity(), None);
+    assert_eq!(inspect_validity(&set, None).unwrap().validity(), None);
     for n in 3..=5 {
         let view = reinspect(&r.path, &set, id(n)).unwrap();
         assert_eq!(view.validity(), Some(Validity::Stale));
@@ -676,7 +676,7 @@ fn actual_reinspection_is_later_and_distinguishes_incomplete_stale_and_current()
     }
     let latest = inspect_candidate(&r.path, &c, id(6)).unwrap();
     assert_eq!(
-        qualify(&set, Some(&latest)).unwrap().validity(),
+        inspect_validity(&set, Some(&latest)).unwrap().validity(),
         Some(Validity::Current)
     );
     let incomplete = CandidateObservation::new(
@@ -692,7 +692,7 @@ fn actual_reinspection_is_later_and_distinguishes_incomplete_stale_and_current()
         .unwrap(),
         latest.basis().cloned(),
     );
-    let view = qualify(&set, Some(&incomplete)).unwrap();
+    let view = inspect_validity(&set, Some(&incomplete)).unwrap();
     assert_eq!(view.validity(), None);
     assert_eq!(
         view.correspondence(),

@@ -1129,10 +1129,10 @@ impl DomainProjection {
 fn reusable(resource: Resource) -> bool {
     matches!(
         resource,
-        Resource::Workers
-            | Resource::Builds
-            | Resource::Tests
-            | Resource::CpuMillis
+        Resource::WorkerSlots
+            | Resource::BuildJobs
+            | Resource::TestProcesses
+            | Resource::CpuMillicores
             | Resource::RamBytes
             | Resource::DiskBytes
     )

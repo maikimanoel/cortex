@@ -27,7 +27,7 @@ pub mod markdown;
 pub mod refresh;
 /// Bounded Rust lexical declarations, imports and explicit local correspondence.
 pub mod rust;
-/// Bounded committed JSON source-set acquisition and contextual qualification.
+/// Bounded committed JSON source-set acquisition and contextual validity inspection.
 pub mod source_set;
 #[cfg(test)]
 use crate::support;
@@ -147,7 +147,7 @@ fn extract_between(
         .map_err(ExtractionError::Domain)
 }
 
-/// Query-context qualification, independently of unverified relationship disposition.
+/// Query-context validity inspection, independently of unverified relationship disposition.
 pub struct KnowledgeView<'a> {
     index: &'a ReferenceIndex,
     correspondence: BindingDecision,
@@ -172,10 +172,10 @@ impl<'a> KnowledgeView<'a> {
         self.profile_matches
     }
 }
-/// Qualify an index against an explicitly supplied later capture. No I/O or assessment.
+/// Inspect validity against an explicitly supplied later capture. No I/O or assessment.
 ///
 /// Trusted callers must really reobserve; changing an ID alone establishes no freshness.
-pub fn qualify<'a>(
+pub fn inspect_validity<'a>(
     index: &'a ReferenceIndex,
     latest: Option<&CandidateObservation>,
 ) -> Result<KnowledgeView<'a>, ExtractionError> {
@@ -187,7 +187,9 @@ pub fn qualify<'a>(
         Some(Validity::Stale)
     } else {
         match &correspondence {
-            BindingDecision::Compatible(_) if index.complete() => Some(Validity::Current),
+            BindingDecision::Compatible(_) if index.all_references_resolved() => {
+                Some(Validity::Current)
+            }
             BindingDecision::Incompatible(_) | BindingDecision::Stale(_) => Some(Validity::Stale),
             _ => None,
         }
@@ -199,14 +201,14 @@ pub fn qualify<'a>(
         profile_matches: profile,
     })
 }
-/// Perform a real later bounded capture, then qualify retained knowledge; no mutation.
+/// Perform a real later bounded capture, then inspect retained knowledge validity; no mutation.
 pub fn reinspect<'a>(
     repo: &Path,
     index: &'a ReferenceIndex,
     id: ObservationId,
 ) -> Result<KnowledgeView<'a>, ExtractionError> {
     let latest = crate::inspect_candidate(repo, index.candidate().observation().contract(), id)?;
-    qualify(index, Some(&latest))
+    inspect_validity(index, Some(&latest))
 }
 
 #[cfg(test)]

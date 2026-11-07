@@ -29,7 +29,7 @@ fn limits() -> GraphLimits {
     GraphLimits::new(6, 5, 256, 4096, 2_000_000).unwrap()
 }
 
-fn context(id: &str, hex: &str, revision: u64) -> MissionContext {
+fn context(id: &str, hex: &str, revision: u64) -> TaskContext {
     // Construct synthetic absolute paths only; no directory or Git object is created.
     let root = std::env::temp_dir().join(format!("g1-synthetic-{id}"));
     let repo = RepositoryIdentity::new(root.clone(), root.join(".git"), root.join(".git")).unwrap();
@@ -59,9 +59,9 @@ fn context(id: &str, hex: &str, revision: u64) -> MissionContext {
         state,
         Some(ComparisonBasis::new("synthetic-profile", b"asserted comparison".to_vec()).unwrap()),
     );
-    MissionContext::new(c, Some(capture)).unwrap()
+    TaskContext::new(c, Some(capture)).unwrap()
 }
-fn missions() -> Vec<Mission> {
+fn tasks() -> Vec<Task> {
     [
         ("A", "a"),
         ("B", "b"),
@@ -72,7 +72,7 @@ fn missions() -> Vec<Mission> {
     ]
     .into_iter()
     .map(|(id, hex)| {
-        Mission::new(
+        Task::new(
             context(id, hex, 1),
             ConsumerKind::Preview,
             DependencyCoverage::DeclaredComplete,
@@ -155,7 +155,7 @@ fn edges() -> Vec<DependencyEdge> {
 }
 fn projection() -> ReadinessProjection {
     ReadinessProjection::new(
-        DependencyGraph::new(graph_ref(1), missions(), edges(), limits()).unwrap(),
+        DependencyGraph::new(graph_ref(1), tasks(), edges(), limits()).unwrap(),
     )
     .unwrap()
 }
@@ -192,7 +192,7 @@ fn start_roots(p: &mut ReadinessProjection) {
     }
     slots(p, "initial-slots", 2);
 }
-fn status(p: &mut ReadinessProjection, id: &str, name: &str, status: MissionStatus) {
+fn status(p: &mut ReadinessProjection, id: &str, name: &str, status: TaskStatus) {
     apply(
         p,
         id,
@@ -275,7 +275,7 @@ fn release(
     apply(p, id, event)
 }
 fn eligible(p: &ReadinessProjection, name: &str) -> bool {
-    p.mission(&task(name)).unwrap().eligible()
+    p.task(&task(name)).unwrap().eligible()
 }
 fn released(p: &ReadinessProjection, name: &str) -> bool {
     matches!(
@@ -291,7 +291,7 @@ fn expect_atomic(p: &mut ReadinessProjection, n: Notification, error: ReadinessE
 fn prime() -> ReadinessProjection {
     let mut p = projection();
     start_roots(&mut p);
-    status(&mut p, "active-A", "A", MissionStatus::Active);
+    status(&mut p, "active-A", "A", TaskStatus::Active);
     let a = report(
         &mut p,
         "report-A",
@@ -301,7 +301,7 @@ fn prime() -> ReadinessProjection {
         ReadinessLevel::IntegratedAccepted,
     );
     release(&mut p, "review-AB", "AB", a, &["pAB"]);
-    status(&mut p, "active-B", "B", MissionStatus::Active);
+    status(&mut p, "active-B", "B", TaskStatus::Active);
     let b = report(
         &mut p,
         "report-B",
@@ -339,19 +339,19 @@ fn g1_01_to_04_roots_intermediate_chain_independent_branch_and_required_fan_in()
     for name in ["A", "B", "C", "D", "E", "F"] {
         assert!(!eligible(&p, name));
     }
-    assert!(p.mission(&task("A")).unwrap().dependency_ready());
-    assert!(!p.mission(&task("B")).unwrap().dependency_ready());
+    assert!(p.task(&task("A")).unwrap().dependency_ready());
+    assert!(!p.task(&task("B")).unwrap().dependency_ready());
     start_roots(&mut p);
     assert!(eligible(&p, "A") && eligible(&p, "D"));
     for name in ["B", "C", "E", "F"] {
         assert!(!eligible(&p, name));
     }
-    status(&mut p, "A-started", "A", MissionStatus::Active);
+    status(&mut p, "A-started", "A", TaskStatus::Active);
     apply(
         &mut p,
         "signal",
         Event::Signal {
-            mission: task("A"),
+            task: task("A"),
             message: "a1 is ready; please begin".into(),
         },
     );
@@ -367,13 +367,10 @@ fn g1_01_to_04_roots_intermediate_chain_independent_branch_and_required_fan_in()
     assert!(!eligible(&p, "B"));
     let transition = release(&mut p, "a-reviewed", "AB", a.clone(), &["pAB"]);
     assert_eq!(transition.changed_edges(), &[eid("AB")]);
-    assert_eq!(transition.changed_missions(), &[task("B")]);
+    assert_eq!(transition.changed_tasks(), &[task("B")]);
     assert_eq!(transition.authority(), ExecutionAuthority::Unavailable);
     assert!(eligible(&p, "B"));
-    assert_eq!(
-        p.mission(&task("A")).unwrap().status(),
-        MissionStatus::Active
-    );
+    assert_eq!(p.task(&task("A")).unwrap().status(), TaskStatus::Active);
     assert!(!eligible(&p, "A"));
     assert_eq!(p.edge(&eid("AB")).unwrap().releases()[0].report(), &a);
     assert_ne!(
@@ -386,7 +383,7 @@ fn g1_01_to_04_roots_intermediate_chain_independent_branch_and_required_fan_in()
             .commit()
     );
 
-    status(&mut p, "B-started", "B", MissionStatus::Active);
+    status(&mut p, "B-started", "B", TaskStatus::Active);
     let b = report(
         &mut p,
         "b-report",
@@ -421,10 +418,7 @@ fn g1_01_to_04_roots_intermediate_chain_independent_branch_and_required_fan_in()
     );
     release(&mut p, "e-for-f", "EF", e, &["pEF"]);
     assert!(eligible(&p, "F"));
-    assert_eq!(
-        p.mission(&task("B")).unwrap().status(),
-        MissionStatus::Active
-    );
+    assert_eq!(p.task(&task("B")).unwrap().status(), TaskStatus::Active);
     for edge in ["AB", "BC", "BF", "DE", "EF"] {
         assert!(released(&p, edge));
         assert_eq!(
@@ -447,7 +441,7 @@ fn g1_05_sibling_edges_require_their_own_predicates_and_revisions() {
         &["pBF"],
     ));
     let mut p = ReadinessProjection::new(
-        DependencyGraph::new(graph_ref(1), missions(), es, limits()).unwrap(),
+        DependencyGraph::new(graph_ref(1), tasks(), es, limits()).unwrap(),
     )
     .unwrap();
     let b = report(
@@ -510,8 +504,8 @@ fn g1_06_levels_are_exact_and_provisional_preview_requires_explicit_policy() {
         ReadinessLevel::ContractStable,
         ReadinessLevel::ImplementationProvisional,
     ] {
-        let mut ms = missions();
-        ms[1] = Mission::new(
+        let mut ms = tasks();
+        ms[1] = Task::new(
             context("B", "b", 1),
             ConsumerKind::Effectful,
             DependencyCoverage::DeclaredComplete,
@@ -562,7 +556,7 @@ fn g1_06_levels_are_exact_and_provisional_preview_requires_explicit_policy() {
             &["pAB"],
         )];
         let mut p = ReadinessProjection::new(
-            DependencyGraph::new(graph_ref(1), missions(), es, limits()).unwrap(),
+            DependencyGraph::new(graph_ref(1), tasks(), es, limits()).unwrap(),
         )
         .unwrap();
         start_roots(&mut p);
@@ -593,7 +587,7 @@ fn g1_06_levels_are_exact_and_provisional_preview_requires_explicit_policy() {
         }
         assert!(eligible(&p, "B"));
         assert_eq!(
-            p.mission(&task("B")).unwrap().authority(),
+            p.task(&task("B")).unwrap().authority(),
             ExecutionAuthority::Unavailable
         );
     }
@@ -604,8 +598,8 @@ fn g1_07_and_10_invalidation_has_causal_closure_and_requires_fresh_context_revie
     let mut p = prime();
     assert!(eligible(&p, "C") && eligible(&p, "E") && eligible(&p, "F"));
     let old = p.notification(&nid("review-AB")).unwrap().clone();
-    let d = p.mission(&task("D")).unwrap().clone();
-    let e = p.mission(&task("E")).unwrap().clone();
+    let d = p.task(&task("D")).unwrap().clone();
+    let e = p.task(&task("E")).unwrap().clone();
     let event = Event::Invalidate {
         roots: vec![p.scope(&task("A")).unwrap()],
         cause: source("oracle-change-v2"),
@@ -613,18 +607,18 @@ fn g1_07_and_10_invalidation_has_causal_closure_and_requires_fresh_context_revie
     };
     let transition = apply(&mut p, "invalidate-A", event);
     assert_eq!(
-        transition.changed_missions(),
+        transition.changed_tasks(),
         &[task("A"), task("B"), task("C"), task("F")]
     );
     assert_eq!(
         transition.changed_edges(),
         &[eid("AB"), eid("BC"), eid("BF"), eid("EF")]
     );
-    assert_eq!(p.mission(&task("D")).unwrap(), &d);
-    assert_eq!(p.mission(&task("E")).unwrap(), &e);
+    assert_eq!(p.task(&task("D")).unwrap(), &d);
+    assert_eq!(p.task(&task("E")).unwrap(), &e);
     assert!(released(&p, "DE"));
     for name in ["B", "C", "F"] {
-        assert!(!p.mission(&task(name)).unwrap().dependency_ready());
+        assert!(!p.task(&task(name)).unwrap().dependency_ready());
     }
     assert_eq!(p.scope(&task("A")).unwrap().generation(), rev(2));
     let before = p.clone();
@@ -661,7 +655,7 @@ fn g1_07_and_10_invalidation_has_causal_closure_and_requires_fresh_context_revie
     assert_eq!(records.len(), 2);
     assert_eq!(records[0].invalidated_by(), Some(&nid("invalidate-A")));
     assert_eq!(records[1].invalidated_by(), None);
-    assert!(p.mission(&task("B")).unwrap().dependency_ready());
+    assert!(p.task(&task("B")).unwrap().dependency_ready());
     assert!(!eligible(&p, "B")); // still Active
     let b = report(
         &mut p,
@@ -680,8 +674,8 @@ fn g1_07_and_10_invalidation_has_causal_closure_and_requires_fresh_context_revie
     release(&mut p, "new-EF", "EF", nid("report-E"), &["pEF"]);
     ready(&mut p, "new-F-preconditions", "F");
     assert!(eligible(&p, "F"));
-    assert_eq!(p.mission(&task("D")).unwrap(), &d);
-    assert_eq!(p.mission(&task("E")).unwrap(), &e);
+    assert_eq!(p.task(&task("D")).unwrap(), &d);
+    assert_eq!(p.task(&task("E")).unwrap(), &e);
 }
 
 #[test]
@@ -690,13 +684,13 @@ fn g1_08_capacity_changes_never_erase_release_basis_or_grant_authority() {
     let edge = p.edge(&eid("BC")).unwrap().clone();
     assert!(eligible(&p, "C"));
     slots(&mut p, "no-slots", 0);
-    assert!(p.mission(&task("C")).unwrap().dependency_ready());
+    assert!(p.task(&task("C")).unwrap().dependency_ready());
     assert!(!eligible(&p, "C"));
     assert!(
-        p.mission(&task("C"))
+        p.task(&task("C"))
             .unwrap()
             .blockers()
-            .contains(&MissionBlocker::NoCapacity)
+            .contains(&TaskBlocker::NoCapacity)
     );
     assert_eq!(p.edge(&eid("BC")).unwrap(), &edge);
     slots(&mut p, "slots-restored", 1);
@@ -721,7 +715,7 @@ fn g1_09_duplicate_conflict_and_rejected_identity_reuse_are_atomic() {
         &p,
         "signal",
         Event::Signal {
-            mission: task("A"),
+            task: task("A"),
             message: "information".into(),
         },
     );
@@ -735,7 +729,7 @@ fn g1_09_duplicate_conflict_and_rejected_identity_reuse_are_atomic() {
         &p,
         "signal",
         Event::Signal {
-            mission: task("A"),
+            task: task("A"),
             message: "different".into(),
         },
     );
@@ -744,7 +738,7 @@ fn g1_09_duplicate_conflict_and_rejected_identity_reuse_are_atomic() {
         &p,
         "reusable",
         Event::Signal {
-            mission: task("absent"),
+            task: task("absent"),
             message: "information".into(),
         },
     );
@@ -753,7 +747,7 @@ fn g1_09_duplicate_conflict_and_rejected_identity_reuse_are_atomic() {
         &mut p,
         "reusable",
         Event::Signal {
-            mission: task("A"),
+            task: task("A"),
             message: "corrected".into(),
         },
     );
@@ -782,7 +776,7 @@ fn g1_09_duplicate_conflict_and_rejected_identity_reuse_are_atomic() {
 
 #[test]
 fn g1_09_graph_refuses_cycles_self_edges_missing_and_ambiguous_identities() {
-    let ms = missions();
+    let ms = tasks();
     let es = edges();
     let mut duplicate = ms.clone();
     duplicate.push(ms[0].clone());
@@ -794,7 +788,7 @@ fn g1_09_graph_refuses_cycles_self_edges_missing_and_ambiguous_identities() {
             GraphLimits::new(7, 5, 10, 100, 1_000_000).unwrap()
         )
         .unwrap_err(),
-        ReadinessError::InvalidGraph(GraphIssue::DuplicateMission)
+        ReadinessError::InvalidGraph(GraphIssue::DuplicateTask)
     );
     let mut duplicate = es.clone();
     duplicate[1] = es[0].clone();
@@ -888,13 +882,13 @@ fn g1_10_unknown_coverage_never_becomes_ready_through_new_flags_or_reviews() {
         },
     );
     for name in ["A", "B", "C", "D", "E", "F"] {
-        assert!(!p.mission(&task(name)).unwrap().dependency_ready());
+        assert!(!p.task(&task(name)).unwrap().dependency_ready());
         assert_eq!(p.scope(&task(name)).unwrap().generation(), rev(2));
         assert!(
-            p.mission(&task(name))
+            p.task(&task(name))
                 .unwrap()
                 .blockers()
-                .contains(&MissionBlocker::UnknownCoverage)
+                .contains(&TaskBlocker::UnknownCoverage)
         );
     }
     assert!(!released(&p, "DE"));
@@ -918,14 +912,14 @@ fn g1_10_unknown_coverage_never_becomes_ready_through_new_flags_or_reviews() {
 #[test]
 fn missing_capture_and_unknown_declared_dependencies_are_held_not_approved() {
     for missing_capture in [true, false] {
-        let mut ms = missions();
+        let mut ms = tasks();
         let original = context("A", "a", 1);
         let ctx = if missing_capture {
-            MissionContext::new(original.contract().clone(), None).unwrap()
+            TaskContext::new(original.contract().clone(), None).unwrap()
         } else {
             original
         };
-        ms[0] = Mission::new(
+        ms[0] = Task::new(
             ctx,
             ConsumerKind::Preview,
             if missing_capture {
@@ -966,7 +960,7 @@ fn missing_capture_and_unknown_declared_dependencies_are_held_not_approved() {
 fn g1_11_cancellation_is_terminal_but_not_artifact_rollback_and_merge_is_not_acceptance() {
     let mut p = prime();
     let edge = p.edge(&eid("AB")).unwrap().clone();
-    status(&mut p, "cancel-A", "A", MissionStatus::Cancelled);
+    status(&mut p, "cancel-A", "A", TaskStatus::Cancelled);
     assert_eq!(p.edge(&eid("AB")).unwrap(), &edge);
     assert!(!eligible(&p, "A"));
     let n = notification(
@@ -974,7 +968,7 @@ fn g1_11_cancellation_is_terminal_but_not_artifact_rollback_and_merge_is_not_acc
         "restart",
         Event::Status {
             scope: p.scope(&task("A")).unwrap(),
-            status: MissionStatus::Pending,
+            status: TaskStatus::Pending,
             source: source("restart"),
         },
     );
@@ -984,7 +978,7 @@ fn g1_11_cancellation_is_terminal_but_not_artifact_rollback_and_merge_is_not_acc
         &mut p,
         "merge-message",
         Event::Signal {
-            mission: task("A"),
+            task: task("A"),
             message: "clean Git merge; exit zero".into(),
         },
     );
@@ -1000,17 +994,17 @@ fn g1_11_cancellation_is_terminal_but_not_artifact_rollback_and_merge_is_not_acc
 }
 
 #[test]
-fn whole_mission_acceptance_needs_its_distinct_report_status_and_new_edge_review() {
+fn whole_task_acceptance_needs_its_distinct_report_status_and_new_edge_review() {
     let es = vec![dependency(
         "AB",
         ("A", "B"),
         artifact("accepted-A", 1, "1"),
-        DependencyKind::MissionAcceptance,
+        DependencyKind::TaskAcceptance,
         ReadinessLevel::IntegratedAccepted,
         &["all-exits"],
     )];
     let mut p = ReadinessProjection::new(
-        DependencyGraph::new(graph_ref(1), missions(), es, limits()).unwrap(),
+        DependencyGraph::new(graph_ref(1), tasks(), es, limits()).unwrap(),
     )
     .unwrap();
     start_roots(&mut p);
@@ -1031,7 +1025,7 @@ fn whole_mission_acceptance_needs_its_distinct_report_status_and_new_edge_review
         "acceptance-report",
         "A",
         artifact("accepted-A", 1, "1"),
-        DependencyKind::MissionAcceptance,
+        DependencyKind::TaskAcceptance,
         ReadinessLevel::IntegratedAccepted,
     );
     release(&mut p, "premature-review", "AB", a.clone(), &["all-exits"]);
@@ -1039,8 +1033,8 @@ fn whole_mission_acceptance_needs_its_distinct_report_status_and_new_edge_review
         p.edge(&eid("AB")).unwrap().decision(),
         &EdgeDecision::Held(HoldReason::ProducerNotAccepted)
     );
-    status(&mut p, "active", "A", MissionStatus::Active);
-    status(&mut p, "accepted", "A", MissionStatus::Accepted);
+    status(&mut p, "active", "A", TaskStatus::Active);
+    status(&mut p, "accepted", "A", TaskStatus::Accepted);
     assert!(!released(&p, "AB"));
     release(&mut p, "fresh-review", "AB", a, &["all-exits"]);
     assert!(released(&p, "AB") && eligible(&p, "B"));
@@ -1084,8 +1078,8 @@ fn tiny_graph(bytes: usize, notifications: usize, supports: usize) -> Dependency
     );
     DependencyGraph::new(
         GraphReference::new(GraphId::new("g").unwrap(), rev(1)),
-        vec![Mission::new(
-            MissionContext::new(c, None).unwrap(),
+        vec![Task::new(
+            TaskContext::new(c, None).unwrap(),
             ConsumerKind::Preview,
             DependencyCoverage::DeclaredComplete,
         )],
@@ -1100,7 +1094,7 @@ fn exact_byte_support_and_notification_limits_refuse_without_eviction_or_identit
     let graph = tiny_graph(54, 2, 1);
     assert_eq!(graph.input_usage().bytes(), 54);
     assert_eq!(graph.input_usage().supports(), 0);
-    let ms = graph.missions().to_vec();
+    let ms = graph.tasks().to_vec();
     assert_eq!(
         DependencyGraph::new(
             graph.reference().clone(),
@@ -1149,7 +1143,7 @@ fn exact_byte_support_and_notification_limits_refuse_without_eviction_or_identit
         nid("m"),
         p.graph().reference().clone(),
         Event::Signal {
-            mission: task("x"),
+            task: task("x"),
             message: "z".into(),
         },
     )
@@ -1163,7 +1157,7 @@ fn exact_byte_support_and_notification_limits_refuse_without_eviction_or_identit
         nid("k"),
         p.graph().reference().clone(),
         Event::Signal {
-            mission: task("x"),
+            task: task("x"),
             message: "z".into(),
         },
     )
@@ -1176,25 +1170,25 @@ fn exact_byte_support_and_notification_limits_refuse_without_eviction_or_identit
 }
 
 #[test]
-fn graph_mission_edge_and_support_bounds_have_exact_positive_neighbors() {
+fn graph_task_edge_and_support_bounds_have_exact_positive_neighbors() {
     assert!(
         DependencyGraph::new(
             graph_ref(1),
-            missions(),
+            tasks(),
             edges(),
             GraphLimits::new(6, 5, 1, 5, 2_000_000).unwrap()
         )
         .is_ok()
     );
     for (m, e, s, error) in [
-        (5, 5, 5, LimitKind::Missions),
+        (5, 5, 5, LimitKind::Tasks),
         (6, 4, 5, LimitKind::Edges),
         (6, 5, 4, LimitKind::Supports),
     ] {
         assert_eq!(
             DependencyGraph::new(
                 graph_ref(1),
-                missions(),
+                tasks(),
                 edges(),
                 GraphLimits::new(m, e, 1, s, 2_000_000).unwrap()
             )
@@ -1220,7 +1214,7 @@ fn graph_mission_edge_and_support_bounds_have_exact_positive_neighbors() {
 #[test]
 fn review_support_budget_includes_all_three_predicate_references_and_attestations() {
     for (supports, ok) in [(7, true), (6, false)] {
-        let ms = missions().into_iter().take(2).collect();
+        let ms = tasks().into_iter().take(2).collect();
         let es = vec![edges().remove(0)];
         let mut p = ReadinessProjection::new(
             DependencyGraph::new(
@@ -1271,7 +1265,7 @@ fn malformed_keys_revisions_and_signal_text_are_rejected_with_valid_neighbors() 
                 nid("n"),
                 graph_ref(1),
                 Event::Signal {
-                    mission: task("A"),
+                    task: task("A"),
                     message
                 }
             )
@@ -1283,7 +1277,7 @@ fn malformed_keys_revisions_and_signal_text_are_rejected_with_valid_neighbors() 
             nid("n"),
             graph_ref(1),
             Event::Signal {
-                mission: task("A"),
+                task: task("A"),
                 message: "é".repeat(2048)
             }
         )
@@ -1293,7 +1287,7 @@ fn malformed_keys_revisions_and_signal_text_are_rejected_with_valid_neighbors() 
         nid("n"),
         graph_ref(2),
         Event::Signal {
-            mission: task("A"),
+            task: task("A"),
             message: "wrong graph".into(),
         },
     )
@@ -1306,8 +1300,8 @@ fn malformed_keys_revisions_and_signal_text_are_rejected_with_valid_neighbors() 
 fn immutable_graph_replacement_cannot_import_old_context_or_notification_authority() {
     let old = prime();
     let old_report = old.notification(&nid("report-A")).unwrap().clone();
-    let mut ms = missions();
-    ms[0] = Mission::new(
+    let mut ms = tasks();
+    ms[0] = Task::new(
         context("A", "5", 2),
         ConsumerKind::Preview,
         DependencyCoverage::DeclaredComplete,
@@ -1337,15 +1331,15 @@ fn immutable_graph_replacement_cannot_import_old_context_or_notification_authori
         old_context.contract().candidate().clone(),
     );
     assert_eq!(
-        MissionContext::new(changed, old_context.capture().cloned()).unwrap_err(),
+        TaskContext::new(changed, old_context.capture().cloned()).unwrap_err(),
         ReadinessError::ContractAlias
     );
 }
 
 #[test]
 fn deterministic_graph_order_and_redacted_debug_preserve_explicit_private_getters() {
-    let graph = DependencyGraph::new(graph_ref(1), missions(), edges(), limits()).unwrap();
-    let mut ms = missions();
+    let graph = DependencyGraph::new(graph_ref(1), tasks(), edges(), limits()).unwrap();
+    let mut ms = tasks();
     ms.reverse();
     let mut es = edges();
     es.reverse();
@@ -1358,7 +1352,7 @@ fn deterministic_graph_order_and_redacted_debug_preserve_explicit_private_getter
         &p,
         "private-notification",
         Event::Signal {
-            mission: task("A"),
+            task: task("A"),
             message: "secret payload /private/location".into(),
         },
     );
@@ -1369,7 +1363,7 @@ fn deterministic_graph_order_and_redacted_debug_preserve_explicit_private_getter
         "{p:?} {:?} {:?} {:?}",
         p.graph(),
         p.scope(&task("A")).unwrap(),
-        p.mission(&task("A")).unwrap()
+        p.task(&task("A")).unwrap()
     );
     for private in [
         "secret",
@@ -1397,7 +1391,7 @@ fn missing_and_mismatched_review_references_refuse_without_consuming_identity() 
     let mut p = projection();
     for result in [
         p.edge(&eid("absent")).map(|_| ()),
-        p.mission(&task("absent")).map(|_| ()),
+        p.task(&task("absent")).map(|_| ()),
         p.notification(&nid("absent")).map(|_| ()),
     ] {
         assert_eq!(result, Err(ReadinessError::MissingReference));
@@ -1419,7 +1413,7 @@ fn missing_and_mismatched_review_references_refuse_without_consuming_identity() 
         &mut p,
         "information",
         Event::Signal {
-            mission: task("A"),
+            task: task("A"),
             message: "not an artifact".into(),
         },
     );
@@ -1500,7 +1494,7 @@ fn incomplete_captures_hold_and_known_candidate_contradictions_refuse() {
         old.basis().cloned(),
     );
     assert_eq!(
-        MissionContext::new(base.contract().clone(), Some(wrong)).unwrap_err(),
+        TaskContext::new(base.contract().clone(), Some(wrong)).unwrap_err(),
         ReadinessError::IncompatibleReference
     );
     for capture in [
@@ -1519,9 +1513,9 @@ fn incomplete_captures_hold_and_known_candidate_contradictions_refuse() {
             old.basis().cloned(),
         ),
     ] {
-        let mut ms = missions();
-        ms[0] = Mission::new(
-            MissionContext::new(base.contract().clone(), Some(capture)).unwrap(),
+        let mut ms = tasks();
+        ms[0] = Task::new(
+            TaskContext::new(base.contract().clone(), Some(capture)).unwrap(),
             ConsumerKind::Preview,
             DependencyCoverage::DeclaredComplete,
         );
@@ -1531,10 +1525,10 @@ fn incomplete_captures_hold_and_known_candidate_contradictions_refuse() {
         .unwrap();
         start_roots(&mut p);
         assert!(
-            p.mission(&task("A"))
+            p.task(&task("A"))
                 .unwrap()
                 .blockers()
-                .contains(&MissionBlocker::MissingContext)
+                .contains(&TaskBlocker::MissingContext)
         );
         let a = report(
             &mut p,
@@ -1554,8 +1548,8 @@ fn incomplete_captures_hold_and_known_candidate_contradictions_refuse() {
 
 #[test]
 fn integrated_effectful_model_is_advisory_and_capacity_has_exact_neighbors() {
-    let mut ms = missions();
-    ms[1] = Mission::new(
+    let mut ms = tasks();
+    ms[1] = Task::new(
         context("B", "b", 1),
         ConsumerKind::Effectful,
         DependencyCoverage::DeclaredComplete,
@@ -1574,7 +1568,7 @@ fn integrated_effectful_model_is_advisory_and_capacity_has_exact_neighbors() {
             source: source("excess"),
         },
     );
-    expect_atomic(&mut p, n, ReadinessError::Limit(LimitKind::Missions));
+    expect_atomic(&mut p, n, ReadinessError::Limit(LimitKind::Tasks));
     let a = report(
         &mut p,
         "a",
@@ -1586,7 +1580,7 @@ fn integrated_effectful_model_is_advisory_and_capacity_has_exact_neighbors() {
     release(&mut p, "review", "AB", a, &["pAB"]);
     assert!(eligible(&p, "B"));
     assert_eq!(
-        p.mission(&task("B")).unwrap().authority(),
+        p.task(&task("B")).unwrap().authority(),
         ExecutionAuthority::Unavailable
     );
     ready(&mut p, "ready-A-again", "A");
@@ -1601,10 +1595,10 @@ fn integrated_effectful_model_is_advisory_and_capacity_has_exact_neighbors() {
     );
     p.apply(n).unwrap();
     assert!(
-        p.mission(&task("A"))
+        p.task(&task("A"))
             .unwrap()
             .blockers()
-            .contains(&MissionBlocker::PreconditionsUnmet)
+            .contains(&TaskBlocker::PreconditionsUnmet)
     );
     assert!(!eligible(&p, "A"));
 }

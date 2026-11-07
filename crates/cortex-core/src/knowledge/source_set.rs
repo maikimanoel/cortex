@@ -8,7 +8,7 @@
 //!
 //! Only lexical relative document paths and local pointer fragments are supported.
 //! No URI decoding, normalization, `$id`, discovery or recursive expansion occurs.
-//! Existing per-source targets and completeness retain their original meanings.
+//! Existing per-source targets and reference resolution retain their original meanings.
 //!
 //! `#` and `#/Id` select the same document. `common.json`, `common.json#` and
 //! `models/user.json#/Id` select a document relative to the referring path's raw
@@ -371,8 +371,10 @@ impl ReferenceSet {
             .map(|p| self.occurrence(p)))
     }
     /// Whether every occurrence resolves within the declared source set/subset.
-    /// This does not redefine any original per-source completeness value.
-    pub fn complete(&self) -> bool {
+    /// Empty emitted references satisfy this predicate; construction still requires
+    /// at least one source. This does not change per-source reference resolution,
+    /// establish extraction completeness, or assess semantic validity.
+    pub fn all_references_resolved(&self) -> bool {
         self.projections
             .iter()
             .all(|p| matches!(p.target, Target::Node { .. }))

@@ -137,7 +137,7 @@ fn prelaunch_uncertainty_and_generic_reports_cannot_bypass_process_receipts() {
         assert!(p == before);
     }
     assert!(p.has_pending_attempt(&s.attempt));
-    assert_eq!(p.accounted(Resource::Workers).unwrap(), 1);
+    assert_eq!(p.accounted(Resource::WorkerSlots).unwrap(), 1);
 }
 #[test]
 fn captured_incarnation_and_observation_identity_cannot_be_replayed_or_replaced() {
@@ -242,7 +242,7 @@ fn cancellation_and_revocation_stop_authority_without_claiming_quiescence() {
         )
         .is_err()
     );
-    assert_eq!(p.accounted(Resource::Workers).unwrap(), 1);
+    assert_eq!(p.accounted(Resource::WorkerSlots).unwrap(), 1);
     let mut done = unknown.clone();
     done.id = ObservationId::new("process-fixture", 3).unwrap();
     done.quiescence = Quiescence::DirectChildReapedStreamsClosed;
@@ -552,7 +552,7 @@ fn measured_prespawn_refusal_keeps_actual_controller_cost_without_fictional_chil
     );
     refused.elapsed_ms = 7000;
     observed(&state, &mut p, &s, refused, 7003);
-    assert_eq!(p.accounted(Resource::TimeMillis).unwrap(), 7000);
+    assert_eq!(p.accounted(Resource::ElapsedMillis).unwrap(), 7000);
     p.apply(
         &state,
         EffectEvent::Reconcile {
@@ -564,11 +564,11 @@ fn measured_prespawn_refusal_keeps_actual_controller_cost_without_fictional_chil
         },
     )
     .unwrap();
-    assert_eq!(p.accounted(Resource::TimeMillis).unwrap(), 7000);
-    assert_eq!(p.accounted(Resource::Workers).unwrap(), 0);
+    assert_eq!(p.accounted(Resource::ElapsedMillis).unwrap(), 7000);
+    assert_eq!(p.accounted(Resource::WorkerSlots).unwrap(), 0);
     assert_eq!(p.accounted(Resource::OutputBytes).unwrap(), 0);
     let waiting = Proposal {
-        mission: task("D"),
+        task: task("D"),
         band: 0,
         waiting_rounds: 0,
         risk_rank: 0,
@@ -579,7 +579,7 @@ fn measured_prespawn_refusal_keeps_actual_controller_cost_without_fictional_chil
     assert!(
         decision[0]
             .held
-            .contains(&WaitReason::Contention(Resource::TimeMillis))
+            .contains(&WaitReason::Contention(Resource::ElapsedMillis))
     );
 }
 #[test]
@@ -600,7 +600,7 @@ fn supervised_overrun_is_charged_while_pending_and_after_quiescent_failure() {
     exceeded.stdout_bytes = 6000;
     observed(&state, &mut p, &s, exceeded.clone(), 6003);
     assert_eq!(p.effects()[0].report, Some(EffectOutcome::Failed));
-    assert_eq!(p.accounted(Resource::TimeMillis).unwrap(), 6000);
+    assert_eq!(p.accounted(Resource::ElapsedMillis).unwrap(), 6000);
     assert_eq!(p.accounted(Resource::OutputBytes).unwrap(), 6000);
     let mut lower = exceeded.clone();
     lower.id = ObservationId::new("process-fixture", 2).unwrap();
@@ -637,11 +637,11 @@ fn supervised_overrun_is_charged_while_pending_and_after_quiescent_failure() {
         },
     )
     .unwrap();
-    assert_eq!(p.accounted(Resource::Workers).unwrap(), 0);
-    assert_eq!(p.accounted(Resource::TimeMillis).unwrap(), 6000);
+    assert_eq!(p.accounted(Resource::WorkerSlots).unwrap(), 0);
+    assert_eq!(p.accounted(Resource::ElapsedMillis).unwrap(), 6000);
     assert_eq!(p.accounted(Resource::OutputBytes).unwrap(), 6000);
     let waiting = Proposal {
-        mission: task("D"),
+        task: task("D"),
         band: 0,
         waiting_rounds: 0,
         risk_rank: 0,
@@ -770,14 +770,46 @@ fn owned_scope_resource_contract_separates_rate_from_cumulative_time() {
     let limits = definition().limits();
     assert!(spec.validate(limits).is_ok());
     let containment = spec.containment.as_mut().unwrap();
-    assert_eq!(containment.cpu_capacity_millis(), Some(1000));
+    assert_eq!(containment.cpu_capacity_millicores(), Some(1000));
     assert_eq!(containment.elapsed_envelope_ms(&spec.limits), Some(7000));
     containment.cpu_time_ms = 1500;
-    assert_eq!(containment.cpu_capacity_millis(), Some(1000));
+    assert_eq!(containment.cpu_capacity_millicores(), Some(1000));
     containment.controls.cpu_quota_us = 50_000;
-    assert_eq!(containment.cpu_capacity_millis(), Some(500));
+    assert_eq!(containment.cpu_capacity_millicores(), Some(500));
     containment.escalation_ms = u64::MAX;
     assert!(spec.validate(limits).is_err());
+}
+
+#[test]
+fn cpu_millicore_accessor_preserves_rounding_zero_and_overflow_boundaries() {
+    let (_, _, scope) = setup();
+    let mut spec = contained_spec(&scope);
+    let limits = definition().limits();
+    let controls = &mut spec.containment.as_mut().unwrap().controls;
+    controls.cpu_quota_us = 1;
+    controls.cpu_period_us = 100_000;
+    assert_eq!(
+        spec.containment.as_ref().unwrap().cpu_capacity_millicores(),
+        Some(1)
+    );
+    spec.containment.as_mut().unwrap().controls.cpu_quota_us = 0;
+    assert_eq!(
+        spec.containment.as_ref().unwrap().cpu_capacity_millicores(),
+        Some(0)
+    );
+    // Arithmetic observation and valid admission are deliberately distinct.
+    assert!(spec.validate(limits).is_err());
+    spec.containment.as_mut().unwrap().controls.cpu_period_us = 0;
+    assert_eq!(
+        spec.containment.as_ref().unwrap().cpu_capacity_millicores(),
+        None
+    );
+    spec.containment.as_mut().unwrap().controls.cpu_period_us = 100_000;
+    spec.containment.as_mut().unwrap().controls.cpu_quota_us = u64::MAX;
+    assert_eq!(
+        spec.containment.as_ref().unwrap().cpu_capacity_millicores(),
+        None
+    );
 }
 
 fn checkpoint_setup() -> (

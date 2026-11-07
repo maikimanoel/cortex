@@ -7,8 +7,8 @@ use cortex_core::{
 
 pub fn demand() -> Vec<Demand> {
     [
-        (Resource::Workers, 1),
-        (Resource::TimeMillis, 1200),
+        (Resource::WorkerSlots, 1),
+        (Resource::ElapsedMillis, 1200),
         (Resource::OutputBytes, 1000),
     ]
     .into_iter()
@@ -28,13 +28,13 @@ pub fn policy() -> Policy {
         privacy: source("private-fixture"),
         capacities: vec![
             Capacity {
-                resource: Resource::Workers,
+                resource: Resource::WorkerSlots,
                 available: Some(2),
                 verification_reserve: 1,
                 declared_enforceable: true,
             },
             Capacity {
-                resource: Resource::TimeMillis,
+                resource: Resource::ElapsedMillis,
                 available: Some(5000),
                 verification_reserve: 1000,
                 declared_enforceable: true,
@@ -46,7 +46,7 @@ pub fn policy() -> Policy {
                 declared_enforceable: true,
             },
         ],
-        cumulative: vec![Resource::TimeMillis, Resource::OutputBytes],
+        cumulative: vec![Resource::ElapsedMillis, Resource::OutputBytes],
         max_effects: 8,
         max_retries: 1,
     }
@@ -55,7 +55,7 @@ pub fn scope(state: &ProgramState) -> EffectScope {
     EffectScope {
         program: state.definition().id().clone(),
         baseline: rev(1),
-        mission: task("A"),
+        task: task("A"),
         candidate: state
             .readiness()
             .scope(&task("A"))
@@ -146,10 +146,10 @@ pub fn owned_scope() -> OwnedScopeSpec {
 }
 pub fn scope_demand() -> Vec<Demand> {
     [
-        (Resource::Workers, 1),
-        (Resource::TimeMillis, 7000),
+        (Resource::WorkerSlots, 1),
+        (Resource::ElapsedMillis, 7000),
         (Resource::OutputBytes, 81920),
-        (Resource::CpuMillis, 1000),
+        (Resource::CpuMillicores, 1000),
         (Resource::RamBytes, 536_870_912),
     ]
     .into_iter()
@@ -163,10 +163,10 @@ pub fn scope_policy() -> Policy {
     let mut p = policy();
     p.reference = source("scope-policy");
     p.capacities = [
-        (Resource::Workers, 2, 1),
-        (Resource::TimeMillis, 21_000, 7000),
+        (Resource::WorkerSlots, 2, 1),
+        (Resource::ElapsedMillis, 21_000, 7000),
         (Resource::OutputBytes, 245_760, 81_920),
-        (Resource::CpuMillis, 3000, 2000),
+        (Resource::CpuMillicores, 3000, 2000),
         (Resource::RamBytes, 4_831_838_208, 4_294_967_296),
     ]
     .into_iter()
@@ -333,8 +333,8 @@ pub fn observed(
 }
 pub fn usage(o: &ProcessObservation) -> Vec<Demand> {
     [
-        (Resource::Workers, 1),
-        (Resource::TimeMillis, o.elapsed_ms),
+        (Resource::WorkerSlots, 1),
+        (Resource::ElapsedMillis, o.elapsed_ms),
         (Resource::OutputBytes, o.stdout_bytes + o.stderr_bytes),
     ]
     .into_iter()

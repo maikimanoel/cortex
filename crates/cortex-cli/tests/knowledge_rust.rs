@@ -264,12 +264,12 @@ fn current_stale_missing_observation_and_profile_qualification_retain_original_f
     r.commit_file("source.rs", "struct Item; use self::Item as Alias;");
     let c = contract(&r);
     let g = extract(&r, &c).unwrap();
-    assert!(g.complete());
+    assert!(g.all_references_resolved());
     assert_eq!(
         rust::reinspect(&r.path, &g, id(4)).unwrap().validity(),
         Some(Validity::Current)
     );
-    assert_eq!(rust::qualify(&g, None).unwrap().validity(), None);
+    assert_eq!(rust::inspect_validity(&g, None).unwrap().validity(), None);
     assert_eq!(
         rust::reinspect(&r.path, &g, id(3)).unwrap().validity(),
         Some(Validity::Stale)
@@ -293,9 +293,12 @@ fn current_stale_missing_observation_and_profile_qualification_retain_original_f
     assert!(!view.profile_matches());
     assert_eq!(view.validity(), Some(Validity::Stale));
     assert!(
-        !cortex_cli::knowledge::qualify(&g, Some(&inspect_candidate(&r.path, &c, id(6)).unwrap()))
-            .unwrap()
-            .profile_matches()
+        !cortex_cli::knowledge::inspect_validity(
+            &g,
+            Some(&inspect_candidate(&r.path, &c, id(6)).unwrap())
+        )
+        .unwrap()
+        .profile_matches()
     );
     fs::write(r.path.join("source.rs"), "struct Changed;").unwrap();
     assert!(matches!(
@@ -383,7 +386,7 @@ fn detached_literal_and_non_utf8_paths_work_without_assuming_crate_root() {
         g.candidate().observation().state().head(),
         Head::Detached { .. }
     ));
-    assert!(g.complete());
+    assert!(g.all_references_resolved());
     let raw = std::ffi::OsString::from_vec(b"source-\xff.rs".to_vec());
     fs::write(r.path.join(&raw), "struct BytePath;").unwrap();
     assert!(

@@ -263,9 +263,9 @@ impl SystemdNonceDomain {
             .and_then(|n| n.checked_div(l.cpu_period_us))
             .ok_or_else(|| issue(phase, DomainCause::Contract))?;
         for (resource, amount) in [
-            (Resource::Workers, 1),
+            (Resource::WorkerSlots, 1),
             (Resource::RamBytes, l.memory_bytes),
-            (Resource::CpuMillis, required_cpu),
+            (Resource::CpuMillicores, required_cpu),
         ] {
             if intent
                 .effect

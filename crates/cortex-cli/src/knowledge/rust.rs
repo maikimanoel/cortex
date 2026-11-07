@@ -52,7 +52,7 @@
 //! Ambiguous/dynamic targets use `Unresolved(OutsideCoverage)`; absent explicit local
 //! names use `MissingTarget`. Glob leaves use `OutsideCoverage`.
 //!
-//! Success establishes supported structural coverage only. [`ReferenceIndex::complete`]
+//! Success establishes supported structural coverage only. [`ReferenceIndex::all_references_resolved`]
 //! means all emitted occurrences have lexical local targets; it never establishes
 //! complete Rust semantics, compilation, validation or authority. Errors distinguish
 //! unsupported coverage from malformed lexical/structural material and finite limits.
@@ -192,7 +192,7 @@ fn extract_between(
 /// Profile mismatch/demonstrated candidate change is stale; missing observation or
 /// unresolved targets is unestablished. CURRENT is scoped lexical correspondence,
 /// never a Rust semantic/validation claim. Caller-built provenance is unauthenticated.
-pub fn qualify<'a>(
+pub fn inspect_validity<'a>(
     index: &'a ReferenceIndex,
     latest: Option<&CandidateObservation>,
 ) -> Result<KnowledgeView<'a>, ExtractionError> {
@@ -204,7 +204,9 @@ pub fn qualify<'a>(
         Some(Validity::Stale)
     } else {
         match &correspondence {
-            BindingDecision::Compatible(_) if index.complete() => Some(Validity::Current),
+            BindingDecision::Compatible(_) if index.all_references_resolved() => {
+                Some(Validity::Current)
+            }
             BindingDecision::Incompatible(_) | BindingDecision::Stale(_) => Some(Validity::Stale),
             _ => None,
         }
@@ -216,14 +218,14 @@ pub fn qualify<'a>(
         profile_matches: profile,
     })
 }
-/// Obtain a real later bounded capture and qualify without changing the historical index.
+/// Obtain a real later bounded capture and inspect validity without changing the historical index.
 pub fn reinspect<'a>(
     repo: &Path,
     index: &'a ReferenceIndex,
     id: ObservationId,
 ) -> Result<KnowledgeView<'a>, ExtractionError> {
     let latest = crate::inspect_candidate(repo, index.candidate().observation().contract(), id)?;
-    qualify(index, Some(&latest))
+    inspect_validity(index, Some(&latest))
 }
 
 #[cfg(test)]

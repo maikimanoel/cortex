@@ -120,7 +120,7 @@ fn amendment_checks_each_declared_source_root_before_appending() {
             Input::Amend {
                 next: Box::new(next),
                 non_impact: cortex_evidence::program::NonImpact {
-                    missions: vec![],
+                    tasks: vec![],
                     basis: source("all-mission-contracts-changed"),
                 },
             },
@@ -155,7 +155,7 @@ fn amendment_checks_each_declared_source_root_before_appending() {
                 Input::Amend {
                     next: Box::new(neighbor),
                     non_impact: cortex_evidence::program::NonImpact {
-                        missions: vec![],
+                        tasks: vec![],
                         basis: source("all-mission-contracts-changed"),
                     },
                 },
@@ -228,7 +228,7 @@ fn equivalent_scope_path_spellings_replay_exact_bytes_and_historical_duplicates(
                 ),
             )
         });
-        assert!(original.graph().missions() == equivalent.graph().missions());
+        assert!(original.graph().tasks() == equivalent.graph().tasks());
         let mut kernel = CoordinationKernel::new(equivalent).unwrap();
         let release = prepare_release(&mut kernel, "AB", true);
         admit(&mut kernel, "release", Input::Release(Box::new(release)));
@@ -255,7 +255,7 @@ fn equivalent_scope_path_spellings_replay_exact_bytes_and_historical_duplicates(
                     Input::Amend {
                         next: Box::new(definition_revision(2, true)),
                         non_impact: cortex_evidence::program::NonImpact {
-                            missions: vec![task("D"), task("E")],
+                            tasks: vec![task("D"), task("E")],
                             basis: source("unchanged-components"),
                         },
                     },
@@ -302,7 +302,7 @@ fn evidence_graph_packages_and_unknown_attempts_survive_exact_encrypted_reopen()
         loaded
             .state()
             .readiness()
-            .mission(&task("B"))
+            .task(&task("B"))
             .unwrap()
             .eligible()
     );
@@ -310,7 +310,7 @@ fn evidence_graph_packages_and_unknown_attempts_survive_exact_encrypted_reopen()
         loaded
             .state()
             .readiness()
-            .mission(&task("E"))
+            .task(&task("E"))
             .unwrap()
             .eligible()
     );
@@ -360,7 +360,7 @@ fn amendment_roundtrip_preserves_unaffected_releases_and_prior_basis() {
         Input::Amend {
             next: Box::new(definition_revision(2, true)),
             non_impact: cortex_evidence::program::NonImpact {
-                missions: vec![task("D"), task("E")],
+                tasks: vec![task("D"), task("E")],
                 basis: source("complete-independent-coverage"),
             },
         },
@@ -373,7 +373,7 @@ fn amendment_roundtrip_preserves_unaffected_releases_and_prior_basis() {
         loaded
             .state()
             .readiness()
-            .mission(&task("E"))
+            .task(&task("E"))
             .unwrap()
             .eligible()
     );
@@ -381,7 +381,7 @@ fn amendment_roundtrip_preserves_unaffected_releases_and_prior_basis() {
         !loaded
             .state()
             .readiness()
-            .mission(&task("B"))
+            .task(&task("B"))
             .unwrap()
             .eligible()
     );
@@ -848,7 +848,7 @@ fn plans_packages_handoffs_and_explicit_invalidations_replay_without_loss() {
     admit(
         &mut k,
         "plan",
-        Input::Plan(Plan {
+        Input::OrderingPlan(OrderingPlan {
             revision: rev(1),
             order: ["D", "E", "A", "B", "C", "F"]
                 .into_iter()
@@ -860,7 +860,7 @@ fn plans_packages_handoffs_and_explicit_invalidations_replay_without_loss() {
     let package = PackageRequest {
         id: PackageId::new("package-A").unwrap(),
         revision: rev(1),
-        mission: task("A"),
+        task: task("A"),
         baseline: rev(1),
         generation: rev(1),
         sources: vec![SourceInput {
@@ -904,7 +904,7 @@ fn plans_packages_handoffs_and_explicit_invalidations_replay_without_loss() {
     let s = store_kernel(&f, &k);
     let loaded = s.load(&key(), Access::ReadOnly).unwrap();
     assert!(loaded.packages() == k.packages());
-    assert!(loaded.state().plan() == k.state().plan());
+    assert!(loaded.state().ordering_plan() == k.state().ordering_plan());
     assert!(loaded.state().attempts() == k.state().attempts());
     assert!(loaded.records() == k.records());
     assert_eq!(
@@ -915,7 +915,7 @@ fn plans_packages_handoffs_and_explicit_invalidations_replay_without_loss() {
         !loaded
             .state()
             .readiness()
-            .mission(&task("B"))
+            .task(&task("B"))
             .unwrap()
             .eligible()
     );

@@ -62,7 +62,7 @@ key!(
 key!(
     ArtifactId,
     "artifact_id",
-    "A declared output role, separate from mission/task identity."
+    "A declared output role, separate from task identity."
 );
 key!(
     NotificationId,
@@ -78,8 +78,8 @@ key!(
 /// Logical resource whose caller-selected bound was exceeded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LimitKind {
-    /// Retained missions.
-    Missions,
+    /// Retained tasks.
+    Tasks,
     /// Retained edges.
     Edges,
     /// All admitted notifications, with no eviction.
@@ -93,19 +93,19 @@ pub enum LimitKind {
 /// Structural graph refusal, without caller identifiers or payloads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GraphIssue {
-    /// A graph must have at least one mission.
+    /// A graph must have at least one task.
     Empty,
-    /// Two missions share a task identity.
-    DuplicateMission,
+    /// Two tasks share a task identity.
+    DuplicateTask,
     /// Two edges share an identity.
     DuplicateEdge,
     /// An output identity/revision has conflicting producer or candidate meaning.
     ArtifactAlias,
     /// Predicates are absent or duplicated.
     Predicates,
-    /// A named mission is not present.
+    /// A named task is not present.
     MissingEndpoint,
-    /// A mission depends on itself.
+    /// A task depends on itself.
     SelfEdge,
     /// The directed graph contains a cycle.
     Cycle,
@@ -133,7 +133,7 @@ pub enum UnsupportedOperation {
     ResponsibilityHandoff,
     /// G1 has no effect recovery or rollback mechanism.
     ExternalEffect,
-    /// No process/tool/mission dispatch is supplied.
+    /// No process/tool/task dispatch is supplied.
     Dispatch,
 }
 
@@ -150,7 +150,7 @@ pub enum ReadinessError {
     ContractAlias,
     /// A supplied context/reference contradicts its frozen declaration.
     IncompatibleReference,
-    /// A named mission, edge, or admitted artifact report is absent.
+    /// A named task, edge, or admitted artifact report is absent.
     MissingReference,
     /// The notification names another graph identity/revision.
     GraphMismatch,
@@ -203,7 +203,7 @@ impl ReadinessError {
 /// Explicit logical bounds. Zero and values exceeding `isize::MAX` are invalid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GraphLimits {
-    missions: usize,
+    tasks: usize,
     edges: usize,
     notifications: usize,
     supports: usize,
@@ -212,20 +212,20 @@ pub struct GraphLimits {
 impl GraphLimits {
     /// Choose all bounds explicitly; there is no implicit operational policy.
     pub fn new(
-        missions: usize,
+        tasks: usize,
         edges: usize,
         notifications: usize,
         supports: usize,
         bytes: usize,
     ) -> Result<Self, ReadinessError> {
-        if [missions, edges, notifications, supports, bytes]
+        if [tasks, edges, notifications, supports, bytes]
             .iter()
             .any(|n| *n == 0 || *n > isize::MAX as usize)
         {
             return Err(ReadinessError::InvalidLimits);
         }
         Ok(Self {
-            missions,
+            tasks,
             edges,
             notifications,
             supports,
@@ -235,7 +235,7 @@ impl GraphLimits {
     /// Read the configured bound, not a host enforcement guarantee.
     pub fn get(self, kind: LimitKind) -> usize {
         match kind {
-            LimitKind::Missions => self.missions,
+            LimitKind::Tasks => self.tasks,
             LimitKind::Edges => self.edges,
             LimitKind::Notifications => self.notifications,
             LimitKind::Supports => self.supports,
@@ -307,11 +307,11 @@ impl GraphReference {
 
 /// Frozen task/candidate contract and optional original supplied capture.
 #[derive(Clone, PartialEq, Eq)]
-pub struct MissionContext {
+pub struct TaskContext {
     contract: CandidateBindingContract,
     capture: Option<CandidateObservation>,
 }
-impl MissionContext {
+impl TaskContext {
     /// Reject contract aliasing or known candidate contradictions, without I/O.
     /// Missing/incomplete captures remain representable and block readiness.
     pub fn new(
@@ -373,28 +373,28 @@ impl MissionContext {
 
 /// Scoped frozen context plus a positive projection generation, not a freshness proof.
 #[derive(Clone, PartialEq, Eq)]
-pub struct MissionScope {
-    context: MissionContext,
+pub struct TaskScope {
+    context: TaskContext,
     generation: ContractRevision,
 }
-impl MissionScope {
+impl TaskScope {
     /// Declare an exact model generation. Actual reinspection is not performed.
-    pub fn new(context: MissionContext, generation: ContractRevision) -> Self {
+    pub fn new(context: TaskContext, generation: ContractRevision) -> Self {
         Self {
             context,
             generation,
         }
     }
     /// Read the frozen complete context.
-    pub fn context(&self) -> &MissionContext {
+    pub fn context(&self) -> &TaskContext {
         &self.context
     }
     /// Read the projection generation, separate from task/graph revisions.
     pub fn generation(&self) -> ContractRevision {
         self.generation
     }
-    /// The existing task ID identifies this mission.
-    pub fn mission(&self) -> &TaskId {
+    /// The existing task ID identifies this task.
+    pub fn task(&self) -> &TaskId {
         self.context.contract.task().id()
     }
 }
@@ -415,16 +415,16 @@ pub enum ConsumerKind {
     /// A hypothetical operational consumer; only integrated inputs can be modeled.
     Effectful,
 }
-/// One cohesive mission uses the existing task contract, not a second task model.
+/// One cohesive task uses the existing task contract, not a second task model.
 #[derive(Clone, PartialEq, Eq)]
-pub struct Mission {
-    context: MissionContext,
+pub struct Task {
+    context: TaskContext,
     kind: ConsumerKind,
     coverage: DependencyCoverage,
 }
-impl Mission {
+impl Task {
     /// Retain the supplied context and explicit dependency coverage.
-    pub fn new(context: MissionContext, kind: ConsumerKind, coverage: DependencyCoverage) -> Self {
+    pub fn new(context: TaskContext, kind: ConsumerKind, coverage: DependencyCoverage) -> Self {
         Self {
             context,
             kind,
@@ -436,7 +436,7 @@ impl Mission {
         self.context.contract.task().id()
     }
     /// Borrow the original contract/capture.
-    pub fn context(&self) -> &MissionContext {
+    pub fn context(&self) -> &TaskContext {
         &self.context
     }
     /// Read the modeled consumer kind.
@@ -478,13 +478,13 @@ impl ArtifactReference {
         &self.candidate
     }
 }
-/// Artifact availability is distinct from whole-mission acceptance.
+/// Artifact availability is distinct from whole-task acceptance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DependencyKind {
     /// A producer can continue after this output is released.
     Artifact,
     /// Requires a distinct acceptance report, accepted producer status and review.
-    MissionAcceptance,
+    TaskAcceptance,
 }
 /// Exact dependency predicates, not a universal numeric quality ranking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -527,7 +527,7 @@ impl ArtifactRequirement {
     pub fn artifact(&self) -> &ArtifactReference {
         &self.artifact
     }
-    /// Inspect artifact versus mission-acceptance dependency.
+    /// Inspect artifact versus task-acceptance dependency.
     pub fn kind(&self) -> DependencyKind {
         self.kind
     }
@@ -567,11 +567,11 @@ impl DependencyEdge {
     pub fn id(&self) -> &EdgeId {
         &self.id
     }
-    /// Read the producer mission ID.
+    /// Read the producer task ID.
     pub fn producer(&self) -> &TaskId {
         &self.producer
     }
-    /// Read the consumer mission ID.
+    /// Read the consumer task ID.
     pub fn consumer(&self) -> &TaskId {
         &self.consumer
     }
@@ -585,7 +585,7 @@ impl DependencyEdge {
 #[derive(Clone, PartialEq, Eq)]
 pub struct DependencyGraph {
     reference: GraphReference,
-    missions: Vec<Mission>,
+    tasks: Vec<Task>,
     edges: Vec<DependencyEdge>,
     order: Vec<usize>,
     limits: GraphLimits,
@@ -595,30 +595,30 @@ impl DependencyGraph {
     /// Validate bounds, unambiguous references, operational-level constraints and DAG topology.
     pub fn new(
         reference: GraphReference,
-        mut missions: Vec<Mission>,
+        mut tasks: Vec<Task>,
         mut edges: Vec<DependencyEdge>,
         limits: GraphLimits,
     ) -> Result<Self, ReadinessError> {
-        if missions.is_empty() {
+        if tasks.is_empty() {
             return Err(ReadinessError::InvalidGraph(GraphIssue::Empty));
         }
-        if missions.len() > limits.missions {
-            return Err(ReadinessError::Limit(LimitKind::Missions));
+        if tasks.len() > limits.tasks {
+            return Err(ReadinessError::Limit(LimitKind::Tasks));
         }
         if edges.len() > limits.edges {
             return Err(ReadinessError::Limit(LimitKind::Edges));
         }
-        missions.sort_by(|a, b| a.id().as_str().cmp(b.id().as_str()));
+        tasks.sort_by(|a, b| a.id().as_str().cmp(b.id().as_str()));
         edges.sort_by(|a, b| a.id.cmp(&b.id));
-        if missions.windows(2).any(|w| w[0].id() == w[1].id()) {
-            return Err(ReadinessError::InvalidGraph(GraphIssue::DuplicateMission));
+        if tasks.windows(2).any(|w| w[0].id() == w[1].id()) {
+            return Err(ReadinessError::InvalidGraph(GraphIssue::DuplicateTask));
         }
         if edges.windows(2).any(|w| w[0].id == w[1].id) {
             return Err(ReadinessError::InvalidGraph(GraphIssue::DuplicateEdge));
         }
         let mut graph = Self {
             reference,
-            missions,
+            tasks,
             edges,
             order: vec![],
             limits,
@@ -626,21 +626,21 @@ impl DependencyGraph {
         };
         let mut usage = InputUsage::default();
         usage.bytes_add(graph.reference.id.0.len())?;
-        for mission in &graph.missions {
-            count_context(&mut usage, &mission.context, limits)?;
+        for task in &graph.tasks {
+            count_context(&mut usage, &task.context, limits)?;
             usage.check(limits)?;
         }
         for (i, edge) in graph.edges.iter().enumerate() {
             let p = graph
-                .mission_index(&edge.producer)
+                .task_index(&edge.producer)
                 .map_err(|_| ReadinessError::InvalidGraph(GraphIssue::MissingEndpoint))?;
             let c = graph
-                .mission_index(&edge.consumer)
+                .task_index(&edge.consumer)
                 .map_err(|_| ReadinessError::InvalidGraph(GraphIssue::MissingEndpoint))?;
             if p == c {
                 return Err(ReadinessError::InvalidGraph(GraphIssue::SelfEdge));
             }
-            if graph.missions[c].kind == ConsumerKind::Effectful
+            if graph.tasks[c].kind == ConsumerKind::Effectful
                 && edge.requirement.level != ReadinessLevel::IntegratedAccepted
             {
                 return Err(ReadinessError::Unsupported(UnsupportedOperation::Dispatch));
@@ -669,26 +669,26 @@ impl DependencyGraph {
         }
         usage.check(limits)?;
         // Iterative Kahn traversal avoids recursion proportional to caller input depth.
-        let mut degree = reserved(graph.missions.len())?;
-        degree.resize(graph.missions.len(), 0usize);
+        let mut degree = reserved(graph.tasks.len())?;
+        degree.resize(graph.tasks.len(), 0usize);
         for edge in &graph.edges {
-            let c = graph.mission_index(&edge.consumer)?;
+            let c = graph.task_index(&edge.consumer)?;
             degree[c] = degree[c]
                 .checked_add(1)
                 .ok_or(ReadinessError::Limit(LimitKind::Edges))?;
         }
-        let mut order = reserved(graph.missions.len())?;
-        let mut visited = reserved(graph.missions.len())?;
-        visited.resize(graph.missions.len(), false);
-        for _ in 0..graph.missions.len() {
+        let mut order = reserved(graph.tasks.len())?;
+        let mut visited = reserved(graph.tasks.len())?;
+        visited.resize(graph.tasks.len(), false);
+        for _ in 0..graph.tasks.len() {
             let Some(p) = (0..degree.len()).find(|i| !visited[*i] && degree[*i] == 0) else {
                 return Err(ReadinessError::InvalidGraph(GraphIssue::Cycle));
             };
             visited[p] = true;
             order.push(p);
             for edge in &graph.edges {
-                if edge.producer == *graph.missions[p].id() {
-                    degree[graph.mission_index(&edge.consumer)?] -= 1;
+                if edge.producer == *graph.tasks[p].id() {
+                    degree[graph.task_index(&edge.consumer)?] -= 1;
                 }
             }
         }
@@ -700,9 +700,9 @@ impl DependencyGraph {
     pub fn reference(&self) -> &GraphReference {
         &self.reference
     }
-    /// Inspect missions in stable task-ID order.
-    pub fn missions(&self) -> &[Mission] {
-        &self.missions
+    /// Inspect tasks in stable task-ID order.
+    pub fn tasks(&self) -> &[Task] {
+        &self.tasks
     }
     /// Inspect required edges in stable edge-ID order.
     pub fn edges(&self) -> &[DependencyEdge] {
@@ -716,8 +716,8 @@ impl DependencyGraph {
     pub fn input_usage(&self) -> InputUsage {
         self.usage
     }
-    fn mission_index(&self, id: &TaskId) -> Result<usize, ReadinessError> {
-        self.missions
+    fn task_index(&self, id: &TaskId) -> Result<usize, ReadinessError> {
+        self.tasks
             .binary_search_by(|m| m.id().as_str().cmp(id.as_str()))
             .map_err(|_| ReadinessError::MissingReference)
     }
@@ -731,7 +731,7 @@ impl DependencyGraph {
 /// A producer's immutable report; it alone cannot release any consumer.
 #[derive(Clone, PartialEq, Eq)]
 pub struct ArtifactReport {
-    producer: MissionScope,
+    producer: TaskScope,
     artifact: ArtifactReference,
     kind: DependencyKind,
     level: ReadinessLevel,
@@ -740,7 +740,7 @@ pub struct ArtifactReport {
 impl ArtifactReport {
     /// Record exact supplied producer/output correspondence and reported level.
     pub fn new(
-        producer: MissionScope,
+        producer: TaskScope,
         artifact: ArtifactReference,
         kind: DependencyKind,
         level: ReadinessLevel,
@@ -755,7 +755,7 @@ impl ArtifactReport {
         }
     }
     /// Read the original producing context/generation.
-    pub fn producer(&self) -> &MissionScope {
+    pub fn producer(&self) -> &TaskScope {
         &self.producer
     }
     /// Read the independent output candidate/revision.
@@ -874,8 +874,8 @@ pub enum ReviewRole {
 pub struct EdgeReview {
     edge: EdgeId,
     report: NotificationId,
-    producer: MissionScope,
-    consumer: MissionScope,
+    producer: TaskScope,
+    consumer: TaskScope,
     role: ReviewRole,
     attestation: ReviewAttestation,
     supports: Vec<PredicateSupport>,
@@ -885,8 +885,8 @@ impl EdgeReview {
     pub fn new(
         edge: EdgeId,
         report: NotificationId,
-        producer: MissionScope,
-        consumer: MissionScope,
+        producer: TaskScope,
+        consumer: TaskScope,
         role: ReviewRole,
         attestation: ReviewAttestation,
         supports: Vec<PredicateSupport>,
@@ -910,7 +910,7 @@ impl EdgeReview {
         &self.report
     }
     /// Borrow producer and consumer scopes, respectively.
-    pub fn scopes(&self) -> [&MissionScope; 2] {
+    pub fn scopes(&self) -> [&TaskScope; 2] {
         [&self.producer, &self.consumer]
     }
     /// Inspect the unauthenticated role assertion.
@@ -927,14 +927,15 @@ impl EdgeReview {
     }
 }
 
-/// In-memory attempt status. Updates report data; they execute nothing.
+/// In-memory task coordination status, separate from an execution attempt.
+/// Updates report data; they execute nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MissionStatus {
+pub enum TaskStatus {
     /// Not started; only this status can be start-eligible.
     Pending,
     /// Already active; cannot be started again.
     Active,
-    /// Caller reports acceptance; a whole-mission edge still needs report/review.
+    /// Caller reports acceptance; a whole-task edge still needs report/review.
     Accepted,
     /// Terminal cancellation, not rollback of existing artifacts.
     Cancelled,
@@ -944,8 +945,8 @@ pub enum MissionStatus {
 pub enum Event {
     /// Information only; bounded text cannot release or grant anything.
     Signal {
-        /// Named mission.
-        mission: TaskId,
+        /// Named task.
+        task: TaskId,
         /// Private caller message.
         message: String,
     },
@@ -954,10 +955,10 @@ pub enum Event {
     /// Coordinator-role review data, boxed to avoid inflating every notification.
     /// This is not a real approval operation.
     Review(Box<EdgeReview>),
-    /// Invalidate causal closure; unknown coverage conservatively blocks all missions.
+    /// Invalidate causal closure; unknown coverage conservatively blocks all tasks.
     Invalidate {
         /// Current scoped roots of the declared change.
-        roots: Vec<MissionScope>,
+        roots: Vec<TaskScope>,
         /// Caller-described cause/version.
         cause: SourceReference,
         /// Declared completeness of affected dependency coverage.
@@ -966,13 +967,13 @@ pub enum Event {
     /// Replace an explicit precondition assertion in the named current context.
     Preconditions {
         /// Applicable context.
-        scope: MissionScope,
+        scope: TaskScope,
         /// Claimed readiness of non-dependency conditions.
         ready: bool,
         /// Source of the assertion.
         source: SourceReference,
     },
-    /// Synthetic free slots, independently bounded by the configured mission limit.
+    /// Synthetic free slots, independently bounded by the configured task limit.
     Capacity {
         /// Zero means unavailable, distinct from no observation yet.
         available: usize,
@@ -982,9 +983,9 @@ pub enum Event {
     /// Update an existing attempt without reopening active/terminal work.
     Status {
         /// Applicable context.
-        scope: MissionScope,
+        scope: TaskScope,
         /// New asserted status.
-        status: MissionStatus,
+        status: TaskStatus,
         /// Source of the assertion.
         source: SourceReference,
     },
@@ -1043,7 +1044,7 @@ pub enum HoldReason {
     UnknownCoverage,
     /// Preview provisional risk/revalidation/cost references are missing.
     ProvisionalPolicy,
-    /// A whole-mission acceptance edge cannot be released while producer is unfinished.
+    /// A whole-task acceptance edge cannot be released while producer is unfinished.
     ProducerNotAccepted,
     /// The first causal invalidation notification; historical basis remains retained.
     Invalidated(NotificationId),
@@ -1104,9 +1105,9 @@ impl EdgeState {
         ExecutionAuthority::Unavailable
     }
 }
-/// Independent mission blocking causes in deterministic order.
+/// Independent task blocking causes in deterministic order.
 #[derive(Clone, PartialEq, Eq)]
-pub enum MissionBlocker {
+pub enum TaskBlocker {
     /// Active or terminal attempts cannot start again.
     NotPending,
     /// No explicit precondition observation in the current generation.
@@ -1124,17 +1125,17 @@ pub enum MissionBlocker {
     /// Explicitly no free synthetic slots.
     NoCapacity,
 }
-/// Advisory mission decision, separate from dependency readiness and actual execution.
+/// Advisory task decision, separate from dependency readiness and actual execution.
 #[derive(Clone, PartialEq, Eq)]
-pub struct MissionState {
+pub struct TaskState {
     generation: ContractRevision,
-    status: MissionStatus,
+    status: TaskStatus,
     preconditions: Option<bool>,
     coverage_known: bool,
     dependency_ready: bool,
-    blockers: Vec<MissionBlocker>,
+    blockers: Vec<TaskBlocker>,
 }
-impl MissionState {
+impl TaskState {
     /// Eligibility is not a reservation or an authorization.
     pub fn eligible(&self) -> bool {
         self.blockers.is_empty()
@@ -1147,12 +1148,12 @@ impl MissionState {
     pub fn generation(&self) -> ContractRevision {
         self.generation
     }
-    /// Inspect the retained attempt status.
-    pub fn status(&self) -> MissionStatus {
+    /// Inspect the retained task coordination status.
+    pub fn status(&self) -> TaskStatus {
         self.status
     }
     /// Inspect stable, explicit reasons preventing eligibility.
-    pub fn blockers(&self) -> &[MissionBlocker] {
+    pub fn blockers(&self) -> &[TaskBlocker] {
         &self.blockers
     }
     /// Eligibility never grants operational authority.
@@ -1168,7 +1169,7 @@ pub struct TransitionReport {
     sequence: usize,
     duplicate: bool,
     changed_edges: Vec<EdgeId>,
-    changed_missions: Vec<TaskId>,
+    changed_tasks: Vec<TaskId>,
 }
 impl TransitionReport {
     /// Exact immutable graph basis.
@@ -1191,9 +1192,9 @@ impl TransitionReport {
     pub fn changed_edges(&self) -> &[EdgeId] {
         &self.changed_edges
     }
-    /// Mission changes in stable ID order; inspect through projection.mission.
-    pub fn changed_missions(&self) -> &[TaskId] {
-        &self.changed_missions
+    /// Task changes in stable ID order; inspect through projection.task.
+    pub fn changed_tasks(&self) -> &[TaskId] {
+        &self.changed_tasks
     }
     /// Every result explicitly leaves operational authority unavailable.
     pub fn authority(&self) -> ExecutionAuthority {
@@ -1203,7 +1204,7 @@ impl TransitionReport {
 
 #[derive(Clone, PartialEq, Eq)]
 struct ProjectionState {
-    missions: Vec<MissionState>,
+    tasks: Vec<TaskState>,
     edges: Vec<EdgeState>,
     capacity: Option<usize>,
 }
@@ -1219,11 +1220,11 @@ pub struct ReadinessProjection {
 impl ReadinessProjection {
     /// Allocate bounded initial derived state; roots still need explicit preconditions/capacity.
     pub fn new(graph: DependencyGraph) -> Result<Self, ReadinessError> {
-        let mut missions = reserved(graph.missions.len())?;
-        for m in &graph.missions {
-            missions.push(MissionState {
+        let mut tasks = reserved(graph.tasks.len())?;
+        for m in &graph.tasks {
+            tasks.push(TaskState {
                 generation: ContractRevision::new(1).expect("positive constant"),
-                status: MissionStatus::Pending,
+                status: TaskStatus::Pending,
                 preconditions: None,
                 coverage_known: m.coverage == DependencyCoverage::DeclaredComplete,
                 dependency_ready: false,
@@ -1239,7 +1240,7 @@ impl ReadinessProjection {
         }
         let usage = graph.usage;
         let mut state = ProjectionState {
-            missions,
+            tasks,
             edges,
             capacity: None,
         };
@@ -1259,16 +1260,16 @@ impl ReadinessProjection {
     pub fn edge(&self, id: &EdgeId) -> Result<&EdgeState, ReadinessError> {
         Ok(&self.state.edges[self.graph.edge_index(id)?])
     }
-    /// Borrow a mission decision, never an execution grant.
-    pub fn mission(&self, id: &TaskId) -> Result<&MissionState, ReadinessError> {
-        Ok(&self.state.missions[self.graph.mission_index(id)?])
+    /// Borrow a task decision, never an execution grant.
+    pub fn task(&self, id: &TaskId) -> Result<&TaskState, ReadinessError> {
+        Ok(&self.state.tasks[self.graph.task_index(id)?])
     }
     /// Obtain the exact current model scope, retaining original contract/capture.
-    pub fn scope(&self, id: &TaskId) -> Result<MissionScope, ReadinessError> {
-        let i = self.graph.mission_index(id)?;
-        Ok(MissionScope::new(
-            self.graph.missions[i].context.clone(),
-            self.state.missions[i].generation,
+    pub fn scope(&self, id: &TaskId) -> Result<TaskScope, ReadinessError> {
+        let i = self.graph.task_index(id)?;
+        Ok(TaskScope::new(
+            self.graph.tasks[i].context.clone(),
+            self.state.tasks[i].generation,
         ))
     }
     /// Explicitly borrow admitted private inputs; no durable storage or authenticity implied.
@@ -1317,7 +1318,7 @@ impl ReadinessProjection {
                 sequence: self.history.len(),
                 duplicate: true,
                 changed_edges: vec![],
-                changed_missions: vec![],
+                changed_tasks: vec![],
             });
         }
         if self.history.len() >= self.graph.limits.notifications {
@@ -1330,30 +1331,29 @@ impl ReadinessProjection {
         // Only derived state is drafted; immutable graph/history payloads are not cloned.
         let mut draft = self.state.clone();
         self.reduce(&mut draft, &notification)?;
-        // Re-evaluate only missions whose inputs or incoming edge decisions changed.
-        // A capacity observation affects all missions; information-only reports do not.
-        for i in 0..self.graph.missions.len() {
-            let mission = self.graph.missions[i].id();
+        // Re-evaluate only tasks whose inputs or incoming edge decisions changed.
+        // A capacity observation affects all tasks; information-only reports do not.
+        for i in 0..self.graph.tasks.len() {
+            let task = self.graph.tasks[i].id();
             let changed = self.state.capacity != draft.capacity
-                || self.state.missions[i] != draft.missions[i]
+                || self.state.tasks[i] != draft.tasks[i]
                 || self.graph.edges.iter().enumerate().any(|(j, e)| {
-                    &e.consumer == mission
-                        && self.state.edges[j].decision != draft.edges[j].decision
+                    &e.consumer == task && self.state.edges[j].decision != draft.edges[j].decision
                 });
             if changed {
-                recompute_mission(&self.graph, &mut draft, i)?;
+                recompute_task(&self.graph, &mut draft, i)?;
             }
         }
         let mut changed_edges = reserved(self.graph.edges.len())?;
-        let mut changed_missions = reserved(self.graph.missions.len())?;
+        let mut changed_tasks = reserved(self.graph.tasks.len())?;
         for (i, edge) in self.graph.edges.iter().enumerate() {
             if self.state.edges[i] != draft.edges[i] {
                 changed_edges.push(edge.id.clone());
             }
         }
-        for (i, mission) in self.graph.missions.iter().enumerate() {
-            if self.state.missions[i] != draft.missions[i] {
-                changed_missions.push(mission.id().clone());
+        for (i, task) in self.graph.tasks.iter().enumerate() {
+            if self.state.tasks[i] != draft.tasks[i] {
+                changed_tasks.push(task.id().clone());
             }
         }
         self.history
@@ -1365,7 +1365,7 @@ impl ReadinessProjection {
             sequence: self.history.len() + 1,
             duplicate: false,
             changed_edges,
-            changed_missions,
+            changed_tasks,
         };
         self.history.push(notification);
         self.state = draft;
@@ -1376,26 +1376,26 @@ impl ReadinessProjection {
     fn resolve_scope(
         &self,
         state: &ProjectionState,
-        scope: &MissionScope,
+        scope: &TaskScope,
     ) -> Result<usize, ReadinessError> {
-        let i = self.graph.mission_index(scope.mission())?;
-        if scope.context != self.graph.missions[i].context {
+        let i = self.graph.task_index(scope.task())?;
+        if scope.context != self.graph.tasks[i].context {
             return Err(ReadinessError::IncompatibleReference);
         }
-        if scope.generation != state.missions[i].generation {
+        if scope.generation != state.tasks[i].generation {
             return Err(ReadinessError::StaleContext);
         }
         Ok(i)
     }
     fn reduce(&self, state: &mut ProjectionState, n: &Notification) -> Result<(), ReadinessError> {
         match &n.event {
-            Event::Signal { mission, .. } => {
-                self.graph.mission_index(mission)?;
+            Event::Signal { task, .. } => {
+                self.graph.task_index(task)?;
             }
             Event::Artifact(report) => {
                 self.resolve_scope(state, &report.producer)?;
                 if !self.graph.edges.iter().any(|e| {
-                    e.producer == *report.producer.mission()
+                    e.producer == *report.producer.task()
                         && e.requirement.artifact == report.artifact
                         && e.requirement.kind == report.kind
                 }) {
@@ -1406,11 +1406,11 @@ impl ReadinessProjection {
             Event::Invalidate {
                 roots, coverage, ..
             } => {
-                if roots.is_empty() || roots.len() > self.graph.missions.len() {
+                if roots.is_empty() || roots.len() > self.graph.tasks.len() {
                     return Err(ReadinessError::IncompatibleReference);
                 }
-                let mut affected = reserved(self.graph.missions.len())?;
-                affected.resize(self.graph.missions.len(), false);
+                let mut affected = reserved(self.graph.tasks.len())?;
+                affected.resize(self.graph.tasks.len(), false);
                 for scope in roots {
                     let i = self.resolve_scope(state, scope)?;
                     if affected[i] {
@@ -1424,14 +1424,14 @@ impl ReadinessProjection {
                     for &p in &self.graph.order {
                         if affected[p] {
                             for edge in &self.graph.edges {
-                                if edge.producer == *self.graph.missions[p].id() {
-                                    affected[self.graph.mission_index(&edge.consumer)?] = true;
+                                if edge.producer == *self.graph.tasks[p].id() {
+                                    affected[self.graph.task_index(&edge.consumer)?] = true;
                                 }
                             }
                         }
                     }
                 }
-                for (i, m) in state.missions.iter_mut().enumerate() {
+                for (i, m) in state.tasks.iter_mut().enumerate() {
                     if affected[i] {
                         let next = m
                             .generation
@@ -1447,8 +1447,8 @@ impl ReadinessProjection {
                     }
                 }
                 for (i, edge) in self.graph.edges.iter().enumerate() {
-                    if affected[self.graph.mission_index(&edge.producer)?]
-                        || affected[self.graph.mission_index(&edge.consumer)?]
+                    if affected[self.graph.task_index(&edge.producer)?]
+                        || affected[self.graph.task_index(&edge.consumer)?]
                     {
                         for release in &mut state.edges[i].releases {
                             if release.invalidated_by.is_none() {
@@ -1462,32 +1462,32 @@ impl ReadinessProjection {
             }
             Event::Preconditions { scope, ready, .. } => {
                 let i = self.resolve_scope(state, scope)?;
-                state.missions[i].preconditions = Some(*ready);
+                state.tasks[i].preconditions = Some(*ready);
             }
             Event::Capacity { available, .. } => {
-                if *available > self.graph.limits.missions {
-                    return Err(ReadinessError::Limit(LimitKind::Missions));
+                if *available > self.graph.limits.tasks {
+                    return Err(ReadinessError::Limit(LimitKind::Tasks));
                 }
                 state.capacity = Some(*available);
             }
             Event::Status { scope, status, .. } => {
                 let i = self.resolve_scope(state, scope)?;
-                let previous = state.missions[i].status;
+                let previous = state.tasks[i].status;
                 if previous != *status
                     && !matches!(
                         (previous, status),
                         (
-                            MissionStatus::Pending,
-                            MissionStatus::Active | MissionStatus::Cancelled
+                            TaskStatus::Pending,
+                            TaskStatus::Active | TaskStatus::Cancelled
                         ) | (
-                            MissionStatus::Active,
-                            MissionStatus::Accepted | MissionStatus::Cancelled
+                            TaskStatus::Active,
+                            TaskStatus::Accepted | TaskStatus::Cancelled
                         )
                     )
                 {
                     return Err(ReadinessError::InvalidTransition);
                 }
-                state.missions[i].status = *status;
+                state.tasks[i].status = *status;
             }
             Event::Unsupported(op) => return Err(ReadinessError::Unsupported(*op)),
         }
@@ -1508,7 +1508,7 @@ impl ReadinessProjection {
         }
         let p = self.resolve_scope(state, &r.producer)?;
         let c = self.resolve_scope(state, &r.consumer)?;
-        if edge.producer != *r.producer.mission() || edge.consumer != *r.consumer.mission() {
+        if edge.producer != *r.producer.task() || edge.consumer != *r.consumer.task() {
             return Err(ReadinessError::IncompatibleReference);
         }
         let Event::Artifact(report) = &self.notification(&r.report)?.event else {
@@ -1536,11 +1536,11 @@ impl ReadinessProjection {
                 return Err(ReadinessError::ReviewRejected(ReviewRefusal::Predicate));
             }
         }
-        let hold = if !self.graph.missions[p].context.available()
-            || !self.graph.missions[c].context.available()
+        let hold = if !self.graph.tasks[p].context.available()
+            || !self.graph.tasks[c].context.available()
         {
             Some(HoldReason::MissingContext)
-        } else if !state.missions[p].coverage_known || !state.missions[c].coverage_known {
+        } else if !state.tasks[p].coverage_known || !state.tasks[c].coverage_known {
             Some(HoldReason::UnknownCoverage)
         } else if r.supports.len() != edge.requirement.predicates.len() {
             Some(HoldReason::MissingSupport)
@@ -1548,8 +1548,8 @@ impl ReadinessProjection {
             && r.attestation.provisional.is_none()
         {
             Some(HoldReason::ProvisionalPolicy)
-        } else if edge.requirement.kind == DependencyKind::MissionAcceptance
-            && state.missions[p].status != MissionStatus::Accepted
+        } else if edge.requirement.kind == DependencyKind::TaskAcceptance
+            && state.tasks[p].status != TaskStatus::Accepted
         {
             Some(HoldReason::ProducerNotAccepted)
         } else {
@@ -1580,17 +1580,17 @@ impl ReadinessProjection {
 }
 
 fn recompute(graph: &DependencyGraph, state: &mut ProjectionState) -> Result<(), ReadinessError> {
-    for i in 0..graph.missions.len() {
-        recompute_mission(graph, state, i)?;
+    for i in 0..graph.tasks.len() {
+        recompute_task(graph, state, i)?;
     }
     Ok(())
 }
-fn recompute_mission(
+fn recompute_task(
     graph: &DependencyGraph,
     state: &mut ProjectionState,
     i: usize,
 ) -> Result<(), ReadinessError> {
-    let m = &graph.missions[i];
+    let m = &graph.tasks[i];
     let mut blockers = reserved(
         graph
             .edges
@@ -1600,21 +1600,21 @@ fn recompute_mission(
             .checked_add(5)
             .ok_or(ReadinessError::Limit(LimitKind::Edges))?,
     )?;
-    let s = &state.missions[i];
-    if s.status != MissionStatus::Pending {
-        blockers.push(MissionBlocker::NotPending);
+    let s = &state.tasks[i];
+    if s.status != TaskStatus::Pending {
+        blockers.push(TaskBlocker::NotPending);
     }
     match s.preconditions {
-        None => blockers.push(MissionBlocker::PreconditionsUnknown),
-        Some(false) => blockers.push(MissionBlocker::PreconditionsUnmet),
+        None => blockers.push(TaskBlocker::PreconditionsUnknown),
+        Some(false) => blockers.push(TaskBlocker::PreconditionsUnmet),
         Some(true) => {}
     }
     let context = m.context.available();
     if !context {
-        blockers.push(MissionBlocker::MissingContext);
+        blockers.push(TaskBlocker::MissingContext);
     }
     if !s.coverage_known {
-        blockers.push(MissionBlocker::UnknownCoverage);
+        blockers.push(TaskBlocker::UnknownCoverage);
     }
     let mut dependencies = context && s.coverage_known;
     for (j, edge) in graph.edges.iter().enumerate() {
@@ -1622,16 +1622,16 @@ fn recompute_mission(
             && !matches!(state.edges[j].decision, EdgeDecision::Released { .. })
         {
             dependencies = false;
-            blockers.push(MissionBlocker::Dependency(edge.id.clone()));
+            blockers.push(TaskBlocker::Dependency(edge.id.clone()));
         }
     }
     match state.capacity {
-        None => blockers.push(MissionBlocker::CapacityUnknown),
-        Some(0) => blockers.push(MissionBlocker::NoCapacity),
+        None => blockers.push(TaskBlocker::CapacityUnknown),
+        Some(0) => blockers.push(TaskBlocker::NoCapacity),
         Some(_) => {}
     }
-    state.missions[i].dependency_ready = dependencies;
-    state.missions[i].blockers = blockers;
+    state.tasks[i].dependency_ready = dependencies;
+    state.tasks[i].blockers = blockers;
     Ok(())
 }
 
@@ -1670,7 +1670,7 @@ fn count_contract(u: &mut InputUsage, c: &CandidateBindingContract) -> Result<()
 }
 fn count_context(
     u: &mut InputUsage,
-    c: &MissionContext,
+    c: &TaskContext,
     limits: GraphLimits,
 ) -> Result<(), ReadinessError> {
     count_contract(u, &c.contract)?;
@@ -1711,8 +1711,8 @@ fn count_notification(
     u.bytes_add(n.id.0.len())?;
     u.bytes_add(n.graph.id.0.len())?;
     match &n.event {
-        Event::Signal { mission, message } => {
-            u.bytes_add(mission.as_str().len())?;
+        Event::Signal { task, message } => {
+            u.bytes_add(task.as_str().len())?;
             u.bytes_add(message.len())?;
         }
         Event::Artifact(r) => {
@@ -1742,8 +1742,8 @@ fn count_notification(
             }
         }
         Event::Invalidate { roots, cause, .. } => {
-            if roots.len() > limits.missions {
-                return Err(ReadinessError::Limit(LimitKind::Missions));
+            if roots.len() > limits.tasks {
+                return Err(ReadinessError::Limit(LimitKind::Tasks));
             }
             for s in roots {
                 count_context(u, &s.context, limits)?;
@@ -1763,9 +1763,9 @@ fn count_notification(
 // Every aggregate containing existing unredacted task/capture types is opaque in Debug.
 redacted!(
     GraphReference,
-    MissionContext,
-    MissionScope,
-    Mission,
+    TaskContext,
+    TaskScope,
+    Task,
     ArtifactReference,
     ArtifactRequirement,
     DependencyEdge,
@@ -1781,8 +1781,8 @@ redacted!(
     EdgeDecision,
     ReleaseRecord,
     EdgeState,
-    MissionBlocker,
-    MissionState,
+    TaskBlocker,
+    TaskState,
     TransitionReport,
     ReadinessProjection
 );

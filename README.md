@@ -10,8 +10,9 @@ boundaries. Projects engineered with Cortex do not need to contain AI.
 
 **Pre-alpha.** The source implements the bounded capabilities below; it is not
 production-ready and makes no general API-stability or cross-platform guarantee.
-Milestone 003 has begun with canonical history, encrypted storage and bounded JSON
-reference knowledge, including selected source sets. Its remaining capabilities
+Milestone 003 has begun with canonical history, encrypted storage and bounded
+JSON, Rust, Markdown and Cargo manifest reference knowledge, including selected
+JSON source sets. Its remaining capabilities
 and Milestones 004–006 remain planned. The owner-approved open-source scope is an
 MIT source-only pre-alpha preview, including these incomplete increments. It
 includes no binary release, package publication or stable API commitment.
@@ -36,10 +37,11 @@ its bounded encrypted storage adapter.
 
 | Document | Canonical responsibility |
 | --- | --- |
-| [Vision](docs/product/vision.md) | Mission, audience, operating model, ambition and demonstrated limits |
+| [Vision](docs/product/vision.md) | Purpose, audience, operating model, ambition and demonstrated limits |
 | [Capability catalog](docs/product/capability-catalog.md) | Stable capability IDs, functional contracts, advanced properties, status and acceptance |
 | [Roadmap](docs/product/roadmap.md) | Milestones 001–007, 002-A/B/C/D, dependencies, exits and future backlog |
 | [Architecture overview](docs/architecture/overview.md) | Current crates versus planned areas, flow and integration boundaries |
+| [Domain vocabulary](docs/architecture/domain-vocabulary.md) | Concept definitions, relationships, resource units and representation boundaries |
 | [Core invariants](docs/architecture/core-invariants.md) | Authority, evidence, candidate, temporal and trust semantics |
 | [Subsystems](docs/architecture/subsystems.md) | Logical ownership and interaction responsibilities |
 | [Open decisions](docs/decisions/open-decisions.md) | Unresolved policies and proposed decision points |
@@ -59,7 +61,7 @@ The planned [native governed parallel contract](docs/architecture/governed-paral
 defines per-consumer dependency release and rolling integration under the existing
 owners. Its first Rust slice, `cortex_core::parallel`, implements a bounded,
 non-effectful in-memory readiness projection over caller-supplied assertions.
-It reports per-edge release/hold/refusal and mission eligibility with causal
+It reports per-edge release/hold/refusal and task eligibility with causal
 invalidation; it authenticates no Evidence and grants no execution permission.
 There is no operational scheduler or agent launcher. The Evidence-owned
 `cortex_evidence::readiness::inspect_support` additionally evaluates actual unified
@@ -71,13 +73,15 @@ edge. See the [support boundary](docs/architecture/unified-evidence.md#dependenc
 separately scoped G1/A-1 preview exceptions and full execution prerequisites.
 
 The separately owner-approved [GPE-B Stage 1 kernel](docs/architecture/program-kernel.md)
-adds native program/mission baselines, exclusive metadata claims, Evidence-backed
+adds native program/task baselines, exclusive metadata claims, Evidence-backed
 non-effectful dependency decisions, encrypted replay/recovery, deterministic
 explicit-source packages and resource simulations. `cortex-storage` owns the
 shared local encrypted infrastructure; `cortex_cli::history_store` remains a
 compatible facade. `cortex program inspect --help` describes explicit keyed,
-read-only human/JSON program inspection. No runtime, worker dispatch or protected
-merge command is supplied. The [bounded sequencing exception](docs/product/roadmap.md#gpe-b-stage-1-sequencing-exception)
+read-only human/JSON program inspection. The existing schema remains the default;
+`--schema-version 2` selects the canonical task/resource/closure vocabulary.
+Stage 1 supplies no runtime, worker dispatch or protected
+merge command. The [bounded sequencing exception](docs/product/roadmap.md#gpe-b-stage-1-sequencing-exception)
 preserves all broader milestone, operational authority and host qualification gates.
 
 The separately authorized [Stage 2A foundations](docs/architecture/operational-foundations.md)

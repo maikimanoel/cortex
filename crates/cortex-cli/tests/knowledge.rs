@@ -146,10 +146,10 @@ fn unresolved_external_missing_and_unsupported_fragments_keep_validity_unestabli
     let c = contract(&r);
     let g = extract(&r, &c, b"schema.json").unwrap();
     assert_eq!(g.references().len(), 4);
-    assert!(!g.complete());
+    assert!(!g.all_references_resolved());
     assert_eq!(g.nodes().len(), 9);
     assert_eq!(reinspect(&r.path, &g, id(4)).unwrap().validity(), None);
-    assert_eq!(qualify(&g, None).unwrap().validity(), None);
+    assert_eq!(inspect_validity(&g, None).unwrap().validity(), None);
     assert!(
         g.references()
             .iter()
@@ -244,7 +244,10 @@ fn wrong_repository_and_unborn_state_cannot_create_a_bound_index() {
         .unwrap(),
         None,
     );
-    assert_eq!(qualify(&graph, Some(&latest)).unwrap().validity(), None);
+    assert_eq!(
+        inspect_validity(&graph, Some(&latest)).unwrap().validity(),
+        None
+    );
 }
 
 #[test]

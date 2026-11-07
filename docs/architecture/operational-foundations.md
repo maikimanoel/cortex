@@ -24,7 +24,7 @@ capacity, insufficient verification reserves and duplicate execution are refused
 Independent eligible fixture work can proceed when another outcome is unknown.
 
 `OperationalProjection` binds proposed grants to the exact program, baseline,
-mission candidate, attempt/generation, instruction package, policy and principal.
+task candidate, attempt/generation, instruction package, policy and principal.
 Logical ticks are monotonic caller assertions with inclusive start and exclusive
 expiry, not an authenticated clock. There is one effect retry chain per metadata
 attempt. Reissuing a grant/package/effect identity cannot restart that chain;
@@ -40,7 +40,7 @@ and delegates ordering to the existing Stage 1 simulator; it creates no reservat
 Known insufficient verification reserves report contention, including a zero-demand
 proposal when the reserve itself cannot fit. Required dimensions cannot be omitted.
 G1's advisory free-capacity signal does not charge an already owned Active attempt
-again; the fixture ledger owns quantity admission. Other mission preconditions,
+again; the fixture ledger owns quantity admission. Other task preconditions,
 context and dependency blockers remain effective.
 The complete instruction package must also remain structurally current. Stage 1
 packages include advisory blockers and the plan revision, so changing those inputs
@@ -63,7 +63,7 @@ canonical kernel. None of these transitions runs a process.
 Policy and operational grant inputs are explicit local assertions, not approved
 runtime grants. A matching fixture policy is not effective host permission.
 Fixture outcomes do not create Evidence assessments, release consequential
-dependencies, complete missions or establish real process/resource guarantees.
+dependencies, complete tasks or establish real process/resource guarantees.
 The accepted Stage 1 dependency engine remains the sole release path.
 
 ## Versioned persistence extension

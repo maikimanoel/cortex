@@ -1,5 +1,6 @@
 //! Explicit read-only encrypted program inspection; no hidden recovery or dispatch.
 mod domains;
+mod schema;
 use cortex_core::{
     parallel::*,
     program::{AttemptStatus, operational::EffectMode, supervision::*},
@@ -9,6 +10,7 @@ use cortex_storage::{
     history_store::StoreKey,
     program_store::{ProgramStore, ReadLimits},
 };
+use schema::Schema;
 use serde_json::{Value, json};
 use std::{
     ffi::OsString,
@@ -20,10 +22,15 @@ use std::{
 };
 use zeroize::Zeroizing;
 
-const HELP: &str = "Usage: cortex program inspect --store <ABSOLUTE-PATH> --program <ID> --key-fd <N> --max-bytes <N> --read-timeout-ms <N> [--json]\n\nRead-only program metadata, pure fixtures and supervised local fixture inspection.\nThe inherited descriptor supplies exactly 32 raw key bytes and EOF.\nNo key argument, default lookup, recovery or execution.\nDeadlines are cooperative on a responsive local Linux filesystem, not hard I/O\npreemption. No live Git recapture or verification is implied.\nExit codes: 0 inspected, 2 invalid arguments, 3 store/key/refusal, 1 output failure.\n";
-fn error(out: &mut impl Write, json_output: bool, kind: &str) -> Result<u8, io::Error> {
+const HELP: &str = "Usage: cortex program inspect --store <ABSOLUTE-PATH> --program <ID> --key-fd <N> --max-bytes <N> --read-timeout-ms <N> [--json] [--schema-version <1|2>]\n\nSchema 1 is the unchanged default; schema 2 selects canonical terminology.\nRead-only program metadata, pure fixtures and supervised local fixture inspection.\nThe inherited descriptor supplies exactly 32 raw key bytes and EOF.\nNo key argument, default lookup, recovery or execution.\nDeadlines are cooperative on a responsive local Linux filesystem, not hard I/O\npreemption. No live Git recapture or verification is implied.\nExit codes: 0 inspected, 2 invalid arguments, 3 store/key/refusal, 1 output failure.\n";
+fn error(
+    out: &mut impl Write,
+    json_output: bool,
+    schema: Schema,
+    kind: &str,
+) -> Result<u8, io::Error> {
     if json_output {
-        serde_json::to_writer(&mut *out,&json!({"schema":"cortex.program.v1","status":"REFUSED","reason":kind,"execution_authority":"UNAVAILABLE"})).map_err(io::Error::other)?;
+        serde_json::to_writer(&mut *out,&json!({"schema":schema.program_name(),"status":"REFUSED","reason":kind,"execution_authority":"UNAVAILABLE"})).map_err(io::Error::other)?;
         writeln!(out)?;
     } else {
         writeln!(out, "Program inspection refused: {kind}")?;
@@ -66,13 +73,13 @@ fn key(fd: u32, deadline: Instant) -> Result<StoreKey, &'static str> {
     }
     StoreKey::new(&bytes[..32]).map_err(|_| "KEY_INVALID")
 }
-fn view(k: &CoordinationKernel) -> Value {
+fn view(k: &CoordinationKernel, schema: Schema) -> Value {
     let d = k.state().definition();
-    let missions:Vec<_>=d.graph().missions().iter().map(|m|{
-  let s=k.state().readiness().mission(m.id()).expect("validated graph");
+    let tasks:Vec<_>=d.graph().tasks().iter().map(|m|{
+  let s=k.state().readiness().task(m.id()).expect("validated graph");
   let blockers:Vec<_>=s.blockers().iter().map(|b|match b{
-   MissionBlocker::Dependency(id)=>json!({"kind":"DEPENDENCY","edge":id.as_str()}),
-   other=>json!({"kind":format!("{other:?}")}),
+   TaskBlocker::Dependency(id)=>json!({"kind":"DEPENDENCY","edge":id.as_str()}),
+   _=>json!({"kind":schema.task_blocker()}),
   }).collect();
   json!({"id":m.id().as_str(),"objective":m.context().contract().task().objective(),"acceptance":m.context().contract().task().acceptance(),"contract_revision":m.context().contract().revision().get(),"candidate":m.context().contract().candidate().commit().as_str(),"generation":s.generation().get(),"dependency_ready":s.dependency_ready(),"eligible":s.eligible(),"authorized":false,"reserved":false,"dispatched":false,"mission_status":format!("{:?}",s.status()),"blockers":blockers})
  }).collect();
@@ -89,18 +96,18 @@ fn view(k: &CoordinationKernel) -> Value {
   json!({"id":e.id().as_str(),"producer":e.producer().as_str(),"consumer":e.consumer().as_str(),"level":match e.requirement().level(){ReadinessLevel::ContractStable=>"CONTRACT_STABLE",ReadinessLevel::ImplementationProvisional=>"IMPLEMENTATION_PROVISIONAL",ReadinessLevel::IntegratedAccepted=>"INTEGRATED_ACCEPTED"},"artifact":e.requirement().artifact().id().as_str(),"artifact_revision":e.requirement().artifact().revision().get(),"artifact_candidate":e.requirement().artifact().candidate().as_str(),"decision":disposition,"prior_releases":s.releases().len()})
  }).collect();
     let attempts:Vec<_>=k.state().attempts().iter().map(|a|json!({"id":a.id.as_str(),"increment":a.increment.as_str(),"owner":a.owner.as_str(),"baseline":a.baseline.get(),"generation":a.generation.get(),"status":match a.status{AttemptStatus::Claimed=>"CLAIMED",AttemptStatus::Unknown=>"UNKNOWN",AttemptStatus::Reported=>"REPORTED",AttemptStatus::Cancelled=>"CANCELLED",AttemptStatus::HandedOver=>"HANDED_OVER"},"external_execution":"NOT_SUPPORTED"})).collect();
-    let streams:Vec<_>=d.workstreams().iter().map(|w|json!({"id":w.id.as_str(),"responsibility":w.responsibility,"missions":w.missions.iter().map(|m|m.as_str()).collect::<Vec<_>>()})).collect();
-    let packages:Vec<_>=k.packages().iter().map(|p|json!({"id":p.request().id.as_str(),"revision":p.request().revision.get(),"mission":p.request().mission.as_str(),"bytes":p.bytes().len(),"current_structural_correspondence":p.check(k.state(),p.bytes()).is_ok(),"submitted":false})).collect();
+    let streams:Vec<_>=d.workstreams().iter().map(|w|json!({"id":w.id.as_str(),"responsibility":w.responsibility,"missions":w.tasks.iter().map(|m|m.as_str()).collect::<Vec<_>>()})).collect();
+    let packages:Vec<_>=k.packages().iter().map(|p|json!({"id":p.request().id.as_str(),"revision":p.request().revision.get(),"mission":p.request().task.as_str(),"bytes":p.bytes().len(),"current_structural_correspondence":p.check(k.state(),p.bytes()).is_ok(),"submitted":false})).collect();
     let decisions:Vec<_>=k.decisions().iter().map(|d|json!({"operation":d.operation.as_str(),"edge":d.edge.as_str(),"baseline":d.baseline.get(),"historically_released":d.released,"findings":d.findings.iter().map(|p|json!({"predicate":p.predicate().as_str(),"disposition":format!("{:?}",p.disposition()),"reasons":p.reasons().iter().map(|r|format!("{r:?}")).collect::<Vec<_>>()})).collect::<Vec<_>>()})).collect();
-    let fixtures = fixture_view(k);
-    let mut result = json!({"schema":"cortex.program.v1","fixture_projection":fixtures,"status":"INSPECTED","program":d.id().as_str(),"objective":d.outcome().objective(),"acceptance":d.outcome().acceptance(),"baseline":d.revision().get(),"retained_baselines":k.state().definitions().len(),"journal_revision":k.revision(),"trust":"CALLER_ASSERTIONS_SINGLE_LOCAL_OPERATOR","execution_authority":"UNAVAILABLE","live_candidate_verification":"NOT_RUN","workstreams":streams,"missions":missions,"edges":edges,"attempts":attempts,"support_decisions":decisions,"packages":packages,"resource_reservations":[],"integration":"NOT_SUPPORTED","owner_decisions_required":["Stage 2 effect, host, resource, privacy and authority qualification","Protected integration approval"]});
+    let fixtures = fixture_view(k, schema);
+    let mut result = json!({"schema":"cortex.program.v1","fixture_projection":fixtures,"status":"INSPECTED","program":d.id().as_str(),"objective":d.outcome().objective(),"acceptance":d.outcome().acceptance(),"baseline":d.revision().get(),"retained_baselines":k.state().definitions().len(),"journal_revision":k.revision(),"trust":"CALLER_ASSERTIONS_SINGLE_LOCAL_OPERATOR","execution_authority":"UNAVAILABLE","live_candidate_verification":"NOT_RUN","workstreams":streams,"missions":tasks,"edges":edges,"attempts":attempts,"support_decisions":decisions,"packages":packages,"resource_reservations":[],"integration":"NOT_SUPPORTED","owner_decisions_required":["Stage 2 effect, host, resource, privacy and authority qualification","Protected integration approval"]});
     if k.fixture_effects().mode() == EffectMode::SupervisedFixture {
         result["fixture_projection"] = Value::Null;
-        result["supervised_projection"] = supervised_view(k);
+        result["supervised_projection"] = supervised_view(k, schema);
         result["execution_authority"] = json!("INSPECTION_CONFERS_NONE");
         result["live_executor_authority"] = json!("UNAVAILABLE");
         result["mission_execution_flags_scope"] = json!("LIVE_AI_EXECUTION_NOT_SUPPORTED");
-        result["resource_reservations"] = json!(k.fixture_effects().effects().iter().filter(|e| e.pending()).map(|e| json!({"effect":e.intent.id.as_str(),"scope":"TRUSTED_LOCAL_FIXTURE","quantities_kind":"ORIGINAL_ADMITTED_DEMAND","quantities":e.intent.demand.iter().map(|d|json!({"resource":format!("{:?}",d.resource),"quantity":d.amount})).collect::<Vec<_>>(),"hard_host_reservation":"NOT_ESTABLISHED"})).collect::<Vec<_>>());
+        result["resource_reservations"] = json!(k.fixture_effects().effects().iter().filter(|e| e.pending()).map(|e| json!({"effect":e.intent.id.as_str(),"scope":"TRUSTED_LOCAL_FIXTURE","quantities_kind":"ORIGINAL_ADMITTED_DEMAND","quantities":e.intent.demand.iter().map(|d|json!({"resource":schema.resource(d.resource),"quantity":d.amount})).collect::<Vec<_>>(),"hard_host_reservation":"NOT_ESTABLISHED"})).collect::<Vec<_>>());
         for package in result["packages"].as_array_mut().expect("packages") {
             let id = package["id"].as_str().expect("package ID").to_owned();
             let related = k
@@ -133,7 +140,7 @@ fn view(k: &CoordinationKernel) -> Value {
     if let Some(projection) = k.domains() {
         result["fixture_projection"] = Value::Null;
         result["supervised_projection"] = Value::Null;
-        result["domain_projection"] = domains::view(projection);
+        result["domain_projection"] = domains::view(projection, schema);
         result["registered_member_programs"] = json!(
             k.domain_members()
                 .iter()
@@ -148,15 +155,16 @@ fn view(k: &CoordinationKernel) -> Value {
             "Separate protected integration or live provider authorization"
         ]);
     }
+    schema.project_program(&mut result);
     result
 }
-fn fixture_view(k: &CoordinationKernel) -> Value {
+fn fixture_view(k: &CoordinationKernel, schema: Schema) -> Value {
     let projection = k.fixture_effects();
     let effects: Vec<_> = projection.effects().iter().map(|e| {
         let scope = &e.intent.scope;
         let grant = projection.grants().iter().find(|g| g.id == e.intent.grant).expect("validated effect grant");
         let package_current = k.packages().iter().find(|p| p.request().id == scope.package && p.request().revision == scope.package_revision).is_some_and(|p| p.check(k.state(),p.bytes()).is_ok());
-        json!({"id":e.intent.id.as_str(),"mission":scope.mission.as_str(),"attempt":scope.attempt.as_str(),"baseline":scope.baseline.get(),"generation":scope.generation.get(),"candidate":scope.candidate.commit().as_str(),"status":format!("{:?}",e.status),"pending":e.pending(),"cancellation_requested":e.cancellation_requested,"reported_outcome":e.report.map(|r| format!("{r:?}")),"reconciled":e.reconciliation.is_some(),"retry_depth":e.retries,"grant":grant.id.as_str(),"grant_revoked":projection.revoked().contains(&grant.id),"grant_expired_at_observed_tick":projection.last_tick() >= grant.expires_before,"baseline_current":scope.baseline == k.state().definition().revision(),"package_current":package_current,"reservation":e.intent.demand.iter().map(|d|json!({"resource":format!("{:?}",d.resource),"quantity":d.amount})).collect::<Vec<_>>(),"observation_kind":"CONTROLLED_FIXTURE","authorized":false,"real_dispatched":false})
+        json!({"id":e.intent.id.as_str(),"mission":scope.task.as_str(),"attempt":scope.attempt.as_str(),"baseline":scope.baseline.get(),"generation":scope.generation.get(),"candidate":scope.candidate.commit().as_str(),"status":format!("{:?}",e.status),"pending":e.pending(),"cancellation_requested":e.cancellation_requested,"reported_outcome":e.report.map(|r| format!("{r:?}")),"reconciled":e.reconciliation.is_some(),"retry_depth":e.retries,"grant":grant.id.as_str(),"grant_revoked":projection.revoked().contains(&grant.id),"grant_expired_at_observed_tick":projection.last_tick() >= grant.expires_before,"baseline_current":scope.baseline == k.state().definition().revision(),"package_current":package_current,"reservation":e.intent.demand.iter().map(|d|json!({"resource":schema.resource(d.resource),"quantity":d.amount})).collect::<Vec<_>>(),"observation_kind":"CONTROLLED_FIXTURE","authorized":false,"real_dispatched":false})
     }).collect();
     let mut dimensions = std::collections::BTreeSet::new();
     for policy in projection.policies() {
@@ -164,7 +172,7 @@ fn fixture_view(k: &CoordinationKernel) -> Value {
             dimensions.insert(capacity.resource);
         }
     }
-    let accounting: Vec<_> = dimensions.into_iter().map(|r|json!({"resource":format!("{r:?}"),"fixture_accounted":projection.accounted(r).ok()})).collect();
+    let accounting: Vec<_> = dimensions.into_iter().map(|r|json!({"resource":schema.resource(r),"fixture_accounted":projection.accounted(r).ok()})).collect();
     let prepared: Vec<_> = k.prepared_inputs().iter().map(|(id,p)|json!({"operation":id.as_str(),"package":p.package().request().id.as_str(),"package_revision":p.package().request().revision.get(),"executor":p.descriptor().identity().name(),"executor_version":p.descriptor().identity().version(),"bytes":p.bytes().len(),"current_structural_correspondence":p.check(k.state(),p.descriptor(),p.requirements(),p.bytes()).is_ok(),"submitted":false})).collect();
     json!({"schema":"cortex.fixture-effects.v1","mode":"CONTROLLED_FIXTURE_ONLY","real_execution_supported":false,"logical_tick":projection.last_tick(),"clock":"CALLER_ASSERTION","policies":projection.policies().len(),"proposed_grants":projection.grants().len(),"revoked_grants":projection.revoked().iter().map(|id|id.as_str()).collect::<Vec<_>>(),"effects":effects,"accounting":accounting,"prepared_inputs":prepared})
 }
@@ -199,10 +207,10 @@ fn scope_observation_view(s: &ScopeObservation) -> Value {
         "measurement_scope":"RETAINED_CAPTURE_NOT_CURRENT_HOST_REINSPECTION",
         "qualification":"NOT_INFERRED","adoption_supported":false,"private_scope_identity_omitted":true})
 }
-fn supervised_view(k: &CoordinationKernel) -> Value {
+fn supervised_view(k: &CoordinationKernel, schema: Schema) -> Value {
     let projection = k.fixture_effects();
     let accounting: Vec<_> = projection.current_policy().into_iter().flat_map(|p| &p.capacities).map(|capacity| {
-        json!({"resource":format!("{:?}",capacity.resource),"accounted":projection.accounted(capacity.resource).ok(),"declared_capacity":capacity.available,"verification_reserve":capacity.verification_reserve,"enforcement_scope":"TRUSTED_FIXTURE_LEDGER_NOT_HARD_HOST_QUOTA"})
+        json!({"resource":schema.resource(capacity.resource),"accounted":projection.accounted(capacity.resource).ok(),"declared_capacity":capacity.available,"verification_reserve":capacity.verification_reserve,"enforcement_scope":"TRUSTED_FIXTURE_LEDGER_NOT_HARD_HOST_QUOTA"})
     }).collect();
     let effects: Vec<_> = projection.effects().iter().map(|effect| {
         let grant = projection.grants().iter().find(|g| g.id == effect.intent.grant).expect("effect grant");
@@ -233,7 +241,7 @@ fn supervised_view(k: &CoordinationKernel) -> Value {
             };
             json!({"observation_scope":o.id.scope(),"observation_sequence":o.id.sequence(),"completion":completion,"quiescence":format!("{:?}",o.quiescence),"process":o.process.as_ref().map(|p|json!({"pid":p.pid,"start_ticks":p.start_ticks,"adoption_supported":false})),"input_bytes":o.input_bytes,"stdout_bytes":o.stdout_bytes,"stderr_bytes":o.stderr_bytes,"structured_records":o.structured_records,"malformed_output":o.malformed_output,"elapsed_ms":o.elapsed_ms,"containment":o.containment.as_deref().map(scope_observation_view),"unresolved_scope_helpers":o.unresolved_scope_helpers.iter().map(|h|json!({"pid":h.pid,"start_ticks":h.start_ticks,"adoption_supported":false})).collect::<Vec<_>>(),"raw_output_retained":false})
         }).collect();
-        json!({"effect":effect.intent.id.as_str(),"mission":effect.intent.scope.mission.as_str(),"attempt":effect.intent.scope.attempt.as_str(),"candidate":effect.intent.scope.candidate.commit().as_str(),"status":format!("{:?}",effect.status),"pending_reconciliation":effect.pending(),"cancellation_requested":effect.cancellation_requested,"grant_revoked":projection.revoked().contains(&grant.id),"grant_expired_at_observed_tick":projection.last_tick() >= grant.expires_before,"dispatch_intent_durable":effect.dispatch_at.is_some(),"dispatch_tick":effect.dispatch_at,"process_spec_retained":effect.process_spec.is_some(),"configured_process_limits":limits,"containment_request":effect.process_spec.as_ref().and_then(|s|s.containment.as_ref()).map(scope_spec_view),"reported_outcome":effect.report.map(|v|format!("{v:?}")),"recovery":recovery,"observations":observations,"mission_acceptance":"NOT_INFERRED"})
+        json!({"effect":effect.intent.id.as_str(),"mission":effect.intent.scope.task.as_str(),"attempt":effect.intent.scope.attempt.as_str(),"candidate":effect.intent.scope.candidate.commit().as_str(),"status":format!("{:?}",effect.status),"pending_reconciliation":effect.pending(),"cancellation_requested":effect.cancellation_requested,"grant_revoked":projection.revoked().contains(&grant.id),"grant_expired_at_observed_tick":projection.last_tick() >= grant.expires_before,"dispatch_intent_durable":effect.dispatch_at.is_some(),"dispatch_tick":effect.dispatch_at,"process_spec_retained":effect.process_spec.is_some(),"configured_process_limits":limits,"containment_request":effect.process_spec.as_ref().and_then(|s|s.containment.as_ref()).map(scope_spec_view),"reported_outcome":effect.report.map(|v|format!("{v:?}")),"recovery":recovery,"observations":observations,"mission_acceptance":"NOT_INFERRED"})
     }).collect();
     let scoped = projection.effects().iter().any(|e| {
         e.process_spec
@@ -257,6 +265,7 @@ pub fn run(args: impl Iterator<Item = OsString>, out: &mut impl Write) -> Result
     let mut max = None;
     let mut timeout = None;
     let mut machine = false;
+    let mut schema = None;
     let mut it = args.iter();
     if it.next().is_none_or(|a| a != "inspect") {
         out.write_all(HELP.as_bytes())?;
@@ -276,6 +285,19 @@ pub fn run(args: impl Iterator<Item = OsString>, out: &mut impl Write) -> Result
             break;
         };
         match flag.to_str() {
+            Some("--schema-version") => {
+                if schema.is_some() {
+                    invalid = true;
+                }
+                schema = match value.to_str() {
+                    Some("1") => Some(Schema::Legacy),
+                    Some("2") => Some(Schema::Canonical),
+                    _ => {
+                        invalid = true;
+                        None
+                    }
+                };
+            }
             Some("--store") => {
                 if store.replace(PathBuf::from(value)).is_some() {
                     invalid = true;
@@ -325,6 +347,7 @@ pub fn run(args: impl Iterator<Item = OsString>, out: &mut impl Write) -> Result
         out.write_all(HELP.as_bytes())?;
         return Ok(2);
     };
+    let schema = schema.unwrap_or(Schema::Legacy);
     let selected = cortex_core::program::ProgramId::new(&program);
     let limits = ReadLimits::new(max, Duration::from_millis(timeout));
     if invalid || !store.is_absolute() || selected.is_err() || limits.is_err() {
@@ -336,24 +359,24 @@ pub fn run(args: impl Iterator<Item = OsString>, out: &mut impl Write) -> Result
         .expect("validated duration");
     let key = match key(fd, deadline) {
         Ok(k) => k,
-        Err(e) => return error(out, machine, e),
+        Err(e) => return error(out, machine, schema, e),
     };
     let remaining = deadline.saturating_duration_since(Instant::now());
     let limits = match ReadLimits::new(max, remaining) {
         Ok(l) => l,
-        Err(_) => return error(out, machine, "READ_DEADLINE"),
+        Err(_) => return error(out, machine, schema, "READ_DEADLINE"),
     };
     let (_, k) = match ProgramStore::inspect(&store, &key, limits) {
         Ok(value) => value,
-        Err(e) => return error(out, machine, &e.to_string()),
+        Err(e) => return error(out, machine, schema, &e.to_string()),
     };
     if Instant::now() >= deadline {
-        return error(out, machine, "READ_DEADLINE");
+        return error(out, machine, schema, "READ_DEADLINE");
     }
     if k.state().definition().id() != &selected.expect("validated identity") {
-        return error(out, machine, "PROGRAM_MISMATCH");
+        return error(out, machine, schema, "PROGRAM_MISMATCH");
     }
-    let value = view(&k);
+    let value = view(&k, schema);
     if machine {
         serde_json::to_writer(&mut *out, &value).map_err(io::Error::other)?;
         writeln!(out)?;
@@ -393,14 +416,15 @@ pub fn run(args: impl Iterator<Item = OsString>, out: &mut impl Write) -> Result
                     domain["native_closure_inspection"],
                     domain["reusable_capacity"],
                     domain["cumulative_consumption"],
-                    domain["next_permissible_action"]
+                    domain[schema.guidance_key()]
                 )?;
             }
         }
-        for m in value["missions"].as_array().expect("array") {
+        for m in value[schema.tasks_key()].as_array().expect("array") {
             writeln!(
                 out,
-                "Mission {}: dependency_ready={} eligible={} blockers={}",
+                "{} {}: dependency_ready={} eligible={} blockers={}",
+                schema.task_label(),
                 m["id"].as_str().expect("ID"),
                 m["dependency_ready"],
                 m["eligible"],
@@ -454,4 +478,33 @@ pub fn run(args: impl Iterator<Item = OsString>, out: &mut impl Write) -> Result
         }
     }
     Ok(0)
+}
+
+#[cfg(test)]
+mod schema_error_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_refusal_bytes_are_frozen_and_only_selected_schema_changes() {
+        // Inspected baseline v1 contract: lexicographic JSON keys, exact literals,
+        // one newline, same operational refusal exit. No private error input.
+        let mut output = Vec::new();
+        assert_eq!(
+            error(&mut output, true, Schema::Legacy, "KEY_LENGTH").unwrap(),
+            3
+        );
+        assert_eq!(output, b"{\"execution_authority\":\"UNAVAILABLE\",\"reason\":\"KEY_LENGTH\",\"schema\":\"cortex.program.v1\",\"status\":\"REFUSED\"}\n");
+        output.clear();
+        assert_eq!(
+            error(&mut output, true, Schema::Canonical, "KEY_LENGTH").unwrap(),
+            3
+        );
+        assert_eq!(output, b"{\"execution_authority\":\"UNAVAILABLE\",\"reason\":\"KEY_LENGTH\",\"schema\":\"cortex.program.v2\",\"status\":\"REFUSED\"}\n");
+        output.clear();
+        assert_eq!(
+            error(&mut output, false, Schema::Legacy, "KEY_LENGTH").unwrap(),
+            3
+        );
+        assert_eq!(output, b"Program inspection refused: KEY_LENGTH\n");
+    }
 }

@@ -60,15 +60,17 @@ actual qualification. Protected merges remain owner-controlled.
 
 `cortex_core::program::ProgramDefinition` owns the exact program-wide objective/acceptance, baseline
 revision/predecessor, approval reference, immutable G1 graph, workstream ownership,
-mission increments and declared exclusive resource identities. Every graph mission
+task increments and declared exclusive claim-scope identities. Every graph task
 has exactly one workstream and at least one increment. Every dependency artifact
 belongs to an increment of its declared producer. The original single-criterion
 `TaskContract` is preserved. No new capability identifiers are introduced.
 
-`ProgramState` separates that baseline from `Plan`, which can only reorder the
-same missions. Baseline amendments require explicit `Amend` scope and retain their
-predecessor. Stage 1 preserves workstream/mission/increment responsibility membership;
-artifact revisions and mission contracts may change. Affected consumers and their
+`ProgramState` separates that baseline from `OrderingPlan`, which can only reorder the
+same tasks through `ordering_plan()` / `set_ordering_plan()`.
+`CoordinationPermission::Plan` retains its broader metadata responsibility,
+including capacity and package preparation. Baseline amendments require explicit `Amend` scope and retain their
+predecessor. Stage 1 preserves workstream/task/increment responsibility membership;
+artifact revisions and task contracts may change. Affected consumers and their
 transitive closure are reset. Unchanged components replay their original inputs;
 explicit non-impact must name exactly the unaffected complement. Unknown declared
 coverage cannot establish non-impact. This is reasoning over declared contracts,
@@ -79,24 +81,25 @@ baseline. An exact historical contract may be selected by a new accepted baselin
 G1's artifact alias rules also apply across retained baselines: an artifact ID
 keeps its producer, and its revision cannot acquire a different candidate or kind.
 
-`CoordinationGrant` binds the claimed operator, exact program/baseline, mission
+`CoordinationGrant` binds the claimed operator, exact program/baseline, task
 scope and metadata permissions. Changed reuse of a grant identity is refused.
 The trusted local caller supplies these assertions; neither signatures nor a
 multi-user permission service are implemented. A grant covering an invalidation
-root must also cover every mission whose projected state changes. The accepted
+root must also cover every task whose projected state changes. The accepted
 baseline remains separate from mutable plans and external text.
 Sender and recipient grants in one handoff must also agree when they share an ID;
 the check precedes any change to either attempt.
 
-Claims serialize ownership of the same mission/increment or any shared declared
-semantic resource. Claiming marks the G1 mission active, without running it or
+Claims serialize ownership of the same task/increment or any shared declared
+claim scope (`ClaimScopeId`). These declared semantic exclusion keys are not
+physical resource-pool identities. Claiming marks the G1 task active, without running it or
 making it accepted. Handoff requires both scoped operator acknowledgments, closes
 the original attempt and retains a distinct new attempt. Unknown attempts continue
 to block replacement. Reports require exact baseline/generation correspondence;
 stale attempts may be explicitly cancelled to release metadata ownership. Reports
-and cancellation do not prove external completion, rollback or mission acceptance.
-Stage 1 does not admit whole-mission acceptance or protected integration commands.
-`MissionAcceptance` edges therefore remain held. `program.*` notification names
+and cancellation do not prove external completion, rollback or task acceptance.
+Stage 1 does not admit whole-task acceptance or protected integration commands.
+`TaskAcceptance` edges therefore remain held. `program.*` notification names
 are reserved for derived claim lifecycle records.
 
 `cortex_evidence::program::CoordinationKernel` is the canonical pure composition
@@ -118,7 +121,7 @@ admitted by G1. Negative support findings are retained. A missing-input proposal
 cannot revoke a previously valid release by itself. Explicit contextual
 invalidation holds the affected current consumers while preserving terminal
 results and release history. Invalidating an older record does not revoke a newer
-release that uses different evidence. Re-evaluation updates only missions with
+release that uses different evidence. Re-evaluation updates only tasks with
 changed inputs/incoming decisions; logical graph scans and bounded replay still
 have costs, and no performance improvement is claimed.
 
@@ -180,7 +183,7 @@ not prove natural-language fidelity, source truth, executor compliance or method
 qualification. Qualification references remain caller references; P0 is unchanged,
 and automatic selection, adoption and trusted blocking remain planned. No package
 is submitted to an external model by Stage 1. This first explicit-source profile
-requires each source to match the target mission's repository/worktree/commit
+requires each source to match the target task's repository/worktree/commit
 requirement; other-candidate acquisition/translation remains a later context
 adapter obligation, with missing context declared in omissions.
 
@@ -188,15 +191,24 @@ adapter obligation, with missing context declared in omissions.
 rounds, risk/cost ranks and required resource demands. Its disclosed order is band,
 waiting age, downstream-unblocking count, risk, coordination cost and stable task ID.
 It reserves declared verification capacity in the simulation before subtracting
-worker proposals. Worker/build/test/CPU/RAM/disk/time/output/CI/model quantities are
-separate. Missing demand/capacity or an undeclared enforcement ability holds a
-required dimension. These assertions are not resource measurement or host
+worker proposals. `WorkerSlots`, `BuildJobs`, `TestProcesses`, `CpuMillicores`,
+`RamBytes`, `DiskBytes`, `ElapsedMillis`, `OutputBytes`, `CiJobs` and `ModelTokens`
+are separate dimensions. Worker slots are declared logical capacity units; their
+reusable or cumulative treatment belongs to the consuming profile. They are not
+observed people, processes or threads. Missing demand/capacity or an undeclared
+enforcement ability holds a required dimension. These assertions are not resource measurement or host
 qualification. Results are proposals; authorized/reserved/dispatched remain false.
 
 ## Operator interface
 
 Rust consumers compose the validated definition and `CoordinationKernel`, then
 explicitly call `ProgramStore::create`, `admit`, `load`, `inspect` or `reconcile`.
+The module-qualified `program_store::AdmissionReceipt` identifies the retained
+operation, store incarnation and original ordinal, including duplicate or
+reconciled-present admission. It is distinct from the history store receipt, an
+in-memory kernel receipt and a closure receipt. It does not assert a new append,
+external completion, acceptance or permission.
+
 Mutations always require complete typed inputs and expected state. There is no
 implicit persistent location or automatic ingestion of a chat/planner output.
 
@@ -216,13 +228,41 @@ key, deadline expiry or required journal recovery. It does not recover, dispatch
 review, approve or recapture Git. The read timeout is cooperative for storage; pipe
 key acquisition uses a nonblocking read with an explicit elapsed deadline.
 
-Structured output schema `cortex.program.v1` is separate from existing check JSON
-v1. It exposes baseline/journal identity, workstreams, exact mission candidates,
-dependency readiness versus eligibility, per-edge release/hold reasons, attempts,
+### Read-only CLI schemas
+
+Omitting `--schema-version` or selecting `--schema-version 1` retains the existing
+human and machine contracts. Structured output schema `cortex.program.v1` is
+separate from check JSON v1. It exposes baseline/journal identity, workstreams,
+exact task candidates, dependency readiness versus eligibility, per-edge release/hold reasons, attempts,
 unknown metadata outcomes, historical support decisions and package correspondence.
 It explicitly reports unavailable execution authority, absent resource reservations,
 unsupported integration and unperformed live verification. Human output summarizes
-missions/blockers and attempts. Exit 0 means inspected metadata, not engineering
+tasks/blockers and attempts, retaining the existing `Mission` label in version 1.
+`--schema-version 2` selects canonical terminology in either human output or, with
+`--json`, machine output. Schema selection does not change inspection or accounting.
+
+| Projection | Explicit version 2 representation | Preserved meaning |
+| --- | --- | --- |
+| Program and workstreams | `cortex.program.v2`, `tasks`, `task`, `task_status` | Same task identities and coordination states, separate from attempts |
+| Resource quantities | Canonical names such as `WorkerSlots` and `CpuMillicores` | Same numeric values, units and profile-specific accounting |
+| Fixture/supervised projections | `cortex.fixture-effects.v2`, `cortex.supervised-fixtures.v2` | Same bounded effect records and observations |
+| Domain projection | `cortex.domains.v2` | Same retained domain facts; no manager contact |
+| Guidance | `next_step_guidance`, scope `RETAINED_STATE_ADVISORY_NOT_EXHAUSTIVE` | Conditional information, not authorization or an exhaustive prerequisite check |
+| Retained binding | `prepared_handle_availability: UNESTABLISHED_BY_JOURNAL` | The journal does not establish a current usable controller channel |
+| Closure receipt | `closure_receipt_recorded`, `closure_receipt_status`, `closure_receipt_source` | Receipt retention and declared source, not authenticated physical closure |
+| Native sample | `native_support_status: INCOMPLETE`, `latest_direct_observation`, `retained_native_observation_count` | Existing bounded direct observation, unchanged selection/counting and proof limits |
+
+Receipt status is `CLOSURE_RECEIPT_RETAINED` or `NO_CLOSURE_RECEIPT_RETAINED`; an
+absent receipt has no asserted receipt source. Native support remains separate
+from any caller-asserted receipt and actual resource disposition. Its guidance is
+`DO_NOT_USE_PARTIAL_NATIVE_SAMPLES_AS_CLOSURE_OR_SETTLEMENT`. Neither sample
+presence nor schema selection grants closure, settlement, retry or new admission.
+The [domain contract](recoverable-domains.md) defines the retained proof boundary.
+
+Missing, unsupported or repeated schema values are refused as invalid arguments
+before key acquisition, without echoing those values. The accepted values are
+exactly `1` and `2`; the parser does not normalize an unsupported spelling. Other command families, including check JSON, retain their
+existing output contracts. Exit 0 means inspected metadata, not engineering
 acceptance; 2 means invalid arguments, 3 means a store/key/inspection refusal, and
 1 means output failure. Output is requested local private program content; avoid
 redirecting it into public logs.

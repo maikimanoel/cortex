@@ -23,7 +23,7 @@ itself clear quarantined scratch, unknown remote outcomes or cumulative debt.
 Each covered reusable dimension settles at most once. Original observations,
 reservation identity and the basis for disposition remain inspectable.
 
-CPU capacity retains the existing milli-CPU meaning of `CpuMillis`. Cumulative
+CPU capacity uses `CpuMillicores`: 1000 is one CPU equivalent. Cumulative
 CPU execution has its own dimension. Charged memory is not virtual address space;
 task counts include threads where supported. Scratch bytes, objects and inodes
 are distinct. A sampled CPU cutoff is not a hard lifetime CPU cap, a kill request
@@ -49,13 +49,14 @@ operator creating competing stores or restoring old snapshots.
 New work requires current authority, accepted dependencies, exact candidate and
 package correspondence, available reusable capacity and every required cumulative
 budget. Settled capacity cannot bypass unresolved mandatory debt. A distinct new
-mission is admitted through the ordinary guards; changing an attempt label cannot
+task is admitted through the ordinary guards; changing an attempt label cannot
 make a lost original operation safe to retry.
 
 Each member's aggregate policy also limits its share of the same pool records;
 this does not introduce a separate allocation ledger. Version 4 maps cumulative
-`TimeMillis` to elapsed milliseconds and `OutputBytes` to output bytes. Unsupported
-cumulative mappings are refused, including treating milli-CPU `CpuMillis` as
+the active `ElapsedMillis` dimension to elapsed milliseconds and `OutputBytes`
+to output bytes. Historical versioned tokens remain unchanged. Unsupported
+cumulative mappings are refused, including treating milli-CPU `CpuMillicores` as
 elapsed CPU execution time.
 
 ## Outer boundary before payload release
@@ -265,5 +266,5 @@ authority, its historical journal, debt and reservations remain held.
 
 The construction sequence is recovery/resource semantics, then the recoverable
 outer backend, then qualification of that exact profile. Compatible interfaces
-may support later provider transport, substantial engineering missions and GPE
+may support later provider transport, substantial engineering tasks and GPE
 programs, but those remain separately authorized downstream stages.

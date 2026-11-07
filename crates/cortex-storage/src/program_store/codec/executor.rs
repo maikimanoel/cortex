@@ -3,9 +3,9 @@ use super::*;
 use cortex_core::program::executor::ObservationKind as CapabilityObservationKind;
 use cortex_core::program::executor::*;
 
-symbols!(CapabilityObservationKind;Advertised,ControlledFixture,HostQualificationReport);
-symbols!(Support;Supported,Unsupported,Unknown);
-symbols!(Transport;StandardInputJsonLines);
+symbols!(CapabilityObservationKind;Advertised => "Advertised",ControlledFixture => "ControlledFixture",HostQualificationReport => "HostQualificationReport");
+symbols!(Support;Supported => "Supported",Unsupported => "Unsupported",Unknown => "Unknown");
+symbols!(Transport;StandardInputJsonLines => "StandardInputJsonLines");
 fields!(CapabilityObservation;control,kind,support,basis);
 fields!(Requirement;control,kind);
 fields!(ExecutorInputRequest;package,revision,descriptor,requirements,max_bytes);

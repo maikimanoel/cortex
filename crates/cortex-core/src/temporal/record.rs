@@ -238,7 +238,7 @@ impl DomainInterval {
     }
 }
 
-/// Independent domain validity and caller-supplied recording time.
+/// Independent domain-time interval and caller-supplied recording time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RecordTime {
     valid: DomainInterval,
@@ -246,7 +246,7 @@ pub struct RecordTime {
 }
 
 impl RecordTime {
-    /// Require a recording instant at/after the epoch, unrelated to domain validity.
+    /// Require a recording instant at/after the epoch, unrelated to the domain-time interval.
     pub fn new(valid: DomainInterval, recorded_at: SystemTime) -> Result<Self, TemporalError> {
         validate_instant(recorded_at)?;
         Ok(Self { valid, recorded_at })
