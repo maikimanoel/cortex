@@ -1200,3 +1200,79 @@ fn prepared_domain_inspection_retains_bounded_observations_without_live_effects(
             .is_none()
     );
 }
+
+#[test]
+fn recursive_closure_projection_retains_hidden_descendant_without_physical_proof() {
+    use cortex_core::program::domain::*;
+    let f = Temp::new();
+    let (mut kernel, intent) = domain_fixture::coordinator();
+    domain_fixture::observed_cancelled(&mut kernel, &intent);
+    let mut sample = domain_fixture::closure_observation(&intent, 5);
+    sample.populated = true;
+    let tree = DomainClosureTreeObservation {
+        nodes: vec![
+            DomainCgroupObservation {
+                relative_path: String::new(),
+                device: sample.identity.cgroup_device,
+                inode: sample.identity.cgroup_inode,
+                populated: true,
+                members: vec![],
+            },
+            DomainCgroupObservation {
+                relative_path: "private-child-node".into(),
+                device: sample.identity.cgroup_device,
+                inode: sample.identity.cgroup_inode + 1,
+                populated: true,
+                members: vec![DomainProcessObservation {
+                    pid: 100456,
+                    start_ticks: 200789,
+                }],
+            },
+        ],
+        sample,
+    };
+    domain_fixture::event(
+        &mut kernel,
+        "tree-sample",
+        DomainEvent::ClosureTreeObserved {
+            domain: intent.id.clone(),
+            observation: tree,
+            at: 5,
+        },
+    );
+    let store =
+        ProgramStore::create_domain_fixture(&f.store(), &key(), kernel.initial().clone(), limits())
+            .unwrap();
+    for operation in kernel.operations() {
+        store.admit(&key(), operation.clone()).unwrap();
+    }
+    let before = snapshot(&f);
+    let mut c = command(&f);
+    c.arg("--json");
+    let output = run(c, &[0x57; 32]);
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let d = &value["domain_projection"]["domains"][0];
+    let tree = &d["retained_cgroup_tree_observation"];
+    assert_eq!(tree["retained_observations"], 1);
+    assert_eq!(tree["latest"]["nodes"], 2);
+    assert_eq!(tree["latest"]["observed_members"], 1);
+    assert_eq!(tree["latest"]["any_population"], true);
+    assert_eq!(tree["whole_domain_closure_proven"], false);
+    assert_eq!(tree["current_liveness"], "NOT_OBSERVED");
+    assert_eq!(d["historical_outcome"]["kind"], "UNKNOWN");
+    assert_eq!(d["closure_evidence_recorded"], false);
+    assert_eq!(d["cumulative_consumption"][0]["unresolved_debt"], true);
+    assert!(
+        d["native_closure_inspection"]["native_observation_missing_proofs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|g| g == "RemainingMembers")
+    );
+    let text = String::from_utf8(output.stdout).unwrap();
+    for private in ["private-child-node", "100456", "200789"] {
+        assert!(!text.contains(private));
+    }
+    assert_eq!(snapshot(&f), before);
+}

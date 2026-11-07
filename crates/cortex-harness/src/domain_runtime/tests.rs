@@ -171,6 +171,21 @@ impl DomainManager for FakeManager {
             restart_prevented: true,
         })
     }
+    fn observe_tree(
+        &mut self,
+        intent: &DomainIntent,
+        end: Instant,
+    ) -> Result<(ManagedObservation, Vec<DomainCgroupObservation>), DomainDiagnostic> {
+        let actual = self.observe(intent, end)?;
+        let root = DomainCgroupObservation {
+            relative_path: String::new(),
+            device: actual.identity.cgroup_device,
+            inode: actual.identity.cgroup_inode,
+            populated: actual.populated,
+            members: actual.direct_members.clone(),
+        };
+        Ok((actual, vec![root]))
+    }
     fn stop(
         &mut self,
         intent: &DomainIntent,
@@ -776,4 +791,74 @@ fn post_cancel_replaced_manager_identity_or_invalid_authority_cannot_publish_rea
         assert_eq!(manager.created, 1);
         assert_eq!(manager.stopped, 1);
     }
+}
+
+#[test]
+fn recursive_native_consumer_retains_same_store_evidence_without_effect_or_refund() {
+    let root = Temp::new();
+    let (store, intent, ids) = stored(&root);
+    let mut manager = FakeManager::new(&root);
+    let held = prepare_only(&store, &mut manager, &ids).prepared.unwrap();
+    assert!(
+        observe_closure_tree(
+            &store,
+            &key(),
+            &mut manager,
+            &ids,
+            OperationId::new("before-cancel-tree").unwrap()
+        )
+        .is_err()
+    );
+    cancel_prepared(
+        &store,
+        &key(),
+        &mut manager,
+        held,
+        cancellation(&store, &ids),
+    )
+    .unwrap();
+    manager.finish();
+    let created = manager.created;
+    let stopped = manager.stopped;
+    observe_closure_tree(
+        &store,
+        &key(),
+        &mut manager,
+        &ids,
+        OperationId::new("tree-capture").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manager.created, created);
+    assert_eq!(manager.stopped, stopped);
+    let restored = store.load(&key(), Access::ReadOnly).unwrap();
+    let record = restored.domains().unwrap().domain(&intent.id).unwrap();
+    assert_eq!(record.closure_tree_observations.len(), 1);
+    assert_eq!(record.closure_tree_observations[0].nodes.len(), 1);
+    assert!(
+        record
+            .closure_inspection()
+            .missing
+            .contains(&ClosureProofGap::SnapshotExclusion)
+    );
+    assert!(record.holds(cortex_core::program::scheduling::Resource::Workers));
+    assert!(record.unresolved_consumption(Consumption::CpuExecutionMillis));
+    assert!(record.closure.is_none());
+    assert_eq!(record.outcome, HistoricalOutcome::Unknown);
+    let replay = store.load(&key(), Access::ReadOnly).unwrap();
+    assert!(replay.domains() == restored.domains());
+    manager.replace = true;
+    assert!(
+        observe_closure_tree(
+            &store,
+            &key(),
+            &mut manager,
+            &ids,
+            OperationId::new("changed-tree").unwrap()
+        )
+        .is_err()
+    );
+    assert_eq!(
+        store.load(&key(), Access::ReadOnly).unwrap().revision(),
+        restored.revision()
+    );
 }

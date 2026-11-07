@@ -545,3 +545,9 @@ supply whole-domain/snapshot proof. Controlled fixture continuity and actual-hos
 qualification remain separate; the latter still needs its selected allocation,
 observer, finite procedure and explicit operational grant. No milestone state or
 live-execution authority advances from this source increment.
+
+The separately authorized recursive native closure readback retains bounded
+subtree observations and explains missing whole-domain proof through the existing
+owners and inspection path. Source verification does not qualify the shared
+workstation, settle historical debt, grant provider execution or complete a
+milestone. Actual-host admission retains its enforced-control and authority gates.

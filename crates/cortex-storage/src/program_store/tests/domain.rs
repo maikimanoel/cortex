@@ -618,3 +618,60 @@ fn cancel_publication_cut_requires_replayed_durable_cancel_before_readback() {
         assert_eq!(record.outcome, HistoricalOutcome::Unknown);
     }
 }
+
+#[test]
+fn recursive_capture_codec_replay_and_crash_cuts_preserve_unknown() {
+    for cut in [Stage::BeforeWrite, Stage::BeforeCommit, Stage::AfterCommit] {
+        let f = Temp::new();
+        let (mut k, i) = domain_fixture::coordinator();
+        domain_fixture::observed_cancelled(&mut k, &i);
+        let s = stored(&k, &f);
+        let input = op(
+            &k,
+            "tree",
+            DomainEvent::ClosureTreeObserved {
+                domain: i.id.clone(),
+                observation: domain_fixture::closure_tree_observation(&i, 5),
+                at: 5,
+            },
+        );
+        let bytes = codec::operation(&input, k.initial().limits().bytes).unwrap();
+        let wire: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(wire[3][0], "domain-closure-tree-v1");
+        assert_eq!(wire[3][1][0], "closure-tree-observed-v1");
+        assert!(codec::decode_operation(&bytes, &k).unwrap() == input);
+        for tag in [
+            "domain-v1",
+            "domain-observation-v1",
+            "domain-closure-observation-v1",
+            "domain-closure-tree-v2",
+        ] {
+            let mut bad = wire.clone();
+            bad[3][0] = serde_json::json!(tag);
+            assert!(codec::decode_operation(&serde_json::to_vec(&bad).unwrap(), &k).is_err());
+        }
+        let mut bad = wire.clone();
+        bad[3][1][2][1][1][0] = serde_json::json!("../escape");
+        assert!(codec::decode_operation(&serde_json::to_vec(&bad).unwrap(), &k).is_err());
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            s.admit_observed(&key(), input.clone(), |stage, _| {
+                if std::mem::discriminant(&stage) == std::mem::discriminant(&cut) {
+                    panic!("controlled recursive observation publication cut");
+                }
+            })
+        }));
+        assert!(failed.is_err());
+        let restored = s.load(&key(), Access::ReadOnly).unwrap();
+        let record = restored.domains().unwrap().domain(&i.id).unwrap();
+        assert_eq!(
+            record.closure_tree_observations.len(),
+            usize::from(matches!(cut, Stage::AfterCommit))
+        );
+        assert!(record.cancelled && record.closure.is_none() && record.holds(Resource::Workers));
+        assert_eq!(record.outcome, HistoricalOutcome::Unknown);
+        assert!(record.unresolved_consumption(Consumption::CpuExecutionMillis));
+        if matches!(cut, Stage::AfterCommit) {
+            assert!(s.admit(&key(), input).unwrap().duplicate);
+        }
+    }
+}

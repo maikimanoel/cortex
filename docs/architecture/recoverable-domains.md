@@ -177,6 +177,21 @@ binary ABI or a general source-stability promise.
 
 ### Closure and subsequent admission
 
+The bounded recursive closure observer additionally retains a cgroup tree sample:
+relative nodes with device/inode identity, population and process birth identities.
+Descriptor-relative opens refuse symlinks and traversal outside the selected root;
+finite node, depth, member, byte and deadline limits bound collection. Repeated
+topology/member observations detect examined changes, but do not create an atomic
+snapshot or fence. The cleanup-only observation can retain a missing main process
+with populated descendants; preparation and payload-release checks stay strict.
+
+Tree records use a distinct versioned event in the same canonical journal. Exact
+binding, scope, configuration, cancellation and sample correspondence remain
+mandatory. CLI inspection exposes redacted tree counts and remaining proof gaps.
+A recursive sample cannot establish complete helper/stream coverage, snapshot
+exclusion or final usage, and cannot close a domain or release resources. Missing
+or changing topology, identity, membership or counters preserve uncertainty.
+
 The native closure-inspection path retains a bounded, versioned post-cancellation
 observation in the same journal. It requires the actual binding and durable Cancel
 before capture/publication, and matches the store, scope, configuration, manager,
