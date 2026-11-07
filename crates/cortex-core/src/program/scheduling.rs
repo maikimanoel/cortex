@@ -5,20 +5,23 @@ use std::collections::BTreeMap;
 /// Independently accounted resource dimensions; units are explicit in each variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Resource {
-    /// Concurrent metadata worker slots.
-    Workers,
-    /// Concurrent build jobs.
-    Builds,
-    /// Concurrent test processes.
-    Tests,
-    /// Milli-CPU units.
-    CpuMillis,
-    /// Resident memory bytes.
+    /// Declared logical worker capacity units. Reuse or cumulative charging is
+    /// determined by the consuming profile, not by this unit or observed PIDs.
+    WorkerSlots,
+    /// Declared build-job units; accounting policy belongs to the profile.
+    BuildJobs,
+    /// Declared test-process units, not cases, assertions or test threads.
+    TestProcesses,
+    /// CPU rate/capacity in millicores: 1000 is one CPU equivalent.
+    /// This is not cumulative CPU execution time.
+    CpuMillicores,
+    /// Memory bytes under the consuming profile. Legacy values do not encode
+    /// an accounting basis; resident and charged memory are not interchangeable.
     RamBytes,
     /// Managed disk bytes.
     DiskBytes,
     /// Elapsed milliseconds.
-    TimeMillis,
+    ElapsedMillis,
     /// Captured output bytes.
     OutputBytes,
     /// CI job units under the selected policy.
@@ -50,8 +53,8 @@ pub struct Demand {
 /// Owner-supplied ordering inputs. Lower bands and risk/cost ranks sort first.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Proposal {
-    /// Target mission.
-    pub mission: TaskId,
+    /// Target task.
+    pub task: TaskId,
     /// Explicit owner value/priority band.
     pub band: u32,
     /// Declared waiting rounds, descending within a band to prevent starvation.
@@ -78,8 +81,8 @@ pub enum WaitReason {
 /// One simulated allocation; authorized/reserved/dispatched remain false by contract.
 #[derive(Clone, PartialEq, Eq)]
 pub struct SchedulingDecision {
-    /// Mission considered in disclosed order.
-    pub mission: TaskId,
+    /// Task considered in disclosed order.
+    pub task: TaskId,
     /// Dependency readiness, independent of scheduling.
     pub dependency_ready: bool,
     /// Graph eligibility, independent of authority.
@@ -120,7 +123,7 @@ pub fn simulate(
     }
     let mut ids = BTreeSet::new();
     for p in proposals {
-        if !ids.insert(p.mission.as_str())
+        if !ids.insert(p.task.as_str())
             || p.demand.len() > 10
             || p.demand
                 .iter()
@@ -131,7 +134,7 @@ pub fn simulate(
         {
             return Err(ProgramError::Structure);
         }
-        state.readiness().mission(&p.mission)?;
+        state.readiness().task(&p.task)?;
     }
     let downstream = |id: &TaskId| {
         let mut seen = BTreeSet::from([id.as_str()]);
@@ -152,14 +155,14 @@ pub fn simulate(
         a.band
             .cmp(&b.band)
             .then_with(|| b.waiting_rounds.cmp(&a.waiting_rounds))
-            .then_with(|| downstream(&b.mission).cmp(&downstream(&a.mission)))
+            .then_with(|| downstream(&b.task).cmp(&downstream(&a.task)))
             .then(a.risk_rank.cmp(&b.risk_rank))
             .then(a.cost_rank.cmp(&b.cost_rank))
-            .then(a.mission.as_str().cmp(b.mission.as_str()))
+            .then(a.task.as_str().cmp(b.task.as_str()))
     });
     let mut result = Vec::new();
     for p in ordered {
-        let m = state.readiness().mission(&p.mission)?;
+        let m = state.readiness().task(&p.task)?;
         let mut held = Vec::new();
         if !m.eligible() {
             held.push(WaitReason::Preconditions);
@@ -193,7 +196,7 @@ pub fn simulate(
             }
         }
         result.push(SchedulingDecision {
-            mission: p.mission.clone(),
+            task: p.task.clone(),
             dependency_ready: m.dependency_ready(),
             eligible: m.eligible(),
             held,

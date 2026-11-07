@@ -56,7 +56,7 @@ fn restoring_original_scope_representation_cannot_change_semantic_identity() {
 }
 
 #[test]
-fn intermediate_release_fan_out_fan_in_and_no_mission_completion() {
+fn intermediate_release_fan_out_fan_in_and_no_task_completion() {
     let mut k = initialized();
     admit(
         &mut k,
@@ -64,26 +64,14 @@ fn intermediate_release_fan_out_fan_in_and_no_mission_completion() {
         Command::Claim(attempt("A-attempt", "A", "operator")),
     );
     release(&mut k, "AB");
-    assert!(
-        k.state()
-            .readiness()
-            .mission(&task("B"))
-            .unwrap()
-            .eligible()
-    );
+    assert!(k.state().readiness().task(&task("B")).unwrap().eligible());
     assert_eq!(k.state().attempts()[0].status, AttemptStatus::Claimed);
-    assert!(
-        !k.state()
-            .readiness()
-            .mission(&task("F"))
-            .unwrap()
-            .eligible()
-    );
+    assert!(!k.state().readiness().task(&task("F")).unwrap().eligible());
     release(&mut k, "BF");
     assert!(
         !k.state()
             .readiness()
-            .mission(&task("F"))
+            .task(&task("F"))
             .unwrap()
             .dependency_ready()
     );
@@ -97,17 +85,11 @@ fn intermediate_release_fan_out_fan_in_and_no_mission_completion() {
     ));
     release(&mut k, "DE");
     release(&mut k, "EF");
-    assert!(
-        k.state()
-            .readiness()
-            .mission(&task("F"))
-            .unwrap()
-            .eligible()
-    );
+    assert!(k.state().readiness().task(&task("F")).unwrap().eligible());
     assert_eq!(k.state().authority(), ExecutionAuthority::Unavailable);
     assert_eq!(
-        k.state().readiness().mission(&task("A")).unwrap().status(),
-        MissionStatus::Active
+        k.state().readiness().task(&task("A")).unwrap().status(),
+        TaskStatus::Active
     );
 }
 #[test]
@@ -116,13 +98,7 @@ fn unassessed_and_missing_context_do_not_release_then_new_valid_decision_can() {
     let r = prepare_release(&mut k, "AB", false);
     admit(&mut k, "held", Command::Release(Box::new(r.clone())));
     assert!(!k.decisions()[0].released);
-    assert!(
-        !k.state()
-            .readiness()
-            .mission(&task("B"))
-            .unwrap()
-            .eligible()
-    );
+    assert!(!k.state().readiness().task(&task("B")).unwrap().eligible());
     let assessment = AssessmentInput {
         examination: r.examinations[0].clone(),
         id: AssessmentId::new("assess-AB").unwrap(),
@@ -202,26 +178,14 @@ fn amendment_keeps_explicit_nonimpact_release_and_invalidates_only_closure() {
         Command::Amend {
             next: Box::new(definition_revision(2, true)),
             non_impact: NonImpact {
-                missions: vec![task("D"), task("E")],
+                tasks: vec![task("D"), task("E")],
                 basis: source("complete-independent-branch-coverage"),
             },
         },
     );
     k.admit(op).unwrap();
-    assert!(
-        !k.state()
-            .readiness()
-            .mission(&task("B"))
-            .unwrap()
-            .eligible()
-    );
-    assert!(
-        k.state()
-            .readiness()
-            .mission(&task("E"))
-            .unwrap()
-            .eligible()
-    );
+    assert!(!k.state().readiness().task(&task("B")).unwrap().eligible());
+    assert!(k.state().readiness().task(&task("E")).unwrap().eligible());
     assert_eq!(k.decisions().len(), 2);
     assert_eq!(k.state().definitions().len(), 2);
 }
@@ -235,7 +199,7 @@ fn false_nonimpact_refuses_without_partially_amending() {
         Command::Amend {
             next: Box::new(definition_revision(2, true)),
             non_impact: NonImpact {
-                missions: vec![task("B"), task("D"), task("E")],
+                tasks: vec![task("B"), task("D"), task("E")],
                 basis: source("unproved-neighbor"),
             },
         },
@@ -258,21 +222,9 @@ fn explicit_stale_examination_holds_consumers_but_retains_terminal_pass() {
     let inspection = k.inspect_record(&ex).unwrap();
     assert_eq!(inspection.validity, Some(Validity::Stale));
     assert_eq!(k.revision(), before);
-    assert!(
-        k.state()
-            .readiness()
-            .mission(&task("B"))
-            .unwrap()
-            .eligible()
-    );
+    assert!(k.state().readiness().task(&task("B")).unwrap().eligible());
     admit(&mut k, "retain-stale", Command::Examine(ex));
-    assert!(
-        !k.state()
-            .readiness()
-            .mission(&task("B"))
-            .unwrap()
-            .eligible()
-    );
+    assert!(!k.state().readiness().task(&task("B")).unwrap().eligible());
     assert_eq!(
         k.records()[0].assessment().unwrap().result(),
         AssessmentResult::Pass
@@ -297,13 +249,7 @@ fn unchanged_examination_is_a_legitimate_noninvalidating_neighbor() {
         "unchanged",
         Command::Examine(r.examinations[0].clone()),
     );
-    assert!(
-        k.state()
-            .readiness()
-            .mission(&task("B"))
-            .unwrap()
-            .eligible()
-    );
+    assert!(k.state().readiness().task(&task("B")).unwrap().eligible());
     assert_eq!(
         k.state()
             .readiness()
@@ -351,13 +297,7 @@ fn unsupported_new_proposal_does_not_revoke_a_previously_valid_release() {
     missing.consumer = None;
     admit(&mut k, "held-proposal", Command::Release(Box::new(missing)));
     assert!(!k.decisions().last().unwrap().released);
-    assert!(
-        k.state()
-            .readiness()
-            .mission(&task("B"))
-            .unwrap()
-            .eligible()
-    );
+    assert!(k.state().readiness().task(&task("B")).unwrap().eligible());
 }
 #[test]
 fn old_evidence_does_not_revoke_a_newer_independently_supported_review() {
@@ -426,11 +366,5 @@ fn old_evidence_does_not_revoke_a_newer_independently_supported_review() {
             reason: "Old mechanism corrected".into(),
         },
     );
-    assert!(
-        k.state()
-            .readiness()
-            .mission(&task("B"))
-            .unwrap()
-            .eligible()
-    );
+    assert!(k.state().readiness().task(&task("B")).unwrap().eligible());
 }

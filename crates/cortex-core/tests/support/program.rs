@@ -54,22 +54,22 @@ pub fn with_contracts(
     definition: &ProgramDefinition,
     replace: impl Fn(&CandidateBindingContract) -> CandidateBindingContract,
 ) -> ProgramDefinition {
-    let missions = definition
+    let tasks = definition
         .graph()
-        .missions()
+        .tasks()
         .iter()
-        .map(|mission| {
-            let contract = replace(mission.context().contract());
-            Mission::new(
-                MissionContext::new(contract.clone(), Some(capture(&contract, 1))).unwrap(),
-                mission.kind(),
-                mission.coverage(),
+        .map(|task| {
+            let contract = replace(task.context().contract());
+            Task::new(
+                TaskContext::new(contract.clone(), Some(capture(&contract, 1))).unwrap(),
+                task.kind(),
+                task.coverage(),
             )
         })
         .collect();
     let graph = DependencyGraph::new(
         definition.graph().reference().clone(),
-        missions,
+        tasks,
         definition.graph().edges().to_vec(),
         definition.graph().limits(),
     )
@@ -88,7 +88,7 @@ pub fn with_contracts(
     .unwrap()
 }
 pub fn definition_revision(n: u64, change_a: bool) -> ProgramDefinition {
-    let missions: Vec<_> = [
+    let tasks: Vec<_> = [
         ("A", "a"),
         ("B", "b"),
         ("C", "c"),
@@ -99,8 +99,8 @@ pub fn definition_revision(n: u64, change_a: bool) -> ProgramDefinition {
     .into_iter()
     .map(|(id, hex)| {
         let c = binding(id, hex, if id == "A" && change_a { n } else { 1 });
-        Mission::new(
-            MissionContext::new(c.clone(), Some(capture(&c, 1))).unwrap(),
+        Task::new(
+            TaskContext::new(c.clone(), Some(capture(&c, 1))).unwrap(),
             ConsumerKind::Preview,
             DependencyCoverage::DeclaredComplete,
         )
@@ -133,36 +133,36 @@ pub fn definition_revision(n: u64, change_a: bool) -> ProgramDefinition {
         Workstream {
             id: WorkstreamId::new("contracts").unwrap(),
             responsibility: "Contract and validation".into(),
-            missions: vec![task("A"), task("B"), task("C")],
+            tasks: vec![task("A"), task("B"), task("C")],
         },
         Workstream {
             id: WorkstreamId::new("context").unwrap(),
             responsibility: "Context and client".into(),
-            missions: vec![task("D"), task("E"), task("F")],
+            tasks: vec![task("D"), task("E"), task("F")],
         },
     ];
-    let mut increments: Vec<_> = missions
+    let mut increments: Vec<_> = tasks
         .iter()
         .map(|m| Increment {
             id: IncrementId::new(m.id().as_str()).unwrap(),
-            mission: m.id().clone(),
+            task: m.id().clone(),
             artifacts: edges
                 .iter()
                 .find(|e| e.producer() == m.id())
                 .map(|e| vec![e.requirement().artifact().clone()])
                 .unwrap_or_default(),
-            resources: vec![ResourceId::new(m.id().as_str()).unwrap()],
+            claim_scopes: vec![ClaimScopeId::new(m.id().as_str()).unwrap()],
         })
         .collect();
     increments.push(Increment {
         id: IncrementId::new("A-later").unwrap(),
-        mission: task("A"),
+        task: task("A"),
         artifacts: vec![],
-        resources: vec![ResourceId::new("A").unwrap()],
+        claim_scopes: vec![ClaimScopeId::new("A").unwrap()],
     });
     let graph = DependencyGraph::new(
         GraphReference::new(GraphId::new("program-graph").unwrap(), rev(n)),
-        missions,
+        tasks,
         edges,
         GraphLimits::new(16, 32, 512, 8192, 8_000_000).unwrap(),
     )
@@ -190,7 +190,7 @@ pub fn grant(n: u64, actor: &str) -> CoordinationGrant {
         program: ProgramId::new("fixture-program").unwrap(),
         baseline: rev(n),
         actor: ActorId::new(actor).unwrap(),
-        missions: ["A", "B", "C", "D", "E", "F"]
+        tasks: ["A", "B", "C", "D", "E", "F"]
             .into_iter()
             .map(task)
             .collect(),

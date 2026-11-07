@@ -39,7 +39,7 @@ fn domain_profile_roundtrip_preserves_history_debt_and_legacy_refusal() {
     assert!(actual.domains() == k.domains());
     let r = actual.domains().unwrap().domain(&i.id).unwrap();
     assert_eq!(r.outcome, HistoricalOutcome::Unknown);
-    assert!(!r.holds(Resource::Workers));
+    assert!(!r.holds(Resource::WorkerSlots));
     assert!(r.holds(Resource::DiskBytes));
     assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
     let bytes = fs::read(f.store().join("program.db")).unwrap();
@@ -103,7 +103,7 @@ fn pool_admission_competing_clients_cannot_double_allocate() {
         .count();
     assert_eq!(winners, 1);
     let k = s.load(&key(), Access::ReadOnly).unwrap();
-    assert_eq!(k.domains().unwrap().held(Resource::Workers), Ok(1));
+    assert_eq!(k.domains().unwrap().held(Resource::WorkerSlots), Ok(1));
     assert_eq!(k.domains().unwrap().domains().len(), 1);
 }
 #[test]
@@ -185,7 +185,10 @@ fn closure_before_after_commit_faults_reconstruct_without_reexecution() {
         let current = s.load(&key(), Access::ReadOnly).unwrap();
         let record = current.domains().unwrap().domain(&i.id).unwrap();
         assert_eq!(record.outcome, HistoricalOutcome::Unknown);
-        assert_eq!(current.domains().unwrap().held(Resource::Workers), Ok(0));
+        assert_eq!(
+            current.domains().unwrap().held(Resource::WorkerSlots),
+            Ok(0)
+        );
         assert_eq!(
             current
                 .domains()
@@ -287,7 +290,7 @@ fn nested_member_amendment_checks_private_source_roots_and_allows_disjoint_neigh
             DomainInput::Amend {
                 next: Box::new(next),
                 non_impact: cortex_evidence::program::NonImpact {
-                    missions: vec![],
+                    tasks: vec![],
                     basis: source("all-contracts-changed"),
                 },
             },
@@ -393,7 +396,7 @@ fn observed_binding_encoding_roundtrip_and_tampering_refuse_downgrade() {
     let r = restored.domains().unwrap().domain(&i.id).unwrap();
     assert!(r.binding_observation.as_ref() == Some(&domain_fixture::binding(&i)));
     assert_eq!(r.phase, DomainPhase::Bound);
-    assert!(r.holds(Resource::Workers));
+    assert!(r.holds(Resource::WorkerSlots));
     assert!(s.admit(&key(), input).unwrap().duplicate);
 }
 
@@ -449,7 +452,7 @@ fn observed_binding_write_and_commit_crash_cuts_preserve_unreleased_state() {
             }
         );
         assert_eq!(r.outcome, HistoricalOutcome::Unknown);
-        assert!(r.holds(Resource::Workers));
+        assert!(r.holds(Resource::WorkerSlots));
         assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
     }
 }
@@ -507,7 +510,7 @@ fn closure_readback_roundtrip_and_version_guards_preserve_debt_and_legacy_bytes(
     assert_eq!(r.closure_observations.len(), 1);
     assert_eq!(r.cancelled_at, Some(4));
     assert_eq!(r.outcome, HistoricalOutcome::Unknown);
-    assert!(r.holds(Resource::Workers));
+    assert!(r.holds(Resource::WorkerSlots));
     assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
 }
 
@@ -543,7 +546,7 @@ fn closure_observation_publication_crash_cuts_replay_without_refund_or_effects()
         );
         assert!(r.cancelled && r.closure.is_none());
         assert_eq!(r.outcome, HistoricalOutcome::Unknown);
-        assert!(r.holds(Resource::Workers));
+        assert!(r.holds(Resource::WorkerSlots));
         assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
     }
 }
@@ -614,7 +617,7 @@ fn cancel_publication_cut_requires_replayed_durable_cancel_before_readback() {
         let after = s.load(&key(), Access::ReadOnly).unwrap();
         let record = after.domains().unwrap().domain(&i.id).unwrap();
         assert!(record.closure.is_none());
-        assert!(record.holds(Resource::Workers));
+        assert!(record.holds(Resource::WorkerSlots));
         assert_eq!(record.outcome, HistoricalOutcome::Unknown);
     }
 }

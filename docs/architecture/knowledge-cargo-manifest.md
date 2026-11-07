@@ -96,7 +96,7 @@ not authentication. `ADAPTER` and `PROFILE` identify the exact syntax, locator a
 relationship rules. The whole retained candidate, source path/bytes and these
 rules are dependencies; no scoped non-impact proof is supplied.
 
-`qualify` takes a supplied later observation; `reinspect` obtains one. Both return
+`inspect_validity` takes a supplied later observation; `reinspect` obtains one. Both return
 the existing `KnowledgeView`, with Core correspondence, profile match and Evidence
 `Validity`. Candidate/profile mismatch is `Some(Stale)`; compatible matching
 profiles establish `Some(Current)` only when all relationships resolve within

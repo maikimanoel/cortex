@@ -379,8 +379,10 @@ impl ReferenceIndex {
             .iter()
             .filter(move |r| matches!(&r.target,ReferenceTarget::Local(t) if t==target)))
     }
-    /// Whether every extracted spelling resolved within this source's declared subset.
-    pub fn complete(&self) -> bool {
+    /// Whether every emitted reference resolves within this source's declared subset.
+    /// An empty reference set satisfies this predicate; extraction coverage and
+    /// semantic validity are separate questions.
+    pub fn all_references_resolved(&self) -> bool {
         self.references
             .iter()
             .all(|r| matches!(r.target, ReferenceTarget::Local(_)))

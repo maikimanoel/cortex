@@ -37,7 +37,7 @@ admission), `cortex-storage` (shared encrypted history/program infrastructure),
 Dependencies flow CLI -> Storage -> Evidence -> Core, with consumers also using
 Core/Evidence directly. Harness consumes Storage/Evidence/Core. Its
 [Stage 2B trusted-fixture profile](supervised-fixtures.md) is a bounded native
-process consumer, not a live AI runner, operational mission scheduler, general
+process consumer, not a live AI runner, operational task scheduler, general
 permission enforcement or authoritative method selector.
 Current [binding](candidate-binding.md), [evidence](unified-evidence.md),
 [knowledge](knowledge-references.md) and [history](temporal-records.md) APIs retain
@@ -53,7 +53,7 @@ G1's original authorization was limited to no-I/O projection; the separate GPE-B
 Stage 1 exception adds only its documented bounded metadata consumers, not dispatch.
 
 For material decisions in every NGE-R01–R16 requirement, retain the NGE contract
-revision, relevant mission/graph/artifact revisions, actual candidate contexts,
+revision, relevant task/graph/artifact revisions, actual candidate contexts,
 mechanism/environment/oracle dependencies, supporting observation/assessment
 references and separate approval reference. Applicability and freshness use the
 existing Evidence semantics; changed inputs invalidate the affected decision basis.
@@ -67,20 +67,20 @@ Signal content does not require an acceptance assessment or ownership ceremony.
 
 A **program** groups owner-accepted outcomes and their acceptance obligations.
 A **workstream** owns a cohesive responsibility across increments, interfaces and
-missions. A **mission** delivers a bounded meaningful functional outcome with an
+tasks. A **task** delivers a bounded meaningful functional outcome with an
 inspectable exit; it need not equal a milestone, crate, session or small file edit.
-A released intermediate artifact can be useful before its mission is complete.
+A released intermediate artifact can be useful before its task is complete.
 
 The owner approves outcomes, exceptions and consequential acceptance. The planner
 proposes decomposition and dependencies. The coordinator reconciles edge releases,
 resource decisions and integrated acceptance within its delegated scope. Executors
 produce contracted artifacts and observations. One person may perform several
 roles, but a role label or separate process does not establish independent review.
-An executor cannot approve its own consequential promotion. Store the mission's
+An executor cannot approve its own consequential promotion. Store the task's
 acceptance baseline separately from its mutable execution plan; amendments require
 an authorized new revision, retained prior basis and affected new evidence.
 
-**Refusal/acceptance:** a producer declaring its whole mission complete cannot
+**Refusal/acceptance:** a producer declaring its whole task complete cannot
 satisfy a missing fan-in or revise a protected oracle. Fixture A below remains
 active after its intermediate output is accepted for B.
 
@@ -89,7 +89,7 @@ active after its intermediate output is accepted for B.
 **Owner:** CAP-CORE-003; CAP-WFL-004 consumes the reviewed contract.
 **Prerequisite:** current task/candidate correspondence and applicable owner authority.
 
-A mission contract retains: program/workstream references; `TaskId` and
+A task contract retains: program/workstream references; `TaskId` and
 `ContractRevision`; outcome and protected behavior/acceptance baseline; input and
 output artifact contracts; source/consumer candidate and capture references;
 required edges/levels/predicates; owned files/resources and protected interfaces;
@@ -99,7 +99,7 @@ uncertain-outcome conditions; required evidence; and approval owner/reference.
 These fields are versioned material, not permissions inferred from a prompt.
 
 Reuse existing task, binding and observation types. Full Git IDs do not identify
-dirty bytes or prove object existence. Each mission and integrated artifact retains
+dirty bytes or prove object existence. Each task and integrated artifact retains
 its own exact candidate even under a shared program base. Preserve source-to-consumer
 correspondence explicitly; identical commits in different worktrees do not imply
 identical local context. No inherited obligation can disappear through delegation.
@@ -112,13 +112,13 @@ inputs, while declaring their capture/authentication unestablished.
 ## NGE-R03 — Native dependency graph
 
 **Owner:** CAP-WFL-004, constrained by CAP-CORE-003.
-**Prerequisite:** uniquely scoped mission/artifact IDs and reviewed graph revision.
+**Prerequisite:** uniquely scoped task/artifact IDs and reviewed graph revision.
 
-A typed directed graph links producer outputs or mission-completion artifacts to
+A typed directed graph links producer outputs or task-completion artifacts to
 consumer requirements. Each edge names producer, consumer, exact artifact role,
 compatible contract revision(s), required readiness level, acceptance predicates,
 verification coverage/context and release authority. Edge kinds distinguish
-mission acceptance (all protected exits evidenced and accepted) from availability
+task acceptance (all protected exits evidenced and accepted) from availability
 of one named artifact; a reported done message cannot satisfy the former.
 Required fan-out edges are
 independent; required fan-in is conjunctive. An optional edge may be omitted only
@@ -174,7 +174,7 @@ and assessment identities rather than relabeling them as coordinator observation
 
 A release binds graph/edge/artifact/consumer revisions, both candidate contexts,
 evidence and coordinator decision. It satisfies only that edge while this basis
-remains valid. It does not complete the producer mission, satisfy sibling edges,
+remains valid. It does not complete the producer task, satisfy sibling edges,
 transfer responsibility, expand a consumer grant or prove future freshness.
 
 **Refusal/acceptance:** a current applicable PASS for B's oracle cannot satisfy
@@ -217,9 +217,9 @@ release C. Evaluate F's full required fan-in on every relevant transition.
 Keep **dependency-ready**, **eligible**, **authorized**, **reserved** and **actually
 dispatched** distinct. For a concrete operation, eligibility additionally requires
 its applicable preconditions and available capacity. Missing authority can leave
-eligible work undispatched. An already active, cancelled or accepted mission is
+eligible work undispatched. An already active, cancelled or accepted task is
 not eligible for another start of that same attempt. Reopening it requires a new
-explicitly reviewed mission/attempt revision, not replay of an old notification.
+explicitly reviewed task/attempt revision, not replay of an old notification.
 Resource loss leaves dependency releases inspectable
 but blocks allocation/dispatch. Recheck scope, evidence, revocation and actual
 reservation atomically enough for the selected effect boundary; a stale plan is
@@ -227,7 +227,7 @@ not a reservation. No event listener gains independent authority.
 
 **Refusal/acceptance:** B becomes eligible after its A edge is accepted without
 waiting for D or A completion. Removing capacity blocks B's allocation, not the
-unrelated D edge; an eligible mission with no current grant is not dispatched.
+unrelated D edge; an eligible task with no current grant is not dispatched.
 
 ## NGE-R08 — Invalidation and non-impact
 
@@ -359,12 +359,12 @@ for a complete method corpus, and does not claim to replace external engineering
 **Prerequisite:** stable inspected state APIs and approved input/output/privacy boundary.
 
 Deliver native local inspection/control through the CLI first. Show graph revision,
-exact input basis, per-edge release/hold/reject causes, blocked missions, capacity,
+exact input basis, per-edge release/hold/reject causes, blocked tasks, capacity,
 unknown outcomes and required approvals separately. Inspect-only output cannot
 launch or approve work. A Rust TUI is conditional on demonstrated operator need and
 stable state/event APIs. No frontend or web GUI belongs to this program.
 
-**Refusal/acceptance:** printing an eligible mission does not start it; unavailable
+**Refusal/acceptance:** printing an eligible task does not start it; unavailable
 live inspection is shown rather than represented as a fresh observation. G1's Rust
 library report is the first consumer surface; a new CLI schema/command is deferred.
 
@@ -403,7 +403,7 @@ own sequence. They need not all exist to demonstrate in-memory dependency releas
 
 Distributed/multi-host work is deferred unless a concrete need and safety case
 justify a later native Rust extension; no cluster, consensus protocol or external
-scheduler is selected. Single-mission and single-executor operation remain valid.
+scheduler is selected. Single-task and single-executor operation remain valid.
 **Refusal/acceptance:** G1 must return useful decisions locally with no provider,
 service, persistent store, distributed runtime or process launch.
 
@@ -428,7 +428,7 @@ Evidence -> CLI dependency, manifest, runner, CLI command or persistent format c
 Reuse `TaskId`, `TaskContract`, `binding::ContractRevision`, `CandidateId`,
 `CandidateBindingContract`, `CandidateObservation` and `temporal::SourceReference`.
 Graph/edge/artifact/notification keys have distinct roles with existing bounded
-identifier syntax; private validated fields prevent aliasing. A mission wraps the
+identifier syntax; private validated fields prevent aliasing. A task wraps the
 existing task/revision and exact supplied binding; it does not replace that API.
 Program/workstream references may be descriptive in G1, not a global registry.
 
@@ -436,32 +436,32 @@ The callable API has these operations, without a stable public API promise:
 
 | Operation | Observable behavior |
 | --- | --- |
-| `DependencyGraph::new(reference, missions, edges, limits)` | Validate unique identities, complete endpoints, predicate/level contracts, finite bounds and acyclicity before retaining a graph |
+| `DependencyGraph::new(reference, tasks, edges, limits)` | Validate unique identities, complete endpoints, predicate/level contracts, finite bounds and acyclicity before retaining a graph |
 | `ReadinessProjection::new(graph)` | Empty release/fact basis; roots wait for explicit initial precondition/capacity events, without any dispatch method |
-| `apply(notification)` | Validate event identity/revision/context; atomically update supplied facts, recompute affected edges and missions, return a transition report |
-| `edge(id)` / `mission(id)` | Borrow the decision, blocking causes and exact supporting references; unknown keys return typed errors |
+| `apply(notification)` | Validate event identity/revision/context; atomically update supplied facts, recompute affected edges and tasks, return a transition report |
+| `edge(id)` / `task(id)` | Borrow the decision, blocking causes and exact supporting references; unknown keys return typed errors |
 
-Mission state (for example active/cancelled), dependency release and execution
+Task state (for example active/cancelled), dependency release and execution
 eligibility are different fields, not one success enum. A report returns per-edge
-`Released`, `Held(reason)` or `Rejected(reason)` and per-mission eligible/blocked
+`Released`, `Held(reason)` or `Rejected(reason)` and per-task eligible/blocked
 causes, retaining graph revision, current context and causality. These decisions
 are advisory projection results; there is **no** execution/promotion permission.
 Every G1 result must expose that dispatch/authority is unimplemented, including an
 otherwise eligible root. Returning only static types or a precomputed task list
-fails the mission: applying A's release must observably change B's decision.
+fails the task: applying A's release must observably change B's decision.
 
 The signatures are `DependencyGraph::new(...) -> Result<DependencyGraph,
 ReadinessError>` and `ReadinessProjection::apply(&mut self, Notification) ->
 Result<TransitionReport, ReadinessError>`, with private validated constructor inputs
 and borrowed lookup views. A graph reference pairs its own scoped ID with a positive
-`ContractRevision`; mission binding contracts retain their existing task/revision.
+`ContractRevision`; task binding contracts retain their existing task/revision.
 No reference is silently normalized, resolved through a filesystem or treated as
 an authenticated identity. G1 models only explicit synthetic worker-slot capacity;
 real multi-resource reservations/accounting remain NGE-R09's later host boundary.
 
 ### Concrete context, history and admission boundary
 
-`MissionContext` retains a `CandidateBindingContract` and optional original
+`TaskContext` retains a `CandidateBindingContract` and optional original
 `CandidateObservation`. Known contradictions are refused; absent/incomplete
 capture, unknown HEAD/repository, dirty entries, insufficient capture consistency
 or a missing comparison basis block readiness. This checks declared structural
@@ -469,12 +469,12 @@ correspondence only: no new observation, binding assessment or authentication is
 performed. An output's `ArtifactReference` has its own revision/candidate and may
 differ from the producer's frozen candidate capture.
 
-`MissionScope` combines that frozen context with a positive projection generation,
+`TaskScope` combines that frozen context with a positive projection generation,
 initially one. Invalidation advances affected generations and clears their
 preconditions; it invalidates all incident releases and follows required downstream
 paths. Thus changing A also requires a new E -> F review for F's new scope, while
 D/E and D -> E can remain unchanged on declared complete non-impact coverage.
-Unknown impact coverage invalidates and blocks every mission until a new adequately
+Unknown impact coverage invalidates and blocks every task until a new adequately
 declared graph/projection is constructed. Changing actual candidate, task contract,
 protected predicate or graph contents likewise requires a new immutable graph;
 releases never migrate implicitly. Merely obtaining the new model scope is not
@@ -482,7 +482,7 @@ fresh source verification.
 
 Notifications retain their full supplied inputs in accepted arrival order.
 Historical release records reference the exact report/review notifications and
-first invalidating cause. `TransitionReport` gives changed edge/mission IDs in
+first invalidating cause. `TransitionReport` gives changed edge/task IDs in
 stable lexical order and a duplicate flag. `edge` borrows current Released/Held
 state and historical releases; incompatible proposals return atomic `Err` with
 `ReadinessError::rejected_review()` exposing Rejected. Missing support yields an
@@ -490,16 +490,18 @@ admitted Held proposal. Neither a held nor a rejected proposal revokes a valid
 existing release; explicit invalidation owns revocation. Rejected identities are
 not consumed. Identical accepted redelivery is a no-op even at capacity.
 
-Whole-mission acceptance uses a distinct `DependencyKind::MissionAcceptance`
+Whole-task acceptance uses a distinct `DependencyKind::TaskAcceptance`
 report, accepted producer status and a fresh edge review; an intermediate Artifact
-release never completes its producer. Only Pending attempts can be eligible;
-Active/Accepted/Cancelled attempts cannot restart. Status updates are caller data,
+release never completes its producer. Only tasks with Pending coordination status
+can be eligible; Active/Accepted/Cancelled tasks cannot restart under that
+projection. This task status is separate from a program ownership attempt or
+external execution-attempt status. Status updates are caller data,
 not dispatch. Capacity is synthetic free-slot availability, not reservation or
-exclusive allocation. Every edge/mission/transition exposes only
+exclusive allocation. Every edge/task/transition exposes only
 `ExecutionAuthority::Unavailable`. Unsupported dispatch, responsibility transfer,
 external effects and graph-edit requests are refused.
 
-`GraphLimits` covers missions, edges, admitted notifications, aggregate predicate
+`GraphLimits` covers tasks, edges, admitted notifications, aggregate predicate
 requirements/source-reference occurrences and retained text/path/comparison bytes.
 Every occurrence counts, including repeated contexts. Source reference groups
 retain reviewer/approval, observation/assessment/context and optional provisional
@@ -517,7 +519,7 @@ redact payloads; explicit getters intentionally expose caller-owned inputs.
 ### Supplied review facts and trust limit
 
 Notifications are information-only Signal, artifact report, coordinator edge-review
-proposal, dependency/context invalidation, capacity/precondition update or mission
+proposal, dependency/context invalidation, capacity/precondition update or task
 status update. Each carries a fresh scoped notification key and graph revision.
 The graph declares each consumer as a non-effectful preview or effectful operation.
 G1 refuses CONTRACT_STABLE for an effectful consumer and supports no operational
@@ -552,7 +554,7 @@ NOT implemented by G1; no circular dependency from Core to Evidence is permitted
    coordinator proposal can release only its named edge after every declared
    predicate support and required-level/context condition is present. Missing
    support holds; incompatible revision/level or attempted producer self-release
-   rejects that proposal. Mission completion remains independent.
+   rejects that proposal. Task completion remains independent.
 3. Invalidation retains the old release as historical, disables its current use
    and follows downstream required paths. G1 uses declared causal dependencies;
    missing non-impact coverage cannot preserve an affected release. Unrelated
@@ -560,8 +562,8 @@ NOT implemented by G1; no circular dependency from Core to Evidence is permitted
    requires a new supplied review, not reactivation of an invalidated review.
 4. Evaluate all required incoming edges plus explicit preconditions and capacity.
    Root A/D require no incoming releases. Capacity updates alter eligibility;
-   dependency readiness remains separately inspectable. Only pending missions can
-   become start-eligible; active/cancelled missions cannot be queued again. A status
+   dependency readiness remains separately inspectable. Only pending tasks can
+   become start-eligible; active/cancelled tasks cannot be queued again. A status
    change alone does not erase a valid artifact release or imply effect rollback.
    Missing authorization
    never becomes a dispatch; G1 has no launcher or authority implementation.
@@ -572,13 +574,13 @@ NOT implemented by G1; no circular dependency from Core to Evidence is permitted
 
 A rejected review cannot revoke a still-applicable accepted release for another
 context; requirement/context replacement must be an explicit invalidation. G1
-keeps each graph immutable: a changed graph/mission contract is validated into a
+keeps each graph immutable: a changed graph/task contract is validated into a
 new projection and receives fresh applicable review inputs. No release is copied
 forward implicitly. The old projection/report remains caller-owned historical data.
 Unsupported graph-edit events are refused rather than partially applied; the full
 versioned graph-change workflow belongs to the later operational contract.
 
-`GraphLimits` supplies positive finite mission/edge/notification/support and text
+`GraphLimits` supplies positive finite task/edge/notification/support and text
 budgets; the caller must choose them explicitly. Reuse existing 128-byte identifier
 and 4096-byte text rules, validate aggregate counts and checked arithmetic before
 admission, retain deduplication history within the configured bound, and fail at
@@ -599,7 +601,7 @@ integration remain **NOT_RUN**. The separately authorized
 now inspects existing records for exact predicate support without changing G1,
 creating a review/release event or authenticating execution. Its tests cover the
 advisory no-false-support subset of G1-12; protected oracle approval remains later. Use six
-missions, not six processes:
+tasks, not six processes:
 
 ```mermaid
 graph LR
@@ -626,7 +628,7 @@ candidate/contract identities; mutation and effects remain absent.
 | G1-08 | Producer Signal/peer text cannot release; capacity zero blocks eligibility while release basis remains; restoring capacity without authority leaves eligible work undispatched | G1; real dispatch later HRN |
 | G1-09 | Duplicate notification causes zero extra transitions; changed payload under that key, cycle, self-edge, ambiguous ID, missing node and over-limit input refuse with unchanged accepted state | G1 |
 | G1-10 | A fresh review after invalidation references new applicable context; replaying an old review cannot revive it. Unknown dependency coverage holds current use | G1 |
-| G1-11 | A clean merge is not an acceptance event; cancelled mission cannot start again and does not retract an externally integrated artifact. A lost effect outcome stays unreconciled, not rolled back or blindly retried | G1 ignores merge-as-proof; actual effects WFL-001 later |
+| G1-11 | A clean merge is not an acceptance event; cancelled task cannot start again and does not retract an externally integrated artifact. A lost effect outcome stays unreconciled, not rolled back or blindly retried | G1 ignores merge-as-proof; actual effects WFL-001 later |
 | G1-12 | Real Evidence unassessed/zero-check/insufficient-oracle/STALE context cannot be exported as release support; changing a protected oracle requires a new approved revision | A-1 advisory Evidence checks; authenticated/authoritative bridge and protected-oracle approval remain NOT_RUN; NOT G1 verification |
 
 A/D may each have other unfinished outputs. Their intermediate integrated artifacts
@@ -637,7 +639,7 @@ all concurrent branches moved together.
 
 ### G1 exit and subsequent gates
 
-Exit is a documented callable pure Rust vertical slice returning edge and mission
+Exit is a documented callable pure Rust vertical slice returning edge and task
 decisions for the event sequence above, with typed negative cases, deterministic
 reports, bounded atomic rejection, private diagnostics and unchanged existing APIs.
 Core unit tests and an external Core integration test must exercise the real API,

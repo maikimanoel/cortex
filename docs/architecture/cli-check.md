@@ -67,7 +67,7 @@ request is qualified as UNKNOWN only for `CurrentContextRequired`; other semanti
 errors remain errors. No terminal judgment is overwritten.
 
 The execution observation describes the actual completed porcelain-status queries
-used by 002-A, whose successful capture requires exit zero. It is not the CORTEX
+used by 002-A, whose successful capture requires exit zero. It is not the Cortex
 process exit. One relevant check means one explicit committed-HEAD comparison,
 not a test suite. The oracle and candidate validation are separate from that exit.
 

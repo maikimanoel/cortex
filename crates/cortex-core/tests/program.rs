@@ -41,7 +41,7 @@ fn handoff_refuses_conflicting_grants_before_changing_either_attempt() {
 }
 
 #[test]
-fn amendment_cannot_reuse_any_retained_mission_contract_revision_for_changed_contents() {
+fn amendment_cannot_reuse_any_retained_task_contract_revision_for_changed_contents() {
     use cortex_core::{TaskContract, binding::CandidateBindingContract};
     let mut state = ProgramState::new(definition()).unwrap();
     let changed = |baseline: u64, revision: u64| {
@@ -108,7 +108,7 @@ fn amendment_cannot_alias_historical_artifact_revisions() {
             .collect();
         let graph = DependencyGraph::new(
             definition.graph().reference().clone(),
-            definition.graph().missions().to_vec(),
+            definition.graph().tasks().to_vec(),
             edges,
             definition.graph().limits(),
         )
@@ -217,8 +217,8 @@ fn stale_attempt_and_grant_do_not_become_current_after_amendment() {
         affected.iter().map(|i| i.as_str()).collect::<Vec<_>>(),
         ["A", "B", "C", "F"]
     );
-    assert!(s.readiness().mission(&task("D")).unwrap().eligible());
-    assert!(!s.readiness().mission(&task("A")).unwrap().eligible());
+    assert!(s.readiness().task(&task("D")).unwrap().eligible());
+    assert!(!s.readiness().task(&task("A")).unwrap().eligible());
     assert_eq!(
         s.reconcile_attempt(
             &grant(2, "operator"),
@@ -244,13 +244,13 @@ fn stale_attempt_and_grant_do_not_become_current_after_amendment() {
     assert_eq!(s.definitions().len(), 2);
 }
 #[test]
-fn plan_cannot_remove_missions_or_mutate_acceptance() {
+fn plan_cannot_remove_tasks_or_mutate_acceptance() {
     let mut s = ProgramState::new(definition()).unwrap();
     let before = s.definition().clone();
     assert_eq!(
-        s.set_plan(
+        s.set_ordering_plan(
             &grant(1, "operator"),
-            Plan {
+            OrderingPlan {
                 revision: rev(1),
                 order: vec![task("A")],
                 basis: source("bad-plan")
@@ -258,9 +258,9 @@ fn plan_cannot_remove_missions_or_mutate_acceptance() {
         ),
         Err(ProgramError::Structure)
     );
-    s.set_plan(
+    s.set_ordering_plan(
         &grant(1, "operator"),
-        Plan {
+        OrderingPlan {
             revision: rev(1),
             order: ["D", "E", "A", "B", "C", "F"]
                 .into_iter()
@@ -279,7 +279,7 @@ fn plan_cannot_remove_missions_or_mutate_acceptance() {
                 "accept",
                 Event::Status {
                     scope: s.readiness().scope(&task("A")).unwrap(),
-                    status: MissionStatus::Accepted,
+                    status: TaskStatus::Accepted,
                     source: source("worker-claim")
                 }
             )
@@ -291,7 +291,7 @@ fn package(s: &ProgramState) -> PackageRequest {
     PackageRequest {
         id: PackageId::new("context-A").unwrap(),
         revision: rev(1),
-        mission: task("A"),
+        task: task("A"),
         baseline: rev(1),
         generation: s.readiness().scope(&task("A")).unwrap().generation(),
         sources: vec![SourceInput {
@@ -337,14 +337,14 @@ fn scheduler_reserves_verification_and_blocks_unknown_or_unenforceable_capacity(
     let mut s = ProgramState::new(definition()).unwrap();
     initialize(&mut s);
     let p = |id: &str, age| Proposal {
-        mission: task(id),
+        task: task(id),
         band: 1,
         waiting_rounds: age,
         risk_rank: 0,
         cost_rank: 0,
         demand: vec![
             Demand {
-                resource: Resource::Workers,
+                resource: Resource::WorkerSlots,
                 amount: Some(1),
             },
             Demand {
@@ -355,7 +355,7 @@ fn scheduler_reserves_verification_and_blocks_unknown_or_unenforceable_capacity(
     };
     let caps = vec![
         Capacity {
-            resource: Resource::Workers,
+            resource: Resource::WorkerSlots,
             available: Some(2),
             verification_reserve: 1,
             declared_enforceable: true,
@@ -368,12 +368,12 @@ fn scheduler_reserves_verification_and_blocks_unknown_or_unenforceable_capacity(
         },
     ];
     let r = simulate(&s, &[p("A", 0), p("D", 5)], &caps).unwrap();
-    assert_eq!(r[0].mission, task("D"));
+    assert_eq!(r[0].task, task("D"));
     assert!(r[0].proposed);
     assert!(!r[1].proposed);
     assert!(
         r[1].held
-            .contains(&WaitReason::Contention(Resource::Workers))
+            .contains(&WaitReason::Contention(Resource::WorkerSlots))
     );
     let mut missing = caps.clone();
     missing[1].available = None;
@@ -396,7 +396,7 @@ fn invalid_program_membership_limits_and_wrong_grant_are_refused() {
     assert!(ProgramLimits::new(0, 8, 1024).is_err());
     let d = definition();
     let mut w = d.workstreams().to_vec();
-    w[0].missions.push(task("D"));
+    w[0].tasks.push(task("D"));
     assert!(
         ProgramDefinition::new(
             d.id().clone(),
@@ -422,12 +422,12 @@ fn invalid_program_membership_limits_and_wrong_grant_are_refused() {
 }
 
 #[test]
-fn scoped_invalidation_cannot_modify_missions_outside_its_grant() {
+fn scoped_invalidation_cannot_modify_tasks_outside_its_grant() {
     let mut s = ProgramState::new(definition()).unwrap();
     initialize(&mut s);
     let before = s.readiness().clone();
     let mut g = grant(1, "operator");
-    g.missions = vec![task("A")];
+    g.tasks = vec![task("A")];
     let input = notify(
         &s,
         "invalidate",
@@ -488,7 +488,7 @@ fn artifact_revision_amendment_discards_old_report_without_blocking_independent_
         .collect();
     let graph = DependencyGraph::new(
         d.graph().reference().clone(),
-        d.graph().missions().to_vec(),
+        d.graph().tasks().to_vec(),
         edges,
         d.graph().limits(),
     )
@@ -521,8 +521,8 @@ fn artifact_revision_amendment_discards_old_report_without_blocking_independent_
         affected.iter().map(|m| m.as_str()).collect::<Vec<_>>(),
         ["B", "C", "F"]
     );
-    assert!(s.readiness().mission(&task("D")).unwrap().eligible());
-    assert!(!s.readiness().mission(&task("B")).unwrap().eligible());
+    assert!(s.readiness().task(&task("D")).unwrap().eligible());
+    assert!(!s.readiness().task(&task("B")).unwrap().eligible());
 }
 
 #[test]
@@ -558,5 +558,5 @@ fn program_outcome_amendment_requires_full_requalification() {
         s.definitions()[0].outcome().objective(),
         "Coordinate the connected fixture program"
     );
-    assert!(!s.readiness().mission(&task("D")).unwrap().eligible());
+    assert!(!s.readiness().task(&task("D")).unwrap().eligible());
 }

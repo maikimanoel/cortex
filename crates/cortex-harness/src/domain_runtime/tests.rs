@@ -230,7 +230,7 @@ fn controlled_manager_bootstrap_journal_chain_produces_nonce_without_settlement(
     let k = store.load(&key(), Access::ReadOnly).unwrap();
     let r = k.domains().unwrap().domain(&intent.id).unwrap();
     assert_eq!(r.phase, DomainPhase::ReleaseUncertain);
-    assert!(r.holds(cortex_core::program::scheduling::Resource::Workers));
+    assert!(r.holds(cortex_core::program::scheduling::Resource::WorkerSlots));
     assert_eq!(manager.created, 1);
 }
 #[test]
@@ -320,7 +320,7 @@ fn controlled_recovery_continuation(measured: Option<u64>) {
     kernel.admit(close).unwrap();
     let closed = kernel.domains().unwrap().domain(&original.id).unwrap();
     assert_eq!(closed.outcome, HistoricalOutcome::Unknown);
-    assert!(!closed.holds(Resource::Workers));
+    assert!(!closed.holds(Resource::WorkerSlots));
     assert!(closed.holds(Resource::DiskBytes));
     let mut next = fixture::add_member(&mut kernel, "independent-next-program");
     next.pool = original.pool.clone();
@@ -470,7 +470,7 @@ fn dropped_prepared_channel_preserves_bound_unknown_and_forbids_recreation() {
     assert_eq!(r.phase, DomainPhase::Bound);
     assert_eq!(r.outcome, HistoricalOutcome::Unknown);
     assert!(!r.cancelled && r.closure.is_none());
-    assert!(r.holds(cortex_core::program::scheduling::Resource::Workers));
+    assert!(r.holds(cortex_core::program::scheduling::Resource::WorkerSlots));
     assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
     let result = prepare_only(&store, &mut manager, &ids);
     assert!(result.run.recovery_only && result.prepared.is_none());
@@ -492,7 +492,7 @@ fn owned_prepared_cancel_commits_request_but_does_not_infer_closure() {
     let r = restored.domains().unwrap().domain(&intent.id).unwrap();
     assert!(r.cancelled && r.binding_observation.is_some() && r.closure.is_none());
     assert_eq!(r.outcome, HistoricalOutcome::Unknown);
-    assert!(r.holds(cortex_core::program::scheduling::Resource::Workers));
+    assert!(r.holds(cortex_core::program::scheduling::Resource::WorkerSlots));
     assert!(
         cancel_domain(&store, &key(), &mut manager, cancel)
             .unwrap()
@@ -570,7 +570,7 @@ fn stale_membership_at_locked_release_retains_uncertainty_without_transmission()
     let r = k.domains().unwrap().domain(&intent.id).unwrap();
     assert_eq!(r.phase, DomainPhase::ReleaseUncertain);
     assert_eq!(r.outcome, HistoricalOutcome::Unknown);
-    assert!(r.holds(cortex_core::program::scheduling::Resource::Workers));
+    assert!(r.holds(cortex_core::program::scheduling::Resource::WorkerSlots));
 }
 
 #[test]
@@ -600,7 +600,7 @@ fn normal_prepared_cancel_fixture_closure_allows_distinct_next_prepare_only_with
         let mut k = store.load(&key(), Access::ReadOnly).unwrap();
         let retained = k.domains().unwrap().domain(&intent.id).unwrap();
         assert_eq!(retained.closure_observations.len(), 1);
-        assert!(retained.holds(cortex_core::program::scheduling::Resource::Workers));
+        assert!(retained.holds(cortex_core::program::scheduling::Resource::WorkerSlots));
         assert!(retained.unresolved_consumption(Consumption::CpuExecutionMillis));
         assert!(
             retained
@@ -676,7 +676,7 @@ fn normal_prepared_cancel_fixture_closure_allows_distinct_next_prepare_only_with
         assert!(first.holds(cortex_core::program::scheduling::Resource::DiskBytes));
         let second = k.domains().unwrap().domain(&next_ids.domain).unwrap();
         assert!(second.cancelled && second.closure.is_none());
-        assert!(second.holds(cortex_core::program::scheduling::Resource::Workers));
+        assert!(second.holds(cortex_core::program::scheduling::Resource::WorkerSlots));
     }
 }
 
@@ -729,7 +729,7 @@ fn post_cancel_observation_is_read_only_partial_and_never_settles_resources() {
             .contains(&ClosureProofGap::RemainingMembers)
     );
     assert!(r.closure.is_none());
-    assert!(r.holds(cortex_core::program::scheduling::Resource::Workers));
+    assert!(r.holds(cortex_core::program::scheduling::Resource::WorkerSlots));
     assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
     assert_eq!(r.outcome, HistoricalOutcome::Unknown);
     let restored = store.load(&key(), Access::ReadOnly).unwrap();

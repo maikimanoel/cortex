@@ -18,7 +18,7 @@ or incomplete inputs refuse. The recorded candidate is not refreshed by replay.
 
 The supervisor pumps bounded input/output, observes direct-child exit, and responds
 to cancellation, elapsed deadlines, malformed output and authority loss. Process
-observations remain distinct from mission acceptance and dependency releases.
+observations remain distinct from task acceptance and dependency releases.
 Lost replies, interrupted controllers and incomplete cleanup retain uncertainty;
 neither reopening nor an ordinary inspection invokes a process. Original reports
 and failed observations survive later reconciliation. No blind retry is supplied.

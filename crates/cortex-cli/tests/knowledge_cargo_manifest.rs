@@ -389,9 +389,13 @@ fn candidate_and_profile_changes_explain_staleness_and_preserve_original_facts()
     assert!(!view.profile_matches());
     assert_eq!(view.validity(), Some(Validity::Stale));
     assert_eq!(view.index(), &old);
-    assert_eq!(qualify(&original, None).unwrap().validity(), None);
+    assert_eq!(inspect_validity(&original, None).unwrap().validity(), None);
     let latest = inspect_candidate(&r.path, &c, id(4)).unwrap();
-    assert!(qualify(&original, Some(&latest)).unwrap().profile_matches());
+    assert!(
+        inspect_validity(&original, Some(&latest))
+            .unwrap()
+            .profile_matches()
+    );
     r.commit_file("Cargo.toml", "[package]\nname='changed'\n");
     let view = reinspect(&r.path, &original, id(5)).unwrap();
     assert_eq!(view.validity(), Some(Validity::Stale));
@@ -438,7 +442,9 @@ fn changed_commit_order_and_redacted_facts_remain_distinct_from_freshness() {
     assert!(!format!("{g:?} {:?} {:?}", g.nodes(), g.references()).contains("actual"));
     let reused = inspect_candidate(&r.path, &c, id(3)).unwrap();
     assert!(matches!(
-        qualify(&g, Some(&reused)).unwrap().correspondence(),
+        inspect_validity(&g, Some(&reused))
+            .unwrap()
+            .correspondence(),
         BindingDecision::Stale(BindingStaleness::ObservationOrder)
     ));
     let boundary = extract_cargo_manifest_references(

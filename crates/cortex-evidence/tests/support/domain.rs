@@ -18,7 +18,7 @@ pub fn pool() -> PoolContract {
         basis: source("pool-journal-association"),
         capacities: vec![
             Capacity {
-                resource: Resource::Workers,
+                resource: Resource::WorkerSlots,
                 available: Some(2),
                 verification_reserve: 1,
                 declared_enforceable: true,
@@ -78,22 +78,22 @@ pub fn named_definition(name: &str) -> ProgramDefinition {
     )
     .unwrap()
 }
-pub fn setup(k: &mut CoordinationKernel, mission: &str) -> DomainIntent {
-    let scope = k.state().readiness().scope(&task(mission)).unwrap();
+pub fn setup(k: &mut CoordinationKernel, task: &str) -> DomainIntent {
+    let scope = k
+        .state()
+        .readiness()
+        .scope(&cortex_core::TaskId::new(task).unwrap())
+        .unwrap();
     let notification = notify(
         k.state(),
-        &format!("ready-{mission}"),
+        &format!("ready-{task}"),
         Event::Preconditions {
             scope,
             ready: true,
             source: source("controlled-precondition"),
         },
     );
-    submit(
-        k,
-        &format!("ready-{mission}"),
-        Command::Notify(notification),
-    );
+    submit(k, &format!("ready-{task}"), Command::Notify(notification));
     if k.fixture_effects().policies().is_empty() {
         let p = Policy {
             reference: source("domain-member-policy"),
@@ -113,16 +113,12 @@ pub fn setup(k: &mut CoordinationKernel, mission: &str) -> DomainIntent {
             Command::SupervisedEffect(Box::new(EffectEvent::Policy(p))),
         );
     }
-    let attempt = attempt(&format!("attempt-{mission}"), mission, "operator");
-    submit(
-        k,
-        &format!("claim-{mission}"),
-        Command::Claim(attempt.clone()),
-    );
+    let attempt = attempt(&format!("attempt-{task}"), task, "operator");
+    submit(k, &format!("claim-{task}"), Command::Claim(attempt.clone()));
     let request = PackageRequest {
-        id: PackageId::new(&format!("package-{mission}")).unwrap(),
+        id: PackageId::new(&format!("package-{task}")).unwrap(),
         revision: rev(1),
-        mission: task(mission),
+        task: cortex_core::TaskId::new(task).unwrap(),
         baseline: rev(1),
         generation: rev(1),
         sources: vec![],
@@ -133,17 +129,17 @@ pub fn setup(k: &mut CoordinationKernel, mission: &str) -> DomainIntent {
     };
     submit(
         k,
-        &format!("package-{mission}"),
+        &format!("package-{task}"),
         Command::Package(request.clone()),
     );
     let scope = EffectScope {
         program: k.state().definition().id().clone(),
         baseline: rev(1),
-        mission: task(mission),
+        task: cortex_core::TaskId::new(task).unwrap(),
         candidate: k
             .state()
             .readiness()
-            .scope(&task(mission))
+            .scope(&cortex_core::TaskId::new(task).unwrap())
             .unwrap()
             .context()
             .contract()
@@ -156,7 +152,7 @@ pub fn setup(k: &mut CoordinationKernel, mission: &str) -> DomainIntent {
     };
     let demand = vec![
         Demand {
-            resource: Resource::Workers,
+            resource: Resource::WorkerSlots,
             amount: Some(1),
         },
         Demand {
@@ -169,7 +165,7 @@ pub fn setup(k: &mut CoordinationKernel, mission: &str) -> DomainIntent {
         },
     ];
     let g = OperationalGrant {
-        id: GrantId::new(&format!("operational-{mission}")).unwrap(),
+        id: GrantId::new(&format!("operational-{task}")).unwrap(),
         principal: ActorId::new("operator").unwrap(),
         policy: source("domain-member-policy"),
         scope: scope.clone(),
@@ -180,13 +176,13 @@ pub fn setup(k: &mut CoordinationKernel, mission: &str) -> DomainIntent {
     };
     submit(
         k,
-        &format!("grant-{mission}"),
+        &format!("grant-{task}"),
         Command::SupervisedEffect(Box::new(EffectEvent::Grant(g.clone()))),
     );
     DomainIntent {
-        id: DomainId::new(&format!("domain-{}-{mission}", scope.program.as_str())).unwrap(),
+        id: DomainId::new(&format!("domain-{}-{task}", scope.program.as_str())).unwrap(),
         effect: EffectIntent {
-            id: EffectId::new(&format!("effect-{mission}")).unwrap(),
+            id: EffectId::new(&format!("effect-{task}")).unwrap(),
             grant: g.id,
             scope,
             demand,
@@ -194,7 +190,7 @@ pub fn setup(k: &mut CoordinationKernel, mission: &str) -> DomainIntent {
         },
         pool: pool_identity(),
         request: OperationId::new(&format!(
-            "request-{}-{mission}",
+            "request-{}-{task}",
             k.state().definition().id().as_str()
         ))
         .unwrap(),
@@ -233,7 +229,7 @@ pub fn closure(i: &DomainIntent, measured: Option<u64>) -> ClosureReceipt {
         restart_prevented: true,
         snapshot_safe: true,
         quiescent: true,
-        released: vec![Resource::Workers, Resource::RamBytes],
+        released: vec![Resource::WorkerSlots, Resource::RamBytes],
         consumption: vec![ConsumptionObservation {
             dimension: Consumption::CpuExecutionMillis,
             measured,

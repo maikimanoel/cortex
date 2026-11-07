@@ -213,7 +213,7 @@ cost and regressions before making efficiency or superiority claims.
 The [native parallel contract](architecture/governed-parallel-engineering.md)
 refines this practice with per-consumer evidence-gated releases, causal readiness
 and separate dispatch authority. An intermediate release need not wait for its
-producer's whole mission; a scheduler cannot convert a signal into approval.
+producer's whole task; a scheduler cannot convert a signal into approval.
 Cortex will implement that control plane in Rust under the existing owners, preserving
 the separate qualified-method and effective-host boundaries.
 

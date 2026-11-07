@@ -148,15 +148,15 @@ impl OperationalProjection {
         let mut usage = Vec::with_capacity(record.intent.demand.len());
         for demand in &record.intent.demand {
             let amount = match demand.resource {
-                Resource::Workers => Some(1),
-                Resource::TimeMillis => Some(observation.elapsed_ms),
+                Resource::WorkerSlots => Some(1),
+                Resource::ElapsedMillis => Some(observation.elapsed_ms),
                 Resource::OutputBytes => observation
                     .stdout_bytes
                     .checked_add(observation.stderr_bytes),
-                Resource::CpuMillis => spec
+                Resource::CpuMillicores => spec
                     .containment
                     .as_ref()
-                    .and_then(|s| s.cpu_capacity_millis()),
+                    .and_then(|s| s.cpu_capacity_millicores()),
                 Resource::RamBytes => observation
                     .containment
                     .as_ref()

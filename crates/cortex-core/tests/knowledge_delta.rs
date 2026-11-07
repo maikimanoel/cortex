@@ -495,8 +495,8 @@ fn unresolved_reason_transition_tracks_changed_coverage_without_invented_targets
         a.target(),
         Resolution::Unresolved(UnresolvedReference::MissingTarget)
     );
-    assert!(!delta.before().complete());
-    assert!(!delta.after().complete());
+    assert!(!delta.before().all_references_resolved());
+    assert!(!delta.after().all_references_resolved());
     assert_eq!(
         after
             .incoming(&SourcePath::new(b"b").unwrap(), "")
@@ -556,10 +556,10 @@ fn unsupported_and_external_reasons_and_unchanged_unresolved_coverage_remain_exp
     );
     assert_eq!(delta.before().references().len(), 2);
     assert_eq!(delta.after().references().len(), 2);
-    assert!(!delta.after().complete());
+    assert!(!delta.after().all_references_resolved());
     let equal = compare(delta.after(), delta.after()).unwrap();
     assert_eq!(equal.reference_changes().count(), 0);
-    assert!(!equal.after().complete());
+    assert!(!equal.after().all_references_resolved());
 }
 
 #[test]

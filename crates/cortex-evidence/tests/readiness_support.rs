@@ -165,7 +165,7 @@ impl Fixture {
         Self::for_edge("AB", &["pAB"])
     }
     fn for_edge(target: &str, ab_predicates: &[&str]) -> Self {
-        let missions = [
+        let tasks = [
             ("A", "a"),
             ("B", "b"),
             ("C", "c"),
@@ -176,8 +176,8 @@ impl Fixture {
         .into_iter()
         .map(|(id, hex)| {
             let c = contract(id, hex, 1, "Retain the protected mission outcome");
-            Mission::new(
-                MissionContext::new(c.clone(), Some(capture(&c, 1))).unwrap(),
+            Task::new(
+                TaskContext::new(c.clone(), Some(capture(&c, 1))).unwrap(),
                 ConsumerKind::Preview,
                 DependencyCoverage::DeclaredComplete,
             )
@@ -209,7 +209,7 @@ impl Fixture {
         let projection = ReadinessProjection::new(
             DependencyGraph::new(
                 GraphReference::new(GraphId::new("private-canary-graph").unwrap(), rev(1)),
-                missions,
+                tasks,
                 edges,
                 GraphLimits::new(6, 5, 64, 4096, 2_000_000).unwrap(),
             )
@@ -1335,7 +1335,7 @@ fn a_23_supported_evidence_has_no_operational_authorization_or_dispatch() {
     );
     assert_eq!(report.authority(), ExecutionAuthority::Unavailable);
     assert_eq!(f.projection, before);
-    assert!(!f.projection.mission(&task("B")).unwrap().eligible());
+    assert!(!f.projection.task(&task("B")).unwrap().eligible());
 }
 #[test]
 fn a_24_late_malformed_input_does_not_partially_publish_staleness() {
@@ -1684,7 +1684,7 @@ fn a_29_omitted_or_wrong_assessment_reference_is_not_automatically_selected() {
     );
 }
 #[test]
-fn a_30_readiness_level_and_mission_kind_are_scope_not_evidence_grants() {
+fn a_30_readiness_level_and_task_kind_are_scope_not_evidence_grants() {
     let f = Fixture::new();
     let mut r = vec![f.record()];
     let basis = f.inspect(&mut r).basis().clone();
@@ -1695,7 +1695,7 @@ fn a_30_readiness_level_and_mission_kind_are_scope_not_evidence_grants() {
             ReadinessLevel::ImplementationProvisional,
         ),
         (
-            DependencyKind::MissionAcceptance,
+            DependencyKind::TaskAcceptance,
             ReadinessLevel::IntegratedAccepted,
         ),
     ] {
@@ -1724,7 +1724,7 @@ fn a_30_readiness_level_and_mission_kind_are_scope_not_evidence_grants() {
         let p = ReadinessProjection::new(
             DependencyGraph::new(
                 GraphReference::new(g.reference().id().clone(), rev(2)),
-                g.missions().to_vec(),
+                g.tasks().to_vec(),
                 edges,
                 g.limits(),
             )
@@ -1761,10 +1761,7 @@ fn a_30_readiness_level_and_mission_kind_are_scope_not_evidence_grants() {
             p.edge(&edge("AB")).unwrap().decision(),
             EdgeDecision::Held(_)
         ));
-        assert_eq!(
-            p.mission(&task("A")).unwrap().status(),
-            MissionStatus::Pending
-        );
+        assert_eq!(p.task(&task("A")).unwrap().status(), TaskStatus::Pending);
     }
 }
 #[test]
@@ -1794,7 +1791,7 @@ fn a_31_scope_recheck_rejects_aliases_new_revisions_and_ignores_unrelated_cursor
         &mut f.projection,
         "info",
         Event::Signal {
-            mission: task("D"),
+            task: task("D"),
             message: "information only".to_owned(),
         },
     );
@@ -2142,18 +2139,18 @@ fn invalid_artifact_requirement_and_unknown_dependency_scope_cannot_grant_author
         .unwrap_err(),
         SupportInputError::IncompatibleReference
     );
-    // Unknown mission dependency coverage is a G1 gate, not something a narrow
+    // Unknown task dependency coverage is a G1 gate, not something a narrow
     // Evidence support finding may override or silently mark as complete.
     let g = f.projection.graph();
-    let missions = g
-        .missions()
+    let tasks = g
+        .tasks()
         .iter()
-        .map(|m| Mission::new(m.context().clone(), m.kind(), DependencyCoverage::Unknown))
+        .map(|m| Task::new(m.context().clone(), m.kind(), DependencyCoverage::Unknown))
         .collect();
     let p = ReadinessProjection::new(
         DependencyGraph::new(
             GraphReference::new(g.reference().id().clone(), rev(2)),
-            missions,
+            tasks,
             g.edges().to_vec(),
             g.limits(),
         )
@@ -2186,9 +2183,9 @@ fn invalid_artifact_requirement_and_unknown_dependency_scope_cannot_grant_author
     assert_eq!(report.authority(), ExecutionAuthority::Unavailable);
     assert_eq!(p, before);
     assert!(
-        p.mission(&task("B"))
+        p.task(&task("B"))
             .unwrap()
             .blockers()
-            .contains(&MissionBlocker::UnknownCoverage)
+            .contains(&TaskBlocker::UnknownCoverage)
     );
 }

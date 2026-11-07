@@ -22,7 +22,7 @@ use cortex_core::{
     },
     parallel::{
         ArtifactReference, ArtifactRequirement, EdgeId, ExecutionAuthority, GraphReference,
-        MissionScope, PredicateId, ReadinessError, ReadinessProjection,
+        PredicateId, ReadinessError, ReadinessProjection, TaskScope,
     },
     temporal::{SourceOrigin, SourceReference},
 };
@@ -60,7 +60,7 @@ pub enum SupportInputError {
     Core(ReadinessError),
     /// Existing binding validation refused a context.
     Binding(BindingError),
-    /// The frozen semantic edge/mission/artifact scope changed.
+    /// The frozen semantic edge/task/artifact scope changed.
     ContextChanged,
     /// Same task/revision or support revision has conflicting contents.
     ContractAlias,
@@ -178,8 +178,8 @@ impl SupportUsage {
 pub struct EdgeScopeSnapshot {
     graph: GraphReference,
     edge: EdgeId,
-    producer: MissionScope,
-    consumer: MissionScope,
+    producer: TaskScope,
+    consumer: TaskScope,
     requirement: ArtifactRequirement,
     cursor: usize,
 }
@@ -209,7 +209,7 @@ impl EdgeScopeSnapshot {
         })
     }
     /// Restore an earlier informational cursor after reconstructing the same
-    /// semantic scope. This cannot change the graph, artifact or mission scopes.
+    /// semantic scope. This cannot change the graph, artifact or task scopes.
     pub fn with_historical_cursor(mut self, cursor: usize) -> Result<Self, SupportInputError> {
         if cursor > self.cursor {
             return Err(SupportInputError::ContextChanged);
@@ -217,13 +217,13 @@ impl EdgeScopeSnapshot {
         self.cursor = cursor;
         Ok(self)
     }
-    /// Restore original mission-scope representations only when they equal the
+    /// Restore original task-scope representations only when they equal the
     /// captured scopes under Core's identity comparison. This preserves accepted
     /// path spellings during input replay without changing semantic correspondence.
     pub fn with_original_scopes(
         mut self,
-        producer: MissionScope,
-        consumer: MissionScope,
+        producer: TaskScope,
+        consumer: TaskScope,
     ) -> Result<Self, SupportInputError> {
         if self.producer != producer || self.consumer != consumer {
             return Err(SupportInputError::ContextChanged);
@@ -241,11 +241,11 @@ impl EdgeScopeSnapshot {
         &self.edge
     }
     /// Frozen producer context and generation.
-    pub fn producer(&self) -> &MissionScope {
+    pub fn producer(&self) -> &TaskScope {
         &self.producer
     }
     /// Frozen consumer context and generation.
-    pub fn consumer(&self) -> &MissionScope {
+    pub fn consumer(&self) -> &TaskScope {
         &self.consumer
     }
     /// Exact artifact/kind/level/predicate requirement.
@@ -378,7 +378,7 @@ impl EdgeEvidenceContract {
     pub fn revision(&self) -> ContractRevision {
         self.revision
     }
-    /// Artifact's explicit repository/worktree requirement, distinct from either mission.
+    /// Artifact's explicit repository/worktree requirement, distinct from either task.
     pub fn artifact_requirement(&self) -> &CandidateRequirement {
         &self.artifact
     }
@@ -505,7 +505,7 @@ pub struct SupportRequest<'a> {
     bindings: &'a [WitnessBinding],
 }
 impl<'a> SupportRequest<'a> {
-    /// Supply independently obtained current mission captures and explicit source contexts.
+    /// Supply independently obtained current task captures and explicit source contexts.
     pub fn new(
         producer: Option<&'a CandidateObservation>,
         consumer: Option<&'a CandidateObservation>,
@@ -615,7 +615,7 @@ pub enum SupportDisposition {
     /// Required support is missing, incompatible, stale or insufficient.
     NotSupported,
 }
-/// Existing Core binding cause for an unresolved current mission context.
+/// Existing Core binding cause for an unresolved current task context.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContextFinding {
     /// Existing binding reports insufficient source material.
@@ -999,7 +999,7 @@ fn check_count(
     }
 }
 fn context_finding(
-    scope: &MissionScope,
+    scope: &TaskScope,
     current: Option<&CandidateObservation>,
 ) -> Result<Option<ContextFinding>, SupportInputError> {
     Ok(

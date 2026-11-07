@@ -95,7 +95,10 @@ fn assert_full_reconstruction(r: &Repo, generation: &RefreshGeneration) {
     for (actual, expected) in set.sources().iter().zip(full.sources()) {
         assert_eq!(actual.path().bytes(), expected.path().bytes());
         assert_eq!(actual.bytes(), expected.bytes());
-        assert_eq!(actual.complete(), expected.complete());
+        assert_eq!(
+            actual.all_references_resolved(),
+            expected.all_references_resolved()
+        );
         assert_eq!(actual.nodes().len(), expected.nodes().len());
         for (a, e) in actual.nodes().iter().zip(expected.nodes()) {
             assert_eq!(a.locator(), e.locator());
@@ -114,7 +117,10 @@ fn assert_full_reconstruction(r: &Repo, generation: &RefreshGeneration) {
             assert_eq!(a.disposition(), ValidationDisposition::Unverified);
         }
     }
-    assert_eq!(set.complete(), full.complete());
+    assert_eq!(
+        set.all_references_resolved(),
+        full.all_references_resolved()
+    );
     assert_eq!(set.references().len(), full.references().len());
     for (a, e) in set.references().zip(full.references()) {
         assert_eq!(a.from().path(), e.from().path());
@@ -206,8 +212,8 @@ fn cold_refresh_has_independently_expected_nodes_spans_edges_and_fresh_provenanc
         set.sources()[0].references()[0].target(),
         &ReferenceTarget::Unresolved(UnresolvedReference::OutsideCoverage)
     );
-    assert!(!set.sources()[0].complete());
-    assert!(set.complete());
+    assert!(!set.sources()[0].all_references_resolved());
+    assert!(set.all_references_resolved());
     for (p, s) in generation.parsing().iter().zip(set.sources()) {
         assert!(p.reused_from().is_none());
         assert_eq!(p.origin(), s.id());
@@ -305,7 +311,7 @@ fn changed_other_document_rebuilds_resolution_for_unchanged_source_and_retarget(
         missing.set().references().next().unwrap().target(),
         Resolution::Unresolved(UnresolvedReference::MissingTarget)
     ));
-    assert!(!missing.set().complete());
+    assert!(!missing.set().all_references_resolved());
     assert_full_reconstruction(&r, missing);
     r.commit_file("a.json", r##"{"Id":0,"use":{"$ref":"b.json#/Other"}}"##);
     let retargeted = both(&r, 20, &mut cache);
@@ -677,7 +683,7 @@ fn actual_refresh_consumer_distinguishes_current_stale_unestablished_and_legacy_
     let c = contract(&r);
     let mut cache = RefreshCache::new();
     let g = both(&r, 1, &mut cache);
-    assert_eq!(qualify(g, None).unwrap().validity(), None);
+    assert_eq!(inspect_validity(g, None).unwrap().validity(), None);
     for n in 3..=5 {
         let view = reinspect(&r.path, g, id(n)).unwrap();
         assert_eq!(view.validity(), Some(Validity::Stale));
@@ -704,7 +710,10 @@ fn actual_refresh_consumer_distinguishes_current_stale_unestablished_and_legacy_
         .unwrap(),
         latest.basis().cloned(),
     );
-    assert_eq!(qualify(g, Some(&incomplete)).unwrap().validity(), None);
+    assert_eq!(
+        inspect_validity(g, Some(&incomplete)).unwrap().validity(),
+        None
+    );
     let legacy = source_set::reinspect(&r.path, g.set(), id(8)).unwrap();
     assert!(!legacy.profile_matches());
     assert_eq!(legacy.validity(), Some(Validity::Stale));

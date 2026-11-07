@@ -13,7 +13,7 @@ pub fn policy() -> Policy {
         privacy: source("synthetic-only"),
         capacities: vec![
             Capacity {
-                resource: Resource::Workers,
+                resource: Resource::WorkerSlots,
                 available: Some(3),
                 verification_reserve: 1,
                 declared_enforceable: true,
@@ -33,7 +33,7 @@ pub fn policy() -> Policy {
 pub fn demand() -> Vec<Demand> {
     vec![
         Demand {
-            resource: Resource::Workers,
+            resource: Resource::WorkerSlots,
             amount: Some(1),
         },
         Demand {
@@ -45,13 +45,13 @@ pub fn demand() -> Vec<Demand> {
 pub fn effect(k: &mut CoordinationKernel, id: &str, e: EffectEvent) {
     admit(k, id, Command::FixtureEffect(Box::new(e)));
 }
-pub fn fixture_scope(k: &mut CoordinationKernel, mission: &str) -> EffectScope {
-    let a = attempt(&format!("attempt-{mission}"), mission, "operator");
-    admit(k, &format!("claim-{mission}"), Command::Claim(a.clone()));
+pub fn fixture_scope(k: &mut CoordinationKernel, task: &str) -> EffectScope {
+    let a = attempt(&format!("attempt-{task}"), task, "operator");
+    admit(k, &format!("claim-{task}"), Command::Claim(a.clone()));
     let request = PackageRequest {
-        id: PackageId::new(&format!("package-{mission}")).unwrap(),
+        id: PackageId::new(&format!("package-{task}")).unwrap(),
         revision: rev(1),
-        mission: task(mission),
+        task: cortex_core::TaskId::new(task).unwrap(),
         baseline: rev(1),
         generation: rev(1),
         sources: vec![],
@@ -62,17 +62,17 @@ pub fn fixture_scope(k: &mut CoordinationKernel, mission: &str) -> EffectScope {
     };
     admit(
         k,
-        &format!("package-{mission}"),
+        &format!("package-{task}"),
         Command::Package(request.clone()),
     );
     EffectScope {
         program: k.state().definition().id().clone(),
         baseline: rev(1),
-        mission: task(mission),
+        task: cortex_core::TaskId::new(task).unwrap(),
         candidate: k
             .state()
             .readiness()
-            .scope(&task(mission))
+            .scope(&cortex_core::TaskId::new(task).unwrap())
             .unwrap()
             .context()
             .contract()
@@ -86,7 +86,7 @@ pub fn fixture_scope(k: &mut CoordinationKernel, mission: &str) -> EffectScope {
 }
 pub fn proposed_grant(scope: &EffectScope) -> OperationalGrant {
     OperationalGrant {
-        id: GrantId::new(&format!("fixture-grant-{}", scope.mission.as_str())).unwrap(),
+        id: GrantId::new(&format!("fixture-grant-{}", scope.task.as_str())).unwrap(),
         principal: ActorId::new("operator").unwrap(),
         policy: policy().reference,
         scope: scope.clone(),

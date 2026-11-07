@@ -105,7 +105,7 @@ impl Wire for ScopeIsolation {
         })
     }
 }
-symbols!(IdentityCheckpointPolicy;BeforeInputV1);
+symbols!(IdentityCheckpointPolicy;BeforeInputV1 => "BeforeInputV1");
 impl Wire for ProcessSpec {
     fn write(&self) -> Result<V, ProgramStoreError> {
         let mut fields = vec![
@@ -222,8 +222,8 @@ impl Wire for ProcessObservation {
         })
     }
 }
-symbols!(Quiescence;NoChildStarted,DirectChildReapedStreamsClosed,OwnedScopeEmpty,Unknown);
-symbols!(InterruptionReason;Timeout,StartupTimeout,IdleTimeout,StdoutLimit,StderrLimit,EventLimit,BufferLimit,StartupIncomplete,ContainmentUnknown,CpuTimeLimit,Cancelled,OutputLimit,InputClosed,Io,MalformedOutput,AuthorityLost,AuthorityUnknown);
+symbols!(Quiescence;NoChildStarted => "NoChildStarted",DirectChildReapedStreamsClosed => "DirectChildReapedStreamsClosed",OwnedScopeEmpty => "OwnedScopeEmpty",Unknown => "Unknown");
+symbols!(InterruptionReason;Timeout => "Timeout",StartupTimeout => "StartupTimeout",IdleTimeout => "IdleTimeout",StdoutLimit => "StdoutLimit",StderrLimit => "StderrLimit",EventLimit => "EventLimit",BufferLimit => "BufferLimit",StartupIncomplete => "StartupIncomplete",ContainmentUnknown => "ContainmentUnknown",CpuTimeLimit => "CpuTimeLimit",Cancelled => "Cancelled",OutputLimit => "OutputLimit",InputClosed => "InputClosed",Io => "Io",MalformedOutput => "MalformedOutput",AuthorityLost => "AuthorityLost",AuthorityUnknown => "AuthorityUnknown");
 
 impl Wire for ProcessCompletion {
     fn write(&self) -> Result<V, ProgramStoreError> {

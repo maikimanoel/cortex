@@ -1,14 +1,15 @@
 //! Redacted retained facts. Inspection never contacts a manager.
+use super::schema::Schema;
 use cortex_core::program::domain::*;
 use serde_json::{Value, json};
 
-pub(super) fn view(projection: &DomainProjection) -> Value {
+pub(super) fn view(projection: &DomainProjection, schema: Schema) -> Value {
     let pool = projection.pool();
     let capacities: Vec<_> = pool
         .into_iter()
         .flat_map(|p| &p.capacities)
         .map(|c| {
-            json!({"dimension":format!("{:?}",c.resource),
+            json!({"dimension":schema.resource(c.resource),
             "declared_total":c.available,"verification_reserve":c.verification_reserve,
             "held":projection.held(c.resource).ok(),
             "enforcement":"NOT_ESTABLISHED_BY_JOURNAL"})
@@ -28,7 +29,7 @@ pub(super) fn view(projection: &DomainProjection) -> Value {
         .collect();
     let records: Vec<_> = projection.domains().iter().map(|d| {
         let capacity: Vec<_> = pool.into_iter().flat_map(|p| &p.capacities).map(|c| {
-            json!({"dimension":format!("{:?}",c.resource),"held":d.holds(c.resource),
+            json!({"dimension":schema.resource(c.resource),"held":d.holds(c.resource),
                 "admitted_quantity":d.intent.effect.demand.iter().find(|r|r.resource==c.resource).and_then(|r|r.amount)})
         }).collect();
         let usage: Vec<_> = d.intent.consumption.iter().map(|r| {

@@ -239,7 +239,7 @@ impl Budget {
 }
 /// Exact successful metadata admission, not a verification or acceptance judgment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Receipt {
+pub struct AdmissionReceipt {
     /// Expected encrypted store incarnation.
     pub store: StoreId,
     /// Retained operation ordinal.
@@ -277,7 +277,7 @@ impl AdmissionFailure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reconciliation {
     /// Exact input was committed at this ordinal.
-    Present(Receipt),
+    Present(AdmissionReceipt),
     /// Confirmed absent at the exact expected predecessor; no automatic retry.
     Absent,
     /// Same identity differs, or predecessor/initial baseline changed.
@@ -386,7 +386,7 @@ impl ProgramStore {
         let roots: Vec<_> = kernel
             .initial()
             .graph()
-            .missions()
+            .tasks()
             .iter()
             .flat_map(|m| {
                 let r = m.context().contract().candidate().repository();
@@ -500,7 +500,11 @@ impl ProgramStore {
     }
     /// Reload, validate and append one complete expected-version operation under
     /// one lifecycle lock and IMMEDIATE transaction. No partial claim or release.
-    pub fn admit(&self, key: &StoreKey, input: Operation) -> Result<Receipt, AdmissionFailure> {
+    pub fn admit(
+        &self,
+        key: &StoreKey,
+        input: Operation,
+    ) -> Result<AdmissionReceipt, AdmissionFailure> {
         self.admit_observed(key, input, |_, _| {})
     }
     fn admit_observed(
@@ -508,7 +512,7 @@ impl ProgramStore {
         key: &StoreKey,
         input: Operation,
         observe: impl FnMut(Stage, &Connection),
-    ) -> Result<Receipt, AdmissionFailure> {
+    ) -> Result<AdmissionReceipt, AdmissionFailure> {
         self.admit_coordinated(key, input, observe, |_| ())
             .map(|(receipt, _)| receipt)
     }
@@ -530,7 +534,7 @@ impl ProgramStore {
         key: &StoreKey,
         input: Operation,
         launch: impl FnOnce(&CoordinationKernel) -> R,
-    ) -> Result<(Receipt, Option<R>), AdmissionFailure> {
+    ) -> Result<(AdmissionReceipt, Option<R>), AdmissionFailure> {
         if self.profile != ProgramProfile::SupervisedFixturesV3
             || !matches!(
                 &input.command,
@@ -551,7 +555,7 @@ impl ProgramStore {
         key: &StoreKey,
         input: Operation,
         launch: impl FnOnce(&CoordinationKernel) -> R,
-    ) -> Result<(Receipt, Option<R>), AdmissionFailure> {
+    ) -> Result<(AdmissionReceipt, Option<R>), AdmissionFailure> {
         use cortex_core::program::domain::DomainEvent;
         if self.profile != ProgramProfile::RecoverableDomainsV4
             || !matches!(&input.command, cortex_evidence::program::Command::Domain(e) if matches!(e.as_ref(), DomainEvent::CreateRequested { .. } | DomainEvent::ReleaseRequested { .. } | DomainEvent::Cancel { .. }))
@@ -566,7 +570,7 @@ impl ProgramStore {
         input: Operation,
         mut observe: impl FnMut(Stage, &Connection),
         launch: impl FnOnce(&CoordinationKernel) -> R,
-    ) -> Result<(Receipt, Option<R>), AdmissionFailure> {
+    ) -> Result<(AdmissionReceipt, Option<R>), AdmissionFailure> {
         let mut budget = Budget::new(self.limits);
         let _lock = self
             .location
@@ -622,7 +626,7 @@ impl ProgramStore {
                 error: sql(e),
             })?;
             return Ok((
-                Receipt {
+                AdmissionReceipt {
                     store: self.id,
                     ordinal: receipt.ordinal,
                     duplicate: true,
@@ -666,7 +670,7 @@ impl ProgramStore {
             completion: Completion::Indeterminate,
             error,
         })?;
-        let receipt = Receipt {
+        let receipt = AdmissionReceipt {
             store: self.id,
             ordinal: receipt.ordinal,
             duplicate: false,
@@ -689,7 +693,7 @@ impl ProgramStore {
         for (i, o) in k.operations().iter().enumerate() {
             if o.id == input.id {
                 return Ok(if o == input {
-                    Reconciliation::Present(Receipt {
+                    Reconciliation::Present(AdmissionReceipt {
                         store: self.id,
                         ordinal: i as u64 + 1,
                         duplicate: true,
@@ -928,8 +932,8 @@ fn check_source_exclusion(
     target: &Path,
     definition: &ProgramDefinition,
 ) -> Result<(), ProgramStoreError> {
-    for mission in definition.graph().missions() {
-        let repo = mission.context().contract().candidate().repository();
+    for task in definition.graph().tasks() {
+        let repo = task.context().contract().candidate().repository();
         for root in [repo.root(), repo.git_dir(), repo.common_dir()] {
             let resolved = root.canonicalize().unwrap_or_else(|_| root.to_owned());
             if target.starts_with(resolved) {

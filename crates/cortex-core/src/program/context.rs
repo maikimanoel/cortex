@@ -2,7 +2,7 @@
 use super::*;
 use crate::{binding::CandidateRequirement, temporal::SourceOrigin};
 
-/// Grounded explicit input; caller assertions retain their source and omission limits.
+/// Declared explicit source input; caller assertions retain their source and omission limits.
 #[derive(Clone, PartialEq, Eq)]
 pub struct SourceInput {
     /// Exact source reference/version.
@@ -31,11 +31,11 @@ pub struct PackageRequest {
     pub id: PackageId,
     /// Caller-assigned positive package revision.
     pub revision: ContractRevision,
-    /// Target mission.
-    pub mission: TaskId,
+    /// Target task.
+    pub task: TaskId,
     /// Exact current baseline.
     pub baseline: ContractRevision,
-    /// Exact expected mission generation.
+    /// Exact expected task generation.
     pub generation: ContractRevision,
     /// Explicit source bytes, in their intended order.
     pub sources: Vec<SourceInput>,
@@ -113,7 +113,7 @@ pub fn assemble(
     request: PackageRequest,
 ) -> Result<InstructionPackage, ProgramError> {
     let d = state.definition();
-    let scope = state.readiness().scope(&request.mission)?;
+    let scope = state.readiness().scope(&request.task)?;
     if request.baseline != d.revision() || request.generation != scope.generation() {
         return Err(ProgramError::Stale);
     }
@@ -135,7 +135,7 @@ pub fn assemble(
         ),
         ("program", d.id().as_str()),
         ("package", request.id.as_str()),
-        ("mission", request.mission.as_str()),
+        ("mission", request.task.as_str()),
         ("objective", scope.context().contract().task().objective()),
         ("acceptance", scope.context().contract().task().acceptance()),
         (
@@ -155,7 +155,7 @@ pub fn assemble(
         ),
         (
             "plan-revision",
-            state.plan().map_or(0, |p| p.revision.get()),
+            state.ordering_plan().map_or(0, |p| p.revision.get()),
         ),
     ] {
         field(&mut bytes, name, value.to_string().as_bytes(), max)?;
@@ -220,13 +220,9 @@ pub fn assemble(
         b"UNAVAILABLE; no executor may consume this package as a grant",
         max,
     )?;
-    for i in d
-        .increments()
-        .iter()
-        .filter(|i| i.mission == request.mission)
-    {
+    for i in d.increments().iter().filter(|i| i.task == request.task) {
         field(&mut bytes, "increment", i.id.as_str().as_bytes(), max)?;
-        for r in &i.resources {
+        for r in &i.claim_scopes {
             field(
                 &mut bytes,
                 "declared-responsibility",
@@ -235,25 +231,27 @@ pub fn assemble(
             )?;
         }
     }
-    let mission = state.readiness().mission(&request.mission)?;
+    let task = state.readiness().task(&request.task)?;
     field(
         &mut bytes,
         "dependency-ready",
-        mission.dependency_ready().to_string().as_bytes(),
+        task.dependency_ready().to_string().as_bytes(),
         max,
     )?;
     field(
         &mut bytes,
         "eligible",
-        mission.eligible().to_string().as_bytes(),
+        task.eligible().to_string().as_bytes(),
         max,
     )?;
-    for blocker in mission.blockers() {
+    for blocker in task.blockers() {
         match blocker {
-            MissionBlocker::Dependency(edge) => {
+            TaskBlocker::Dependency(edge) => {
                 field(&mut bytes, "blocked-edge", edge.as_str().as_bytes(), max)?
             }
-            value => field(&mut bytes, "blocker", format!("{value:?}").as_bytes(), max)?,
+            // The v1 assembler predates the public type rename. Its opaque blocker
+            // bytes are a retained format token, independent of Debug/type names.
+            _ => field(&mut bytes, "blocker", b"MissionBlocker([redacted])", max)?,
         }
     }
 
@@ -261,7 +259,7 @@ pub fn assemble(
         .graph()
         .edges()
         .iter()
-        .filter(|e| e.consumer() == &request.mission)
+        .filter(|e| e.consumer() == &request.task)
     {
         field(&mut bytes, "edge", e.id().as_str().as_bytes(), max)?;
         field(

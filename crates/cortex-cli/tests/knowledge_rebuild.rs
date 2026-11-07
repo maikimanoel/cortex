@@ -310,11 +310,11 @@ type Source<'a> = (&'a str, &'a str, &'a [Node<'a>], bool);
 fn assert_graph(set: &ReferenceSet, sources: &[Source<'_>], expected: &[Edge<'_>], complete: bool) {
     assert_eq!(set.sources().len(), sources.len());
     assert_eq!(edges(set), expected);
-    assert_eq!(set.complete(), complete);
+    assert_eq!(set.all_references_resolved(), complete);
     for (source, (name, bytes, nodes, legacy_complete)) in set.sources().iter().zip(sources) {
         assert_eq!(source.path(), &path(name));
         assert_eq!(source.bytes(), bytes.as_bytes());
-        assert_eq!(source.complete(), *legacy_complete);
+        assert_eq!(source.all_references_resolved(), *legacy_complete);
         assert_eq!(
             source
                 .nodes()
@@ -824,7 +824,7 @@ fn dirty_and_incomplete_observation_transitions_cannot_establish_current() {
             basis,
         );
         read_only(&repo, || {
-            let view = qualify(&set, Some(&partial)).unwrap();
+            let view = inspect_validity(&set, Some(&partial)).unwrap();
             assert_eq!(view.validity(), None);
             assert_eq!(
                 view.correspondence(),
@@ -832,7 +832,7 @@ fn dirty_and_incomplete_observation_transitions_cannot_establish_current() {
             );
         });
     }
-    assert_eq!(qualify(&set, None).unwrap().validity(), None);
+    assert_eq!(inspect_validity(&set, None).unwrap().validity(), None);
 
     fs::write(repo.path.join("a.json"), A_OTHER).unwrap();
     let dirty = read_only(&repo, || inspect_candidate(&repo.path, &c, id(11)).unwrap());
@@ -846,7 +846,7 @@ fn dirty_and_incomplete_observation_transitions_cannot_establish_current() {
         }]
     );
     assert_eq!(
-        qualify(&set, Some(&dirty)).unwrap().validity(),
+        inspect_validity(&set, Some(&dirty)).unwrap().validity(),
         Some(Validity::Stale)
     );
     assert_validity(&repo, &set, 12, Some(Validity::Stale));

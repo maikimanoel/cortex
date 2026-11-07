@@ -257,7 +257,7 @@ fn a_process_observation_cannot_supply_its_own_coordination_scope() {
         })),
     );
     input.grant.id = GrantId::new("different-mission-grant").unwrap();
-    input.grant.missions = vec![task("D")];
+    input.grant.tasks = vec![task("D")];
     let before = k.revision();
     assert!(k.admit(input).is_err());
     assert_eq!(k.revision(), before);

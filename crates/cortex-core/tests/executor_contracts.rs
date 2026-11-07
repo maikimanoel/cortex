@@ -61,7 +61,7 @@ fn package(state: &ProgramState) -> InstructionPackage {
         PackageRequest {
             id: PackageId::new("input-package").unwrap(),
             revision: rev(1),
-            mission: task("A"),
+            task: task("A"),
             baseline: state.definition().revision(),
             generation: state.readiness().scope(&task("A")).unwrap().generation(),
             sources: vec![SourceInput {
@@ -326,14 +326,14 @@ fn altered_package_and_current_state_changes_are_rejected_then_fresh_preparation
         );
     }
     state
-        .set_plan(
+        .set_ordering_plan(
             &grant(1, "operator"),
-            Plan {
+            OrderingPlan {
                 revision: rev(1),
                 order: state
                     .definition()
                     .graph()
-                    .missions()
+                    .tasks()
                     .iter()
                     .map(|m| m.id().clone())
                     .collect(),
