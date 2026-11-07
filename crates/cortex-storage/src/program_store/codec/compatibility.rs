@@ -1,7 +1,6 @@
 //! Synthetic retained-format cases specified from the original positional codec.
 use super::*;
-#[path = "../../../../cortex-core/tests/support/program.rs"]
-mod fixture;
+use crate::program_store::tests::fixture;
 use cortex_core::program::{domain::Consumption, operational::EffectScope, scheduling::*};
 
 fn roundtrip<T: Wire + PartialEq>(expected: T, bytes: &[u8]) {
@@ -244,4 +243,32 @@ fn task_context_scope_graph_and_claim_ids_keep_the_retained_structure() {
     );
     assert!(ClaimScopeId::read(&json!("")).is_err());
     assert!(TaskScope::read(&json!([expected_context, 0])).is_err());
+}
+
+#[test]
+fn retained_signal_position_and_constructor_rejection_are_independent_of_rust_names() {
+    const GOLDEN: &[u8] = br#"["signal-id",["graph",2],["signal","A","Public synthetic message"]]"#;
+    let expected = Notification::new(
+        NotificationId::new("signal-id").unwrap(),
+        GraphReference::new(GraphId::new("graph").unwrap(), fixture::rev(2)),
+        Event::Signal {
+            task: fixture::task("A"),
+            message: "Public synthetic message".into(),
+        },
+    )
+    .unwrap();
+    roundtrip(expected, GOLDEN);
+    for invalid in [
+        json!(["signal-id", ["graph", 2], ["signal", "A"]]),
+        json!([
+            "signal-id",
+            ["graph", 2],
+            ["signal", "A", "message", "extra"]
+        ]),
+        json!(["signal-id", ["graph", 0], ["signal", "A", "message"]]),
+        json!(["signal-id", ["graph", 2], ["signal", "", "message"]]),
+        json!(["signal-id", ["graph", 2], ["task-signal", "A", "message"]]),
+    ] {
+        assert!(Notification::read(&invalid).is_err());
+    }
 }

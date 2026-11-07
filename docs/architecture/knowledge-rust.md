@@ -104,7 +104,7 @@ Privacy, cfg evaluation, namespace/type/name resolution, calls, runtime dependen
 and compilation correctness are outside v1 even when every occurrence has a target.
 
 A successful producer result means supported lexical structural coverage.
-`ReferenceIndex::complete()` separately says every emitted occurrence has a local
+`ReferenceIndex::all_references_resolved()` separately says every emitted occurrence has a local
 target. Neither implies complete Rust semantics. Errors independently distinguish
 `Encoding`, `InvalidRust`, `UnsupportedSyntax`, `Limit`, inspection, binding, candidate
 and Core construction failures. All relationships remain `Extracted` and `Unverified`.

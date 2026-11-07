@@ -1,6 +1,6 @@
-# Contributing to CORTEX
+# Contributing to Cortex
 
-CORTEX is pre-alpha. Milestones 001 and 002 are delivered. Milestone 003 has begun
+Cortex is pre-alpha. Milestones 001 and 002 are delivered. Milestone 003 has begun
 with canonical history, bounded encrypted storage and lexical reference knowledge;
 003-A/003-B remain incomplete, and 003-C–003-F and 004–006 remain planned.
 Maiki Manoel maintains the project and reviews external contributions through

@@ -378,7 +378,7 @@ impl Drop for ChildGuard {
         }
     }
 }
-// Private observation boundary: production installs only PreparedScope. TestProcesses
+// Private observation boundary: production installs only PreparedScope. Tests
 // may supply controlled facts without activating a host isolation backend.
 trait ScopeRuntime {
     fn observe(

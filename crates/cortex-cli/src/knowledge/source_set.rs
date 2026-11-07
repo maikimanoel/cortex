@@ -213,7 +213,7 @@ impl<'a> SourceSetView<'a> {
     }
 }
 
-/// Qualify against a supplied genuinely later capture. No I/O or assessment.
+/// Inspect validity against a supplied genuinely later capture. No I/O or assessment.
 /// Matching candidate/profile and fully resolved declared-set coverage are required
 /// for scoped Current validity. New candidates/profiles conservatively invalidate;
 /// incomplete or missing coverage cannot establish Current.

@@ -158,7 +158,7 @@ pub enum ReadinessError {
     StaleContext,
     /// A notification identity was reused for different data.
     IdentityConflict,
-    /// A status transition would restart or reopen an existing attempt.
+    /// A status transition would restart or reopen an existing task.
     InvalidTransition,
     /// Logical admission budget exceeded.
     Limit(LimitKind),
@@ -980,7 +980,7 @@ pub enum Event {
         /// Source of this synthetic assertion.
         source: SourceReference,
     },
-    /// Update an existing attempt without reopening active/terminal work.
+    /// Update task coordination status without reopening active/terminal work.
     Status {
         /// Applicable context.
         scope: TaskScope,
@@ -1108,7 +1108,7 @@ impl EdgeState {
 /// Independent task blocking causes in deterministic order.
 #[derive(Clone, PartialEq, Eq)]
 pub enum TaskBlocker {
-    /// Active or terminal attempts cannot start again.
+    /// Active or terminal tasks cannot start again.
     NotPending,
     /// No explicit precondition observation in the current generation.
     PreconditionsUnknown,

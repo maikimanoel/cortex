@@ -187,7 +187,7 @@ fn extract_between(
     ReferenceIndex::new(bound, path, bytes, record, nodes, references).map_err(Into::into)
 }
 
-/// Qualify retained Rust coverage against a supplied later observation, without I/O.
+/// Inspect validity of retained Rust coverage against a supplied later observation, without I/O.
 ///
 /// Profile mismatch/demonstrated candidate change is stale; missing observation or
 /// unresolved targets is unestablished. CURRENT is scoped lexical correspondence,

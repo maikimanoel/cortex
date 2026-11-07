@@ -48,7 +48,7 @@ This is **lexical JSON reference extraction**, not JSON Schema evaluation. It wa
 all JSON values, including examples, and does not interpret `$id`, dynamic references,
 schema drafts, application semantics or runtime dependencies. It accepts JSON by
 explicit operation, not filename convention. Other languages/formats need separate
-qualified adapters; CORTEX is not restricted to Rust projects.
+qualified adapters; Cortex is not restricted to Rust projects.
 
 `ReferenceIndex::incoming(locator)` returns borrowed resolved relationships to a known
 node. A known node with no incoming references returns zero; an unknown locator is

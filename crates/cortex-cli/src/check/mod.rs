@@ -250,7 +250,7 @@ fn finish(
         }
     } else {
         // Completed 002-A capture establishes that the actual porcelain status
-        // queries exited zero. This is their outcome, never the CORTEX exit code.
+        // queries exited zero. This is their outcome, never the Cortex exit code.
         // The separate oracle below performs exactly one committed-HEAD comparison.
         let conclusion = match source.state().head() {
             Head::Attached { commit, .. } | Head::Detached { commit } if commit == &expected => {

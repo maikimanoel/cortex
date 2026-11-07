@@ -1,7 +1,7 @@
 //! GPE-B S1/O1/F1: exact reconstruction, real competing processes and crash cuts.
 use super::*;
 #[path = "../../../cortex-evidence/tests/support/program.rs"]
-mod fixture;
+pub(super) mod fixture;
 use cortex_core::binding::{CandidateBindingContract, CandidateRequirement, RepositoryIdentity};
 use cortex_core::program::*;
 use cortex_evidence::program::Command as Input;

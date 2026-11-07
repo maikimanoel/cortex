@@ -180,7 +180,7 @@ fn extract_between(
         .map_err(ExtractionError::from)
 }
 
-/// Qualify retained facts against a supplied later observation without I/O.
+/// Inspect validity of retained facts against a supplied later observation without I/O.
 ///
 /// Exact profile and candidate correspondence plus fully resolved relationships
 /// are needed for scoped CURRENT. This authenticates neither reports nor syntax.
