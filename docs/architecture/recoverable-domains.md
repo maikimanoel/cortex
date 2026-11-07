@@ -177,6 +177,35 @@ binary ABI or a general source-stability promise.
 
 ### Closure and subsequent admission
 
+The native closure-inspection path retains a bounded, versioned post-cancellation
+observation in the same journal. It requires the actual binding and durable Cancel
+before capture/publication, and matches the store, scope, configuration, manager,
+boot, invocation, cgroup incarnation and process birth observations. Duplicate,
+out-of-order or mismatched samples are refused. Replay only reconstructs records;
+it cannot invoke the observer or repeat a stop request.
+
+These samples preserve their observation tick, direct-member coverage, provenance,
+population and optional sampled usage. They do not become final consumption,
+closure receipts or settlement. Even an empty direct-member list with zero sampled
+CPU leaves explicit gaps for whole-domain, helper, stream, snapshot and final-use
+proof. The read-only CLI reports those gaps separately from any existing
+caller-asserted closure receipt; inspection does not contact the manager or refresh
+old evidence. Partial native capture never releases occupancy or clears debt.
+
+An actual closure producer still needs an accepted observer outside the interrupted
+controller, complete membership/helper/stream coverage, exact immutable identities,
+applicable restart/snapshot evidence and final dimension-specific measurements.
+The current adapter supplies no snapshot-exclusion guarantee. Missing units,
+garbage collection, changed epochs or unavailable counters remain missing proof.
+No boolean copied from a fixture or configuration readback supplies that guarantee.
+
+New closure observations use a distinct command/event encoding; existing domain
+and binding encodings retain their original bytes and meaning. Readers lacking
+the extension refuse it. There is no historical migration, changed receipt trust,
+debt exception or broader source/API compatibility promise. The observation count
+is bounded per domain; reaching the bound refuses another sample rather than
+overwriting evidence, dropping uncertainty or granting more execution budget.
+
 Preparation is not closure. A normal cancellation must be durable before its
 exact stop request, but the acknowledgement establishes neither quiescence nor
 resource disposition. The current native observer still cannot prove snapshot

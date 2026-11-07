@@ -680,6 +680,104 @@ pub fn inspect_nonce_domain(
     })
 }
 
+/// Capture and durably retain a bounded read-only post-cancellation sample of
+/// the exact bound incarnation. No create, release, stop, closure or settlement
+/// is performed. An absent/replaced identity is an error, never zero usage.
+/// Direct-member readbacks leave whole-domain/helper/stream/snapshot proof held.
+pub fn observe_nonce_domain_closure(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut SystemdNonceDomain,
+    ids: &DomainOperations,
+    observation_id: OperationId,
+) -> Result<Receipt, DomainDiagnostic> {
+    observe_closure(store, key, backend, ids, observation_id)
+}
+fn observe_closure<M: DomainManager>(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut M,
+    ids: &DomainOperations,
+    observation_id: OperationId,
+) -> Result<Receipt, DomainDiagnostic> {
+    let start = Instant::now();
+    let end = start + Duration::from_secs(1);
+    let kernel = store
+        .load(key, Access::ReadOnly)
+        .map_err(|_| issue(DomainPhaseDiagnostic::Closure, DomainCause::Journal))?;
+    let domain = record(&kernel, &ids.domain)?;
+    let binding = domain
+        .binding_observation
+        .as_ref()
+        .ok_or_else(|| issue(DomainPhaseDiagnostic::Closure, DomainCause::Correspondence))?;
+    if !domain.cancelled || domain.closure.is_some() {
+        return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Contract));
+    }
+    backend.corresponds(&domain.intent)?;
+    let actual = backend.observe(&domain.intent, end)?;
+    if Instant::now() >= end || actual.identity != binding.identity {
+        return Err(issue(
+            DomainPhaseDiagnostic::Closure,
+            DomainCause::Correspondence,
+        ));
+    }
+    let at = kernel
+        .domains()
+        .ok_or_else(|| issue(DomainPhaseDiagnostic::Closure, DomainCause::Contract))?
+        .last_tick()
+        .checked_add(
+            u64::try_from(start.elapsed().as_millis())
+                .map_err(|_| issue(DomainPhaseDiagnostic::Closure, DomainCause::Deadline))?,
+        )
+        .ok_or_else(|| issue(DomainPhaseDiagnostic::Closure, DomainCause::Deadline))?;
+    let observed_main = match (actual.main_pid, actual.start_ticks) {
+        (0, 0) => None,
+        (pid, start_ticks) if pid != 0 && start_ticks != 0 => {
+            Some(DomainProcessObservation { pid, start_ticks })
+        }
+        _ => {
+            return Err(issue(
+                DomainPhaseDiagnostic::Closure,
+                DomainCause::Correspondence,
+            ));
+        }
+    };
+    let observation = DomainClosureObservation {
+        identity: actual.identity,
+        configuration: domain.intent.configuration.clone(),
+        scope: domain.intent.effect.scope.clone(),
+        binding_main: binding.main.clone(),
+        observed_main,
+        direct_members: actual.direct_members,
+        populated: actual.populated,
+        restart_prevented: actual.restart_prevented,
+        cpu_micros: actual.cpu_micros,
+        memory_peak: actual.memory_peak,
+        observed_at: at,
+        basis: ids.basis.clone(),
+    };
+    observation
+        .validate()
+        .map_err(|_| issue(DomainPhaseDiagnostic::Closure, DomainCause::Correspondence))?;
+    // Use the revision sampled before manager I/O. A concurrent writer makes
+    // publication stale; never retimestamp, repeat manager effects or overwrite.
+    store
+        .admit(
+            key,
+            operation(
+                &kernel,
+                ids,
+                observation_id,
+                DomainEvent::ClosureObserved {
+                    domain: ids.domain.clone(),
+                    observation,
+                    at,
+                },
+            ),
+        )
+        .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))
+}
+
 /// Consume a retained pre-release channel through canonical cancellation. The
 /// channel stays owned until cancellation/stop returns, then closes even on error.
 /// Neither descriptor closure nor a stop acknowledgement proves domain closure.

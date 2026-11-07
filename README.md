@@ -123,6 +123,9 @@ The native prepared lifecycle retains the real bootstrap channel and durable
 binding observations before an explicit release. Read-only program inspection
 distinguishes those observations from current liveness and closure. Legacy records,
 resource debt and the separate host-qualification gates remain unchanged.
+Post-cancellation native observations are retained separately from closure proof.
+Inspection explains missing whole-domain, helper, stream, snapshot and final-use
+evidence; a partial sample cannot settle capacity or authorize another attempt.
 
 The bounded [native method inspector](docs/architecture/engineering-methods.md#native-method-inspection-p0)
 adds immutable `cortex_core::methods` definitions and advisory

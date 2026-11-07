@@ -742,3 +742,224 @@ fn cancellation_and_revocation_before_observed_binding_hold_identity_and_release
         assert!(r.holds(Resource::Workers));
     }
 }
+
+#[test]
+fn partial_closure_readback_preserves_unknown_holds_and_final_debt() {
+    let (mut k, i) = coordinator();
+    observed_cancelled(&mut k, &i);
+    event(
+        &mut k,
+        "post-cancel",
+        DomainEvent::ClosureObserved {
+            domain: i.id.clone(),
+            observation: closure_observation(&i, 5),
+            at: 5,
+        },
+    );
+    let r = k.domains().unwrap().domain(&i.id).unwrap();
+    assert_eq!(r.outcome, HistoricalOutcome::Unknown);
+    assert_eq!(r.cancelled_at, Some(4));
+    assert!(r.holds(Resource::Workers));
+    assert!(r.holds(Resource::RamBytes));
+    assert!(r.holds(Resource::DiskBytes));
+    assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
+    assert!(r.closure.is_none());
+    let inspection = r.closure_inspection();
+    assert_eq!(inspection.retained_observations, 1);
+    assert!(!inspection.receipt_recorded);
+    for gap in [
+        ClosureProofGap::WholeDomainCoverage,
+        ClosureProofGap::HelperCoverage,
+        ClosureProofGap::StreamCoverage,
+        ClosureProofGap::SnapshotExclusion,
+        ClosureProofGap::FinalConsumption,
+    ] {
+        assert!(inspection.missing.contains(&gap));
+    }
+    assert!(
+        !inspection
+            .missing
+            .contains(&ClosureProofGap::PopulatedDomain)
+    );
+    let next = setup(&mut k, "D");
+    let op = domain_operation(
+        &k,
+        "next-refused",
+        Command::Domain(Box::new(DomainEvent::Reserve {
+            intent: next,
+            at: 6,
+        })),
+    );
+    assert!(k.admit(op).is_err());
+}
+
+#[test]
+fn closure_readback_rejects_mixed_identity_scope_ticks_and_pid_reuse_atomically() {
+    let (mut k, i) = coordinator();
+    observed_cancelled(&mut k, &i);
+    let good = closure_observation(&i, 5);
+    let mut inputs = vec![];
+    let mut o = good.clone();
+    o.identity.manager = "other-manager".into();
+    inputs.push(o);
+    let mut o = good.clone();
+    o.identity.invocation = "other-invocation".into();
+    inputs.push(o);
+    let mut o = good.clone();
+    o.identity.cgroup_inode += 1;
+    inputs.push(o);
+    let mut o = good.clone();
+    o.identity.boot = "other-boot".into();
+    inputs.push(o);
+    let mut o = good.clone();
+    o.configuration = source("other-configuration");
+    inputs.push(o);
+    let mut o = good.clone();
+    o.scope.generation = rev(2);
+    inputs.push(o);
+    let mut o = good.clone();
+    o.scope.package_revision = rev(2);
+    inputs.push(o);
+    let mut o = good.clone();
+    o.binding_main.start_ticks += 1;
+    inputs.push(o);
+    let mut o = good.clone();
+    o.observed_at = 6;
+    inputs.push(o);
+    let mut o = good.clone();
+    o.populated = true;
+    o.direct_members.push(DomainProcessObservation {
+        pid: o.binding_main.pid,
+        start_ticks: o.binding_main.start_ticks + 1,
+    });
+    inputs.push(o);
+    for (n, observation) in inputs.into_iter().enumerate() {
+        let before = k.clone();
+        let op = domain_operation(
+            &k,
+            &format!("bad-observation-{n}"),
+            Command::Domain(Box::new(DomainEvent::ClosureObserved {
+                domain: i.id.clone(),
+                observation,
+                at: 5,
+            })),
+        );
+        assert!(k.admit(op).is_err());
+        assert!(k.domains() == before.domains());
+        assert_eq!(k.revision(), before.revision());
+    }
+    event(
+        &mut k,
+        "good-observation",
+        DomainEvent::ClosureObserved {
+            domain: i.id.clone(),
+            observation: good.clone(),
+            at: 5,
+        },
+    );
+    let duplicate = domain_operation(
+        &k,
+        "duplicate-observation",
+        Command::Domain(Box::new(DomainEvent::ClosureObserved {
+            domain: i.id.clone(),
+            observation: good,
+            at: 5,
+        })),
+    );
+    assert!(k.admit(duplicate).is_err());
+    let mut stale = closure_observation(&i, 3);
+    stale.basis = source("delayed");
+    let op = domain_operation(
+        &k,
+        "delayed-observation",
+        Command::Domain(Box::new(DomainEvent::ClosureObserved {
+            domain: i.id,
+            observation: stale,
+            at: 3,
+        })),
+    );
+    assert!(k.admit(op).is_err());
+}
+
+#[test]
+fn post_cancel_readbacks_are_bounded_and_hidden_members_do_not_prove_quiescence() {
+    let (mut k, i) = coordinator();
+    observed_cancelled(&mut k, &i);
+    for n in 0..32 {
+        let mut observation = closure_observation(&i, 5 + n);
+        observation.populated = true;
+        observation.restart_prevented = false;
+        observation.cpu_micros = None;
+        observation.memory_peak = None;
+        event(
+            &mut k,
+            &format!("partial-{n}"),
+            DomainEvent::ClosureObserved {
+                domain: i.id.clone(),
+                observation,
+                at: 5 + n,
+            },
+        );
+    }
+    let r = k.domains().unwrap().domain(&i.id).unwrap();
+    assert_eq!(r.closure_observations.len(), 32);
+    let gaps = r.closure_inspection().missing;
+    assert!(gaps.contains(&ClosureProofGap::PopulatedDomain));
+    assert!(gaps.contains(&ClosureProofGap::RestartPrevention));
+    assert!(gaps.contains(&ClosureProofGap::FinalConsumption));
+    let extra = domain_operation(
+        &k,
+        "too-many",
+        Command::Domain(Box::new(DomainEvent::ClosureObserved {
+            domain: i.id.clone(),
+            observation: closure_observation(&i, 37),
+            at: 37,
+        })),
+    );
+    assert!(matches!(
+        k.admit(extra),
+        Err(KernelError::Domain(DomainError::Full))
+    ));
+}
+
+#[test]
+fn readback_requires_cancelled_observed_binding_and_cannot_reopen_closed_domain() {
+    let (mut k, i) = coordinator();
+    bound(&mut k, &i); // Legacy identity-only binding supplies no birth evidence.
+    let input = DomainEvent::ClosureObserved {
+        domain: i.id.clone(),
+        observation: closure_observation(&i, 4),
+        at: 4,
+    };
+    assert!(
+        k.admit(domain_operation(
+            &k,
+            "no-binding-cancel",
+            Command::Domain(Box::new(input))
+        ))
+        .is_err()
+    );
+    let (mut k, i) = coordinator();
+    observed_cancelled(&mut k, &i);
+    event(
+        &mut k,
+        "fixture-closed",
+        DomainEvent::Closed {
+            receipt: closure(&i, Some(7)),
+            at: 5,
+        },
+    );
+    let input = DomainEvent::ClosureObserved {
+        domain: i.id.clone(),
+        observation: closure_observation(&i, 6),
+        at: 6,
+    };
+    assert!(
+        k.admit(domain_operation(
+            &k,
+            "after-close",
+            Command::Domain(Box::new(input))
+        ))
+        .is_err()
+    );
+}

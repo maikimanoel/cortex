@@ -1500,3 +1500,10 @@ separates historical Unknown from present closure and per-dimension resource
 disposition under those same owners. It adds explicit shared-pool admission and
 a fixed synthetic payload backend without promoting any complete capability.
 Source acceptance, actual-host qualification and live execution remain separate.
+
+The recoverable-domain closure-evidence extension supplies bounded retained
+post-cancellation samples and read-only missing-proof inspection under the existing
+CAP-WFL-001/004, CAP-EVD-003, CAP-HRN-001/002, CAP-MEM-001, CAP-SEC-002 and
+CAP-CLI-004 owners. Sampled direct membership and usage remain partial observations,
+not authenticated whole-domain closure, final accounting or resource settlement.
+Full capability statuses and operational prerequisites remain unchanged.

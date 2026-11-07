@@ -13,6 +13,7 @@ fields!(DomainIdentity;pool,request,manager,invocation,control_group,cgroup_devi
 fields!(DomainProcessObservation;pid,start_ticks);
 fields!(DomainControlReadback;cpu_quota_us,cpu_period_us,memory_bytes,swap_bytes,tasks,runtime_max_micros,timeout_stop_micros,restart_prevented,kill_control_group,no_new_privileges,send_sigkill,remain_after_exit);
 fields!(DomainBindingObservation;identity,configuration,main,direct_members,controls,populated,basis);
+fields!(DomainClosureObservation;identity,configuration,scope,binding_main,observed_main,direct_members,populated,restart_prevented,cpu_micros,memory_peak,observed_at,basis);
 fields!(ConsumptionObservation;dimension,measured);
 fields!(ClosureReceipt;domain,identity,configuration,scope,whole_domain,restart_prevented,snapshot_safe,quiescent,released,consumption,evidence);
 impl Wire for DomainEvent {
@@ -34,6 +35,22 @@ impl Wire for DomainEvent {
                 observation.validate().map_err(|_| bad())?;
                 json!([
                     "bound-observed-v1",
+                    domain.write()?,
+                    observation.write()?,
+                    at
+                ])
+            }
+            Self::ClosureObserved {
+                domain,
+                observation,
+                at,
+            } => {
+                observation.validate().map_err(|_| bad())?;
+                if observation.observed_at != *at {
+                    return Err(bad());
+                }
+                json!([
+                    "closure-observed-v1",
                     domain.write()?,
                     observation.write()?,
                     at
@@ -130,6 +147,20 @@ impl Wire for DomainEvent {
                     domain: read(&a[1])?,
                     observation,
                     at: read(&a[3])?,
+                }
+            }
+            "closure-observed-v1" => {
+                let a = arr(v, 4)?;
+                let observation: DomainClosureObservation = read(&a[2])?;
+                observation.validate().map_err(|_| bad())?;
+                let at = read(&a[3])?;
+                if observation.observed_at != at {
+                    return Err(bad());
+                }
+                Self::ClosureObserved {
+                    domain: read(&a[1])?,
+                    observation,
+                    at,
                 }
             }
             "unknown-v1" | "cancel-v1" => {
