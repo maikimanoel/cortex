@@ -162,10 +162,18 @@ fn unresolved_structure_is_not_invented_or_validated() {
     )
     .unwrap();
     let value = index(vec![node("")], vec![r]).unwrap();
-    assert!(!value.complete());
+    assert!(!value.all_references_resolved());
     assert_eq!(value.nodes().len(), 1);
     assert_eq!(
         value.references()[0].disposition(),
         ValidationDisposition::Unverified
     );
+}
+
+#[test]
+fn no_emitted_references_is_resolved_without_claiming_extraction_completeness() {
+    let value = index(vec![node("")], vec![]).unwrap();
+    assert!(value.all_references_resolved());
+    assert!(value.references().is_empty());
+    assert_eq!(value.nodes().len(), 1);
 }

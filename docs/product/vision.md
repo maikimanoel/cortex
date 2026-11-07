@@ -147,8 +147,10 @@ actual candidate. Improvements must be proposed and evaluated against explicit
 oracles and baselines. Compatibility, reliability, retrieval quality, security,
 and performance claims require observations in the stated environments.
 
-The current implementation retains the three-crate foundation described in the
-[accepted foundation decision](../architecture/0001-foundation.md) and adds
+The current implementation preserves the contracts described in the
+[accepted foundation decision](../architecture/0001-foundation.md). Its
+[five-crate workspace](../architecture/overview.md#observed-implementation) adds
+Storage and the bounded Harness alongside Core, Evidence and CLI, including
 [002-A bounded local Git inspection](../architecture/repository-inspection.md) and
 [002-B typed candidate/task binding](../architecture/candidate-binding.md), plus
 [002-C unified evidence](../architecture/unified-evidence.md).
@@ -160,7 +162,10 @@ times. Binding does not create an assessment. The CLI prints help/version/inspec
 committed-HEAD equality criterion, with human/JSON output. It does not enforce task
 permissions or execute agents. The first 003-A library slices add canonical temporal
 history and bounded encrypted local persistence with explicit operator inputs;
-general memory/recovery and the remaining 003 contracts remain incomplete.
+bounded lexical JSON, Rust, Markdown and Cargo manifest adapters share the
+derived knowledge model. The provider-free Harness supports explicitly granted
+trusted fixtures; source support does not establish real-host qualification.
+General memory/recovery and the remaining 003 contracts remain incomplete.
 The [roadmap](roadmap.md) schedules that work;
 plans are not execution authorization or evidence of delivery.
 

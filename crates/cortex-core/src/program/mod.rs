@@ -66,7 +66,7 @@ id!(
 );
 id!(GrantId, "An explicit local metadata grant reference.");
 id!(
-    ResourceId,
+    ClaimScopeId,
     "Declared exclusive semantic responsibility, not a host limit."
 );
 id!(PackageId, "An immutable instruction package identity.");
@@ -157,22 +157,22 @@ pub struct Workstream {
     pub id: WorkstreamId,
     /// Protected responsibility description.
     pub responsibility: String,
-    /// Exact graph missions owned by this domain.
-    pub missions: Vec<TaskId>,
+    /// Exact graph tasks owned by this domain.
+    pub tasks: Vec<TaskId>,
 }
 /// Untrusted increment input, validated against the graph and other increments.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Increment {
     /// Unique increment identity.
     pub id: IncrementId,
-    /// Producer mission.
-    pub mission: TaskId,
+    /// Producer task.
+    pub task: TaskId,
     /// Exact intermediate artifacts; empty is allowed for a terminal-only increment.
     pub artifacts: Vec<ArtifactReference>,
     /// Explicit exclusive semantic scopes, including conflicts beyond path overlap.
-    pub resources: Vec<ResourceId>,
+    pub claim_scopes: Vec<ClaimScopeId>,
 }
-/// Protected program-wide outcome, distinct from its individual mission criteria.
+/// Protected program-wide outcome, distinct from its individual task criteria.
 #[derive(Clone, PartialEq, Eq)]
 pub struct ProgramOutcome {
     objective: String,
@@ -245,17 +245,17 @@ impl ProgramDefinition {
             text_bytes = text_bytes
                 .checked_add(w.responsibility.len())
                 .ok_or(ProgramError::Capacity)?;
-            if !streams.insert(&w.id) || w.missions.is_empty() {
+            if !streams.insert(&w.id) || w.tasks.is_empty() {
                 return Err(ProgramError::Structure);
             }
-            for m in &w.missions {
+            for m in &w.tasks {
                 if !owned.insert(m.as_str()) {
                     return Err(ProgramError::Structure);
                 }
             }
         }
         if text_bytes > limits.bytes
-            || owned != graph.missions().iter().map(|m| m.id().as_str()).collect()
+            || owned != graph.tasks().iter().map(|m| m.id().as_str()).collect()
         {
             return Err(ProgramError::Structure);
         }
@@ -263,10 +263,10 @@ impl ProgramDefinition {
         let mut artifacts = BTreeSet::new();
         for i in &increments {
             if !ids.insert(&i.id)
-                || !owned.contains(i.mission.as_str())
-                || i.resources.len() > limits.entries
+                || !owned.contains(i.task.as_str())
+                || i.claim_scopes.len() > limits.entries
                 || i.artifacts.len() > limits.entries
-                || i.resources.iter().collect::<BTreeSet<_>>().len() != i.resources.len()
+                || i.claim_scopes.iter().collect::<BTreeSet<_>>().len() != i.claim_scopes.len()
             {
                 return Err(ProgramError::Structure);
             }
@@ -275,19 +275,19 @@ impl ProgramDefinition {
                     || !graph
                         .edges()
                         .iter()
-                        .any(|e| e.producer() == &i.mission && e.requirement().artifact() == a)
+                        .any(|e| e.producer() == &i.task && e.requirement().artifact() == a)
                 {
                     return Err(ProgramError::Structure);
                 }
             }
         }
         if graph
-            .missions()
+            .tasks()
             .iter()
-            .any(|m| !increments.iter().any(|i| &i.mission == m.id()))
+            .any(|m| !increments.iter().any(|i| &i.task == m.id()))
             || graph.edges().iter().any(|e| {
                 !increments.iter().any(|i| {
-                    &i.mission == e.producer() && i.artifacts.contains(e.requirement().artifact())
+                    &i.task == e.producer() && i.artifacts.contains(e.requirement().artifact())
                 })
             })
         {
@@ -366,20 +366,20 @@ pub struct CoordinationGrant {
     pub baseline: ContractRevision,
     /// Claimed invoking operator.
     pub actor: ActorId,
-    /// Explicit covered missions.
-    pub missions: Vec<TaskId>,
+    /// Explicit covered tasks.
+    pub tasks: Vec<TaskId>,
     /// Explicit metadata operations.
     pub permissions: Vec<CoordinationPermission>,
     /// Caller-reported authority basis, not a signature.
     pub basis: SourceReference,
 }
 impl CoordinationGrant {
-    /// Validate correspondence and required permission/mission scope.
+    /// Validate correspondence and required permission/task scope.
     pub fn check(
         &self,
         definition: &ProgramDefinition,
         permission: CoordinationPermission,
-        missions: &[TaskId],
+        tasks: &[TaskId],
     ) -> Result<(), ProgramError> {
         if self.program != definition.id
             || self.baseline != definition.revision
@@ -390,19 +390,19 @@ impl CoordinationGrant {
                 .iter()
                 .enumerate()
                 .any(|(i, p)| self.permissions[..i].contains(p))
-            || self.missions.len() > definition.graph.missions().len()
+            || self.tasks.len() > definition.graph.tasks().len()
             || self
-                .missions
+                .tasks
                 .iter()
                 .map(TaskId::as_str)
                 .collect::<BTreeSet<_>>()
                 .len()
-                != self.missions.len()
+                != self.tasks.len()
             || self
-                .missions
+                .tasks
                 .iter()
-                .any(|m| !definition.graph.missions().iter().any(|x| x.id() == m))
-            || missions.iter().any(|m| !self.missions.contains(m))
+                .any(|m| !definition.graph.tasks().iter().any(|x| x.id() == m))
+            || tasks.iter().any(|m| !self.tasks.contains(m))
         {
             return Err(ProgramError::Authority);
         }
@@ -435,19 +435,19 @@ pub struct Attempt {
     pub owner: ActorId,
     /// Baseline when claimed.
     pub baseline: ContractRevision,
-    /// Mission generation when claimed.
+    /// Task generation when claimed.
     pub generation: ContractRevision,
     /// Current metadata disposition.
     pub status: AttemptStatus,
     /// Original/reconciliation reference.
     pub basis: SourceReference,
 }
-/// A plan changes ordering only, never acceptance criteria, permissions or scope.
+/// An ordering plan changes ordering only, never acceptance criteria, permissions or scope.
 #[derive(Clone, PartialEq, Eq)]
-pub struct Plan {
-    /// Monotonic plan revision, independent of baseline revision.
+pub struct OrderingPlan {
+    /// Monotonic ordering-plan revision, independent of baseline revision.
     pub revision: ContractRevision,
-    /// Exact mission ordering; earlier entries have owner-declared precedence.
+    /// Exact task ordering; earlier entries have owner-declared precedence.
     pub order: Vec<TaskId>,
     /// Reason for the ordering, without universal numerical weights.
     pub basis: SourceReference,
@@ -458,10 +458,10 @@ pub struct ProgramState {
     definitions: Vec<ProgramDefinition>,
     readiness: ReadinessProjection,
     attempts: Vec<Attempt>,
-    plan: Option<Plan>,
+    ordering_plan: Option<OrderingPlan>,
 }
 impl ProgramState {
-    /// Construct the first accepted baseline. No mission is implicitly accepted.
+    /// Construct the first accepted baseline. No task is implicitly accepted.
     pub fn new(definition: ProgramDefinition) -> Result<Self, ProgramError> {
         if definition.predecessor.is_some() {
             return Err(ProgramError::Structure);
@@ -471,7 +471,7 @@ impl ProgramState {
             definitions: vec![definition],
             readiness,
             attempts: vec![],
-            plan: None,
+            ordering_plan: None,
         })
     }
     /// Current immutable baseline.
@@ -491,37 +491,45 @@ impl ProgramState {
         &self.attempts
     }
     /// Current ordering proposal.
-    pub fn plan(&self) -> Option<&Plan> {
-        self.plan.as_ref()
+    pub fn ordering_plan(&self) -> Option<&OrderingPlan> {
+        self.ordering_plan.as_ref()
     }
     /// Stage 1 always denies execution authority.
     pub fn authority(&self) -> ExecutionAuthority {
         ExecutionAuthority::Unavailable
     }
-    /// Change only a complete mission ordering with exact next plan revision.
-    pub fn set_plan(&mut self, grant: &CoordinationGrant, plan: Plan) -> Result<(), ProgramError> {
-        grant.check(self.definition(), CoordinationPermission::Plan, &plan.order)?;
+    /// Change only a complete task ordering with exact next ordering-plan revision.
+    pub fn set_ordering_plan(
+        &mut self,
+        grant: &CoordinationGrant,
+        ordering_plan: OrderingPlan,
+    ) -> Result<(), ProgramError> {
+        grant.check(
+            self.definition(),
+            CoordinationPermission::Plan,
+            &ordering_plan.order,
+        )?;
         let next = self
-            .plan
+            .ordering_plan
             .as_ref()
             .map_or(Some(1), |p| p.revision.get().checked_add(1));
-        if next != Some(plan.revision.get()) {
+        if next != Some(ordering_plan.revision.get()) {
             return Err(ProgramError::Stale);
         }
-        let ids: BTreeSet<_> = plan.order.iter().map(TaskId::as_str).collect();
-        if ids.len() != plan.order.len()
+        let ids: BTreeSet<_> = ordering_plan.order.iter().map(TaskId::as_str).collect();
+        if ids.len() != ordering_plan.order.len()
             || ids
                 != self
                     .definition()
                     .graph
-                    .missions()
+                    .tasks()
                     .iter()
                     .map(|m| m.id().as_str())
                     .collect()
         {
             return Err(ProgramError::Structure);
         }
-        self.plan = Some(plan);
+        self.ordering_plan = Some(ordering_plan);
         Ok(())
     }
     /// Apply a non-effectful graph notification under exact metadata scope.
@@ -534,53 +542,53 @@ impl ProgramState {
         if input.id().as_str().starts_with("program.") {
             return Err(ProgramError::IdentityConflict);
         }
-        let (permission, missions) = match input.event() {
-            Event::Signal { mission, .. } => (CoordinationPermission::Plan, vec![mission.clone()]),
+        let (permission, tasks) = match input.event() {
+            Event::Signal { task, .. } => (CoordinationPermission::Plan, vec![task.clone()]),
             Event::Artifact(r) => (
                 CoordinationPermission::Plan,
-                vec![r.producer().mission().clone()],
+                vec![r.producer().task().clone()],
             ),
             Event::Review(r) => {
                 let consumer = self
                     .definition()
                     .graph
-                    .missions()
+                    .tasks()
                     .iter()
-                    .find(|m| m.id() == r.scopes()[1].mission())
+                    .find(|m| m.id() == r.scopes()[1].task())
                     .ok_or(ProgramError::Missing)?;
                 if consumer.kind() != ConsumerKind::Preview {
                     return Err(ProgramError::EffectUnavailable);
                 }
                 (
                     CoordinationPermission::Review,
-                    r.scopes().iter().map(|s| s.mission().clone()).collect(),
+                    r.scopes().iter().map(|s| s.task().clone()).collect(),
                 )
             }
             Event::Invalidate { roots, .. } => (
                 CoordinationPermission::Review,
-                roots.iter().map(|s| s.mission().clone()).collect(),
+                roots.iter().map(|s| s.task().clone()).collect(),
             ),
             Event::Preconditions { scope, .. } => {
-                (CoordinationPermission::Plan, vec![scope.mission().clone()])
+                (CoordinationPermission::Plan, vec![scope.task().clone()])
             }
             Event::Capacity { .. } => (
                 CoordinationPermission::Plan,
                 self.definition()
                     .graph
-                    .missions()
+                    .tasks()
                     .iter()
                     .map(|m| m.id().clone())
                     .collect(),
             ),
-            // Mission acceptance is not a worker metadata report.
+            // Task acceptance is not a worker metadata report.
             Event::Status { .. } | Event::Unsupported(_) => {
                 return Err(ProgramError::EffectUnavailable);
             }
         };
-        grant.check(self.definition(), permission, &missions)?;
+        grant.check(self.definition(), permission, &tasks)?;
         let mut projection = self.readiness.clone();
         let report = projection.apply(input)?;
-        grant.check(self.definition(), permission, report.changed_missions())?;
+        grant.check(self.definition(), permission, report.changed_tasks())?;
         self.readiness = projection;
         Ok(report)
     }
@@ -599,11 +607,11 @@ impl ProgramState {
         grant.check(
             self.definition(),
             CoordinationPermission::Claim,
-            std::slice::from_ref(&increment.mission),
+            std::slice::from_ref(&increment.task),
         )?;
         if attempt.owner != grant.actor
             || attempt.baseline != self.definition().revision
-            || attempt.generation != self.readiness.scope(&increment.mission)?.generation()
+            || attempt.generation != self.readiness.scope(&increment.task)?.generation()
             || attempt.status != AttemptStatus::Claimed
         {
             return Err(ProgramError::Stale);
@@ -628,22 +636,22 @@ impl ProgramState {
                 .and_then(|d| d.increments.iter().find(|i| i.id == a.increment))
                 .ok_or(ProgramError::Structure)?;
             if old.id == increment.id
-                || old.mission == increment.mission
+                || old.task == increment.task
                 || old
-                    .resources
+                    .claim_scopes
                     .iter()
-                    .any(|r| increment.resources.contains(r))
+                    .any(|r| increment.claim_scopes.contains(r))
             {
                 return Err(ProgramError::Claimed);
             }
         }
-        let scope = self.readiness.scope(&increment.mission)?;
+        let scope = self.readiness.scope(&increment.task)?;
         self.readiness.apply(Notification::new(
             NotificationId::new(&format!("program.claim.{}", self.attempts.len()))?,
             self.definition().graph.reference().clone(),
             Event::Status {
                 scope,
-                status: MissionStatus::Active,
+                status: TaskStatus::Active,
                 source: attempt.basis.clone(),
             },
         )?)?;
@@ -679,7 +687,7 @@ impl ProgramState {
         grant.check(
             self.definition(),
             CoordinationPermission::Claim,
-            std::slice::from_ref(&increment.mission),
+            std::slice::from_ref(&increment.task),
         )?;
         if a.owner != grant.actor || a.generation != generation {
             return Err(ProgramError::Stale);
@@ -687,7 +695,7 @@ impl ProgramState {
         // Stale work may be cancelled to release metadata ownership, never reported as current.
         if status != AttemptStatus::Cancelled
             && (a.baseline != self.definition().revision
-                || self.readiness.scope(&increment.mission)?.generation() != generation)
+                || self.readiness.scope(&increment.task)?.generation() != generation)
         {
             return Err(ProgramError::Stale);
         }
@@ -747,19 +755,14 @@ impl ProgramState {
     }
     /// Amend an owner-accepted baseline. Only unchanged connected components may
     /// retain prior G1 inputs; changed contracts invalidate their causal closure.
-    /// Returns exact affected mission identities for inspection and requalification.
+    /// Returns exact affected task identities for inspection and requalification.
     pub fn amend(
         &mut self,
         grant: &CoordinationGrant,
         next: ProgramDefinition,
     ) -> Result<Vec<TaskId>, ProgramError> {
         let old = self.definition();
-        let all: Vec<_> = old
-            .graph
-            .missions()
-            .iter()
-            .map(|m| m.id().clone())
-            .collect();
+        let all: Vec<_> = old.graph.tasks().iter().map(|m| m.id().clone()).collect();
         grant.check(old, CoordinationPermission::Amend, &all)?;
         if next.id != old.id
             || next.predecessor != Some(old.revision)
@@ -780,22 +783,22 @@ impl ProgramState {
             return Err(ProgramError::Capacity);
         }
         // Stage 1 amendments preserve membership; owner-authorized scope expansion
-        // requires a separately constructed program, never an incidental plan edit.
+        // requires a separately constructed program, never an incidental ordering-plan edit.
         if old.workstreams != next.workstreams
             || old.increments.len() != next.increments.len()
             || old.increments.iter().any(|i| {
                 !next
                     .increments
                     .iter()
-                    .any(|n| n.id == i.id && n.mission == i.mission && n.resources == i.resources)
+                    .any(|n| n.id == i.id && n.task == i.task && n.claim_scopes == i.claim_scopes)
             })
         {
             return Err(ProgramError::Structure);
         }
-        for mission in next.graph.missions() {
-            let contract = mission.context().contract();
+        for task in next.graph.tasks() {
+            let contract = task.context().contract();
             if self.definitions.iter().any(|definition| {
-                definition.graph.missions().iter().any(|previous| {
+                definition.graph.tasks().iter().any(|previous| {
                     let prior = previous.context().contract();
                     prior.task().id() == contract.task().id()
                         && prior.revision() == contract.revision()
@@ -824,12 +827,12 @@ impl ProgramState {
         if old.outcome != next.outcome {
             affected.extend(all.iter().map(|m| m.as_str().to_owned()));
         }
-        for m in old.graph.missions() {
-            if next.graph.missions().iter().find(|n| n.id() == m.id()) != Some(m) {
+        for m in old.graph.tasks() {
+            if next.graph.tasks().iter().find(|n| n.id() == m.id()) != Some(m) {
                 affected.insert(m.id().as_str().to_owned());
             }
         }
-        if all.len() != next.graph.missions().len() {
+        if all.len() != next.graph.tasks().len() {
             return Err(ProgramError::Structure);
         }
         for e in old.graph.edges().iter().chain(next.graph.edges()) {
@@ -856,9 +859,9 @@ impl ProgramState {
         if !affected.is_empty()
             && old
                 .graph
-                .missions()
+                .tasks()
                 .iter()
-                .chain(next.graph.missions())
+                .chain(next.graph.tasks())
                 .any(|m| m.coverage() == DependencyCoverage::Unknown)
         {
             affected.extend(all.iter().map(|m| m.as_str().to_owned()));
@@ -866,11 +869,11 @@ impl ProgramState {
         let mut projection = ReadinessProjection::new(next.graph.clone())?;
         for input in self.readiness.notifications() {
             let keep = match input.event() {
-                Event::Signal { mission, .. } => !affected.contains(mission.as_str()),
+                Event::Signal { task, .. } => !affected.contains(task.as_str()),
                 Event::Artifact(r) => {
-                    !affected.contains(r.producer().mission().as_str())
+                    !affected.contains(r.producer().task().as_str())
                         && next.graph.edges().iter().any(|e| {
-                            e.producer() == r.producer().mission()
+                            e.producer() == r.producer().task()
                                 && e.requirement().artifact() == r.artifact()
                                 && e.requirement().kind() == r.kind()
                         })
@@ -878,13 +881,13 @@ impl ProgramState {
                 Event::Review(r) => r
                     .scopes()
                     .iter()
-                    .all(|s| !affected.contains(s.mission().as_str())),
+                    .all(|s| !affected.contains(s.task().as_str())),
                 Event::Preconditions { scope, .. } | Event::Status { scope, .. } => {
-                    !affected.contains(scope.mission().as_str())
+                    !affected.contains(scope.task().as_str())
                 }
-                Event::Invalidate { roots, .. } => roots
-                    .iter()
-                    .all(|s| !affected.contains(s.mission().as_str())),
+                Event::Invalidate { roots, .. } => {
+                    roots.iter().all(|s| !affected.contains(s.task().as_str()))
+                }
                 Event::Capacity { .. } => true,
                 _ => false,
             };

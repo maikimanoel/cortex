@@ -11,7 +11,7 @@ use cortex_core::{
 use cortex_evidence::program::{Command, CoordinationKernel, Operation};
 use cortex_storage::{
     history_store::{Access, StoreId, StoreKey},
-    program_store::{ProgramStore, Receipt},
+    program_store::{AdmissionReceipt, ProgramStore},
 };
 use serde_json::json;
 use std::{
@@ -46,15 +46,15 @@ pub struct DomainOperations {
 /// the controller; a returned nonce is neither cleanup nor engineering acceptance.
 pub struct DomainRun {
     /// Exact admitted creation receipt, when established.
-    pub creation: Option<Receipt>,
+    pub creation: Option<AdmissionReceipt>,
     /// Exact retained incarnation publication, when established.
-    pub binding: Option<Receipt>,
+    pub binding: Option<AdmissionReceipt>,
     /// Exact commit-before-payload receipt, when established.
-    pub release: Option<Receipt>,
+    pub release: Option<AdmissionReceipt>,
     /// Captured fixed public nonce, absent if unresolved.
     pub nonce: Option<String>,
     /// Result observation receipt, independently from closure.
-    pub report: Option<Receipt>,
+    pub report: Option<AdmissionReceipt>,
     /// Original redacted refusal/interruption.
     pub diagnostic: Option<DomainDiagnostic>,
     /// Existing uncertainty/release means this invocation performed no creation.
@@ -207,8 +207,8 @@ pub struct PreparedNonceDomain {
     intent: DomainIntent,
     ids: DomainOperations,
     observation: DomainBindingObservation,
-    creation: Receipt,
-    binding: Receipt,
+    creation: AdmissionReceipt,
+    binding: AdmissionReceipt,
     nonce: String,
     start: Instant,
     end: Instant,
@@ -704,7 +704,7 @@ pub fn observe_nonce_domain_closure(
     backend: &mut SystemdNonceDomain,
     ids: &DomainOperations,
     observation_id: OperationId,
-) -> Result<Receipt, DomainDiagnostic> {
+) -> Result<AdmissionReceipt, DomainDiagnostic> {
     observe_closure(store, key, backend, ids, observation_id)
 }
 fn observe_closure<M: DomainManager>(
@@ -713,7 +713,7 @@ fn observe_closure<M: DomainManager>(
     backend: &mut M,
     ids: &DomainOperations,
     observation_id: OperationId,
-) -> Result<Receipt, DomainDiagnostic> {
+) -> Result<AdmissionReceipt, DomainDiagnostic> {
     let start = Instant::now();
     let end = start + Duration::from_secs(1);
     let kernel = store
@@ -794,15 +794,16 @@ fn observe_closure<M: DomainManager>(
 
 /// Capture a bounded recursive native tree after durable cancellation. Matched
 /// traversals are non-atomic facts; helpers outside the tree, retained streams,
-/// snapshot exclusion and final consumption remain unproven. No host effect,
-/// receipt/closure, settlement, adoption or retry is performed.
+/// snapshot exclusion and final consumption remain unproven. This publishes an
+/// observation and returns its journal admission receipt; it performs no host
+/// mutation, closure, settlement, adoption or retry.
 pub fn observe_nonce_domain_closure_tree(
     store: &ProgramStore,
     key: &StoreKey,
     backend: &mut SystemdNonceDomain,
     ids: &DomainOperations,
     observation_id: OperationId,
-) -> Result<Receipt, DomainDiagnostic> {
+) -> Result<AdmissionReceipt, DomainDiagnostic> {
     observe_closure_tree(store, key, backend, ids, observation_id)
 }
 fn observe_closure_tree<M: DomainManager>(
@@ -811,7 +812,7 @@ fn observe_closure_tree<M: DomainManager>(
     backend: &mut M,
     ids: &DomainOperations,
     observation_id: OperationId,
-) -> Result<Receipt, DomainDiagnostic> {
+) -> Result<AdmissionReceipt, DomainDiagnostic> {
     let start = Instant::now();
     let end = start + Duration::from_secs(1);
     let kernel = store
@@ -900,7 +901,7 @@ pub fn cancel_prepared_nonce_domain(
     backend: &mut SystemdNonceDomain,
     prepared: PreparedNonceDomain,
     operation: Operation,
-) -> Result<Receipt, DomainDiagnostic> {
+) -> Result<AdmissionReceipt, DomainDiagnostic> {
     cancel_prepared(store, key, backend, prepared, operation)
 }
 fn cancel_prepared<M: DomainManager>(
@@ -909,7 +910,7 @@ fn cancel_prepared<M: DomainManager>(
     manager: &mut M,
     prepared: PreparedNonceDomain,
     operation: Operation,
-) -> Result<Receipt, DomainDiagnostic> {
+) -> Result<AdmissionReceipt, DomainDiagnostic> {
     let Command::Domain(event) = &operation.command else {
         return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Contract));
     };
@@ -945,7 +946,7 @@ pub fn cancel_nonce_domain(
     key: &StoreKey,
     backend: &mut SystemdNonceDomain,
     operation: Operation,
-) -> Result<Receipt, DomainDiagnostic> {
+) -> Result<AdmissionReceipt, DomainDiagnostic> {
     cancel_domain(store, key, backend, operation)
 }
 fn cancel_domain<M: DomainManager>(
@@ -953,7 +954,7 @@ fn cancel_domain<M: DomainManager>(
     key: &StoreKey,
     backend: &mut M,
     operation: Operation,
-) -> Result<Receipt, DomainDiagnostic> {
+) -> Result<AdmissionReceipt, DomainDiagnostic> {
     let Command::Domain(event) = &operation.command else {
         return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Contract));
     };

@@ -213,11 +213,11 @@ impl<'a> SourceSetView<'a> {
     }
 }
 
-/// Qualify against a supplied genuinely later capture. No I/O or assessment.
+/// Inspect validity against a supplied genuinely later capture. No I/O or assessment.
 /// Matching candidate/profile and fully resolved declared-set coverage are required
 /// for scoped Current validity. New candidates/profiles conservatively invalidate;
 /// incomplete or missing coverage cannot establish Current.
-pub fn qualify<'a>(
+pub fn inspect_validity<'a>(
     set: &'a ReferenceSet,
     latest: Option<&CandidateObservation>,
 ) -> Result<SourceSetView<'a>, SourceSetExtractionError> {
@@ -233,7 +233,9 @@ pub fn qualify<'a>(
         Some(Validity::Stale)
     } else {
         match &correspondence {
-            BindingDecision::Compatible(_) if set.complete() => Some(Validity::Current),
+            BindingDecision::Compatible(_) if set.all_references_resolved() => {
+                Some(Validity::Current)
+            }
             BindingDecision::Incompatible(_) | BindingDecision::Stale(_) => Some(Validity::Stale),
             _ => None,
         }
@@ -246,7 +248,7 @@ pub fn qualify<'a>(
     })
 }
 
-/// Obtain an actual new bounded capture, then qualify without relabeling the set.
+/// Obtain an actual new bounded capture, then inspect validity without relabeling the set.
 /// IDs reserved for extraction cannot substitute for post-extraction reinspection.
 pub fn reinspect<'a>(
     repo: &Path,
@@ -255,7 +257,7 @@ pub fn reinspect<'a>(
 ) -> Result<SourceSetView<'a>, SourceSetExtractionError> {
     let latest = crate::inspect_candidate(repo, set.candidate().observation().contract(), id)
         .map_err(ExtractionError::Inspection)?;
-    qualify(set, Some(&latest))
+    inspect_validity(set, Some(&latest))
 }
 
 #[cfg(test)]

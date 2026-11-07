@@ -150,8 +150,8 @@ pub struct ReleaseInput {
 /// This is structural coverage over supplied contracts, not semantic discovery.
 #[derive(Clone, PartialEq, Eq)]
 pub struct NonImpact {
-    /// Exact unchanged mission identities.
-    pub missions: Vec<TaskId>,
+    /// Exact unchanged task identities.
+    pub tasks: Vec<TaskId>,
     /// Explicit operator-supplied coverage/rationale reference.
     pub basis: SourceReference,
 }
@@ -202,7 +202,7 @@ pub enum Command {
     /// Support examination and optional per-edge non-effectful release.
     Release(Box<ReleaseInput>),
     /// Ordering only; never an acceptance-baseline mutation.
-    Plan(Plan),
+    OrderingPlan(OrderingPlan),
     /// Exclusive declared responsibility claim.
     Claim(Attempt),
     /// Report, unknown-state reconciliation or cancellation.
@@ -392,7 +392,7 @@ impl CoordinationKernel {
                 p.request().id == scope.package && p.request().revision == scope.package_revision
             })
             .ok_or(ProgramError::Missing)?;
-        if package.request().mission != scope.mission
+        if package.request().task != scope.task
             || package.request().baseline != scope.baseline
             || package.request().generation != scope.generation
         {
@@ -503,9 +503,9 @@ impl CoordinationKernel {
         &self,
         g: &CoordinationGrant,
         p: CoordinationPermission,
-        missions: &[TaskId],
+        tasks: &[TaskId],
     ) -> Result<(), KernelError> {
-        Ok(g.check(self.state.definition(), p, missions)?)
+        Ok(g.check(self.state.definition(), p, tasks)?)
     }
     fn record_mut(&mut self, id: &ObservationId) -> Result<&mut EvidenceRecord, KernelError> {
         self.records
@@ -531,7 +531,7 @@ impl CoordinationKernel {
                         .state
                         .definition()
                         .graph()
-                        .missions()
+                        .tasks()
                         .iter()
                         .map(|m| m.id().clone())
                         .collect::<Vec<_>>(),
@@ -573,7 +573,7 @@ impl CoordinationKernel {
                             .state
                             .definition()
                             .graph()
-                            .missions()
+                            .tasks()
                             .iter()
                             .map(|m| m.id().clone())
                             .collect::<Vec<_>>(),
@@ -682,7 +682,7 @@ impl CoordinationKernel {
                     &review
                         .scopes()
                         .iter()
-                        .map(|s| s.mission().clone())
+                        .map(|s| s.task().clone())
                         .collect::<Vec<_>>(),
                 )?;
                 let examinations: Vec<_> = r
@@ -741,7 +741,7 @@ impl CoordinationKernel {
                     released,
                 });
             }
-            Command::Plan(p) => self.state.set_plan(g, p.clone())?,
+            Command::OrderingPlan(p) => self.state.set_ordering_plan(g, p.clone())?,
             Command::Claim(a) => self.state.claim(g, a.clone())?,
             Command::Attempt {
                 id,
@@ -772,13 +772,13 @@ impl CoordinationKernel {
                     .state
                     .definition()
                     .graph()
-                    .missions()
+                    .tasks()
                     .iter()
                     .filter(|m| !affected.contains(m.id()))
                     .map(|m| m.id().as_str())
                     .collect();
                 actual.sort();
-                let mut declared: Vec<_> = non_impact.missions.iter().map(TaskId::as_str).collect();
+                let mut declared: Vec<_> = non_impact.tasks.iter().map(TaskId::as_str).collect();
                 declared.sort();
                 if actual != declared {
                     return Err(ProgramError::Structure.into());
@@ -817,7 +817,7 @@ impl CoordinationKernel {
                 self.check(
                     g,
                     CoordinationPermission::Plan,
-                    std::slice::from_ref(&package.request().mission),
+                    std::slice::from_ref(&package.request().task),
                 )?;
                 let prepared = cortex_core::program::executor::prepare(
                     &self.state,
@@ -832,7 +832,7 @@ impl CoordinationKernel {
                 self.check(
                     g,
                     CoordinationPermission::Plan,
-                    std::slice::from_ref(&p.mission),
+                    std::slice::from_ref(&p.task),
                 )?;
                 if self.packages.iter().any(|old| old.request().id == p.id) {
                     return Err(ProgramError::IdentityConflict.into());
@@ -866,13 +866,13 @@ impl CoordinationKernel {
                 .ok_or(OperationalError::UnknownResource(resource))?;
             let cumulative = policy.cumulative.contains(&resource);
             let dimension = match (resource, cumulative) {
-                (Resource::TimeMillis, true) => Some(Consumption::ElapsedMillis),
+                (Resource::ElapsedMillis, true) => Some(Consumption::ElapsedMillis),
                 (Resource::OutputBytes, true) => Some(Consumption::OutputBytes),
                 (
-                    Resource::Workers
-                    | Resource::Builds
-                    | Resource::Tests
-                    | Resource::CpuMillis
+                    Resource::WorkerSlots
+                    | Resource::BuildJobs
+                    | Resource::TestProcesses
+                    | Resource::CpuMillicores
                     | Resource::RamBytes
                     | Resource::DiskBytes,
                     false,
@@ -978,17 +978,17 @@ impl CoordinationKernel {
         {
             return Err(ProgramError::EffectUnavailable.into());
         }
-        let missions = match event {
+        let tasks = match event {
             EffectEvent::Policy(_) => self
                 .state
                 .definition()
                 .graph()
-                .missions()
+                .tasks()
                 .iter()
                 .map(|m| m.id().clone())
                 .collect(),
-            EffectEvent::Grant(g) => vec![g.scope.mission.clone()],
-            EffectEvent::Reserve { intent, .. } => vec![intent.scope.mission.clone()],
+            EffectEvent::Grant(g) => vec![g.scope.task.clone()],
+            EffectEvent::Reserve { intent, .. } => vec![intent.scope.task.clone()],
             EffectEvent::Revoke { grant, .. } => vec![
                 self.fixture_effects
                     .grants()
@@ -996,7 +996,7 @@ impl CoordinationKernel {
                     .find(|g| &g.id == grant)
                     .ok_or(ProgramError::Missing)?
                     .scope
-                    .mission
+                    .task
                     .clone(),
             ],
             EffectEvent::Dispatch { scope, .. }
@@ -1006,9 +1006,9 @@ impl CoordinationKernel {
             | EffectEvent::Report { scope, .. }
             | EffectEvent::Unknown { scope, .. }
             | EffectEvent::Cancel { scope, .. }
-            | EffectEvent::Reconcile { scope, .. } => vec![scope.mission.clone()],
+            | EffectEvent::Reconcile { scope, .. } => vec![scope.task.clone()],
         };
-        self.check(grant, CoordinationPermission::Review, &missions)?;
+        self.check(grant, CoordinationPermission::Review, &tasks)?;
         let scope = match event {
             EffectEvent::Reserve { intent, .. } => Some(&intent.scope),
             EffectEvent::Dispatch { scope, .. } | EffectEvent::PrepareProcess { scope, .. } => {
@@ -1026,7 +1026,7 @@ impl CoordinationKernel {
                 })
                 .ok_or(ProgramError::Missing)?;
             let request = package.request();
-            if request.mission != scope.mission
+            if request.task != scope.task
                 || request.baseline != scope.baseline
                 || request.generation != scope.generation
             {
@@ -1058,7 +1058,7 @@ impl CoordinationKernel {
             let request = prepared.package().request();
             if request.id != scope.package
                 || request.revision != scope.package_revision
-                || request.mission != scope.mission
+                || request.task != scope.task
                 || request.baseline != scope.baseline
                 || request.generation != scope.generation
                 || prepared.bytes().len() as u64 != spec.input_len
@@ -1109,7 +1109,7 @@ impl CoordinationKernel {
             let scope = self
                 .state
                 .readiness()
-                .scope(r.contract.scope().consumer().mission())?;
+                .scope(r.contract.scope().consumer().task())?;
             if !roots.contains(&scope) {
                 roots.push(scope);
             }

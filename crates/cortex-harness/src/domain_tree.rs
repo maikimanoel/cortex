@@ -442,4 +442,42 @@ mod tests {
         );
         assert!(capture(&f.0, m.dev(), m.ino(), "/owned", Instant::now(), process).is_err());
     }
+    #[test]
+    fn finite_collector_accepts_exact_node_member_and_depth_bounds() {
+        let f = Fixture::new();
+        f.node("", false, "");
+        for n in 0..31 {
+            f.node(&format!("c{n}"), false, "");
+        }
+        assert_eq!(f.capture(process).unwrap().len(), 32);
+        f.node("c31", false, "");
+        assert_eq!(
+            f.capture(process).err().unwrap().cause,
+            DomainCause::Capacity
+        );
+
+        let f = Fixture::new();
+        let pids = (1..=64).map(|n| format!("{n}\n")).collect::<String>();
+        f.node("", true, &pids);
+        assert_eq!(f.capture(process).unwrap()[0].members.len(), 64);
+        f.node("", true, &format!("{pids}65\n"));
+        assert!(f.capture(process).is_err());
+
+        let f = Fixture::new();
+        f.node("", false, "");
+        let mut path = String::new();
+        for _ in 0..8 {
+            if !path.is_empty() {
+                path.push('/');
+            }
+            path.push('a');
+            f.node(&path, false, "");
+        }
+        assert_eq!(f.capture(process).unwrap().len(), 9);
+        f.node(&format!("{path}/a"), false, "");
+        assert_eq!(
+            f.capture(process).err().unwrap().cause,
+            DomainCause::Capacity
+        );
+    }
 }

@@ -52,7 +52,7 @@ not a record that a particular candidate passed.
 
 | Existing responsibility | Stage 1 bounded implementation | Still outside this boundary |
 | --- | --- | --- |
-| CAP-CORE-003 | Immutable accepted program/mission baselines, exact metadata grants, plans, attempts and claims | Authenticated/effective operational permission, host fencing |
+| CAP-CORE-003 | Immutable accepted program/task baselines, exact metadata grants, plans, attempts and claims | Authenticated/effective operational permission, host fencing |
 | CAP-WFL-001 / CAP-MEM-001 / CAP-SEC-002 | Separate encrypted program/Evidence journal, transactional expected-version admission, replay and uncertain metadata-commit reconciliation | External effect intent/dispatch/retry protocol, broader privacy/retention policies |
 | CAP-WFL-004 / CAP-EVD-003 | G1/A-1-backed non-effectful per-consumer decisions, amendments, declared non-impact and retained causal invalidation | Trusted operational release, actual worker scheduling, protected integration |
 | CAP-WFL-002 / CAP-CTX-001 / CAP-CTX-002 | Exact explicit-source instruction packages and contextual method proposals | General retrieval/portable context, automatic qualification/adoption, executor translation/submission |
@@ -391,15 +391,19 @@ provides explicit committed JSON source extraction, exact byte spans/local-point
 relationships, borrowed incoming queries and contextual current/stale inspection.
 The additive source-set interface binds 1–8 explicitly selected files as one batch
 and resolves supported relative document references only within that set. Original
-single-source targets/completeness remain unchanged; no automatic discovery occurs.
+single-source targets/reference-resolution results remain unchanged; no automatic discovery occurs.
 It reuses Core binding/provenance and Evidence validity, with extracted/unverified
 relations only. No Rust-only assumption, inference, validation, knowledge persistence
 or graph mutation is implemented. Producer-owned refresh reacquires every selected
 blob, reuses parsing only for exact supported path/bytes/dependencies and publishes
 a freshly bound set with rebuilt resolution. Returned errors retain the old cache.
 The borrowed snapshot-delta query reports byte/node/reference changes under exact
-declared profile compatibility, not semantic non-impact or freshness. Multi-language
-parsing and broader dependency-sensitive incremental indexing remain unfinished.
+declared profile compatibility, not semantic non-impact or freshness. The bounded
+[Rust](../architecture/knowledge-rust.md), [Markdown](../architecture/knowledge-markdown.md)
+and [Cargo manifest](../architecture/knowledge-cargo-manifest.md) adapters add
+lexical source profiles using the same Core model. They do not add those languages
+to the JSON-only source-set resolver. Broader language analysis and
+dependency-sensitive incremental indexing remain unfinished.
 **Verification mechanisms:** [Core invariants](../../crates/cortex-core/tests/knowledge.rs),
 [parser fixtures](../../crates/cortex-cli/src/knowledge/json.rs) and
 [real-Git queries](../../crates/cortex-cli/tests/knowledge.rs) cover actual references,
@@ -888,7 +892,7 @@ Git merge or branch-local `PASS` does not establish semantic compatibility or
 integrated `PASS`.
 
 The [native Rust control-plane contract](../architecture/governed-parallel-engineering.md)
-refines this capability: versioned program/workstream/mission contracts, typed
+refines this capability: versioned program/workstream/task contracts, typed
 artifact dependencies, consumer-specific readiness levels and evidence-gated edge
 releases. Signal, DependencyRelease and ResponsibilityHandoff have distinct meanings.
 Eligibility is recomputed on relevant events; an accepted intermediate artifact may
@@ -1431,7 +1435,7 @@ tests. **Decisions:** DEC-005/006/007; no complete command tree selected now.
 **Name:** Workspace development and bounded CI validation.
 **Status:** IMPLEMENTED.
 **Owner:** CLI/delivery. **Target:** 001, maintained in every increment.
-**Dependencies:** The three workspace crates and installed pinned toolchain.
+**Dependencies:** The workspace crates and installed pinned toolchain.
 
 **Functional contract:** Provide a shared Cargo workspace/lockfile, pinned Rust
 toolchain, unpublished packages, documented local verification commands, and a

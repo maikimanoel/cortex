@@ -13,7 +13,9 @@ use cortex_core::{
 use cortex_evidence::program::{Command as WorkflowCommand, CoordinationKernel, Operation};
 use cortex_storage::{
     history_store::{Access, Completion, StoreKey},
-    program_store::{AdmissionFailure, ProgramStore, ProgramStoreError, Receipt, Reconciliation},
+    program_store::{
+        AdmissionFailure, AdmissionReceipt, ProgramStore, ProgramStoreError, Reconciliation,
+    },
 };
 use std::{
     error::Error,
@@ -69,15 +71,15 @@ pub struct IdentityCaptureIds {
 /// reconciles resource reservations or releases an engineering dependency.
 pub struct RunResult {
     /// Exact durable dispatch receipt; duplicates performed no launch.
-    pub dispatch: Receipt,
+    pub dispatch: AdmissionReceipt,
     /// Positive spawn observation receipt, when durably retained.
-    pub started: Option<Receipt>,
+    pub started: Option<AdmissionReceipt>,
     /// Committed opt-in identity checkpoint, if its exact receipt was confirmed.
-    pub identity_checkpoint: Option<Receipt>,
+    pub identity_checkpoint: Option<AdmissionReceipt>,
     /// Final observation, including unknown or interrupted cleanup.
     pub observation: Option<ProcessObservation>,
     /// Final observation receipt, when durably retained.
-    pub recorded: Option<Receipt>,
+    pub recorded: Option<AdmissionReceipt>,
     /// Original recording failure; an unrecorded observation must be reconciled.
     pub recording_failure: Option<AdmissionFailure>,
     /// Exact rejected stale-revision appends, retained before any bounded repair.
@@ -93,7 +95,7 @@ pub struct ReconciledReceipt {
     /// Original uncertainty, preserved rather than relabeled as success.
     pub failure: AdmissionFailure,
     /// Later exact reconciliation of that same operation.
-    pub receipt: Receipt,
+    pub receipt: AdmissionReceipt,
 }
 
 /// Private-input-safe boundary refusal. An error before dispatch confers no
@@ -300,8 +302,9 @@ pub fn inspect_fixture(
             | Control::StructuredOutput
             | Control::Timeout
             | Control::Cancellation
-            | Control::Resource(Resource::TimeMillis | Resource::OutputBytes | Resource::Workers) =>
-                {}
+            | Control::Resource(
+                Resource::ElapsedMillis | Resource::OutputBytes | Resource::WorkerSlots,
+            ) => {}
             other => return Err(HarnessError::Unsupported(other)),
         }
     }
@@ -1113,7 +1116,7 @@ impl ReceiptWriter<'_> {
         id: &OperationId,
         observation: &ProcessObservation,
         tick: u64,
-    ) -> Result<Receipt, AdmissionFailure> {
+    ) -> Result<AdmissionReceipt, AdmissionFailure> {
         let Self {
             store,
             key,

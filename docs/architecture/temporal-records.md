@@ -430,7 +430,7 @@ were assessed, not implemented as additional backends.
 | --- | --- | --- | --- |
 | Framed append journal | Implement framing/integrity checks, synchronization, partial-tail recognition, exact-prefix replay and exclusion correctly | Deletion needs a qualified rewrite/compaction of segments and copies; headers/codecs need explicit evolution | Small I/O surface but substantial custom crash/recovery and compaction logic; standard-library use does not remove those obligations |
 | Complete snapshot with atomic replacement | Write/validate/synchronize a new bounded image, replace under exclusion and synchronize required directory metadata; distinguish pre/post-replacement recovery | Simpler whole-history reconstruction, but old/temp images are additional protected copies; every admission rewrites the image | Plausible small-store alternative; host-specific replacement/locking and recovery protocol remain application responsibilities |
-| Local SQLite transaction store | Validate through Core inside serialized admission; retain explicit ordinals; qualify journal/sync settings, error mapping and recovery | Whole-store removal includes engine sidecars/temp data; row deletion alone is not physical erasure; codec/version policy remains CORTEX-owned | Adds a reviewed Rust binding/native engine and build provenance obligations, while delegating page transactions/locking/recovery to one existing engine |
+| Local SQLite transaction store | Validate through Core inside serialized admission; retain explicit ordinals; qualify journal/sync settings, error mapping and recovery | Whole-store removal includes engine sidecars/temp data; row deletion alone is not physical erasure; codec/version policy remains Cortex-owned | Adds a reviewed Rust binding/native engine and build provenance obligations, while delegating page transactions/locking/recovery to one existing engine |
 
 **Selected initial direction:** SQLite via rusqlite with stable bundled SQLCipher
 Community and system OpenSSL 3, rollback journaling (`DELETE`) and
@@ -442,7 +442,7 @@ intact until authorized recovery/removal.
 
 The [accepted decision](0002-durable-history.md) records exact qualified versions,
 key handling, Linux constraints, dependency/license costs and reopening conditions.
-Selecting an engine delegates page recovery, not CORTEX's admission rules. No
+Selecting an engine delegates page recovery, not Cortex's admission rules. No
 interchangeable backend framework or public persistence schema follows.
 
 ### Persistence acceptance and remaining scope

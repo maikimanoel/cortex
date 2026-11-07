@@ -390,7 +390,7 @@ impl OwnedScopeSpec {
             || self.cpu_time_ms == 0
             || self.cancellation_grace_ms == 0
             || self.escalation_ms == 0
-            || self.cpu_capacity_millis().is_none()
+            || self.cpu_capacity_millicores().is_none()
             || self.elapsed_envelope_ms(process).is_none()
             || self.cpu_time_ms.checked_mul(1000).is_none()
         {
@@ -431,7 +431,7 @@ impl OwnedScopeSpec {
     }
     /// Rounded-up milli-CPU capacity required for the requested quota ratio.
     /// This is never cumulative CPU execution time.
-    pub fn cpu_capacity_millis(&self) -> Option<u64> {
+    pub fn cpu_capacity_millicores(&self) -> Option<u64> {
         let n = self.controls.cpu_quota_us.checked_mul(1000)?;
         (self.controls.cpu_period_us > 0).then(|| n.div_ceil(self.controls.cpu_period_us))
     }

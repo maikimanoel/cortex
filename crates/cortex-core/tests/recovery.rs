@@ -40,7 +40,7 @@ fn genuine_pre_spawn_refusal_is_a_candidate_not_an_automatic_refund() {
     assert!(v.reservation_held);
     assert!(p.has_pending_attempt(&s.attempt));
     assert_eq!(
-        p.accounted(cortex_core::program::scheduling::Resource::Workers)
+        p.accounted(cortex_core::program::scheduling::Resource::WorkerSlots)
             .unwrap(),
         1
     );

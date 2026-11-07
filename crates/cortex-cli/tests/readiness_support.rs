@@ -127,11 +127,11 @@ impl Fixture {
         let consumer = contract(repo, "consumer");
         let verification = contract(repo, "verification");
         let p = profile(repo);
-        let missions = [&producer, &consumer]
+        let tasks = [&producer, &consumer]
             .into_iter()
             .map(|c| {
-                Mission::new(
-                    MissionContext::new(c.clone(), Some(capture(repo, c, 1))).unwrap(),
+                Task::new(
+                    TaskContext::new(c.clone(), Some(capture(repo, c, 1))).unwrap(),
                     ConsumerKind::Preview,
                     DependencyCoverage::DeclaredComplete,
                 )
@@ -157,7 +157,7 @@ impl Fixture {
         let projection = ReadinessProjection::new(
             DependencyGraph::new(
                 GraphReference::new(GraphId::new("actual-query-fixture").unwrap(), revision(1)),
-                missions,
+                tasks,
                 vec![edge],
                 GraphLimits::new(2, 1, 16, 128, 4_000_000).unwrap(),
             )

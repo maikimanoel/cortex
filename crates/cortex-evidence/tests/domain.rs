@@ -22,7 +22,7 @@ fn unknown_closure_releases_covered_capacity_once_but_keeps_debt_and_disk() {
     let p = k.domains().unwrap();
     let r = p.domain(&i.id).unwrap();
     assert_eq!(r.outcome, HistoricalOutcome::Unknown);
-    assert!(!r.holds(Resource::Workers));
+    assert!(!r.holds(Resource::WorkerSlots));
     assert!(r.holds(Resource::DiskBytes));
     assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
     let j = setup(&mut k, "D");
@@ -88,7 +88,7 @@ fn measured_consumption_and_closed_capacity_allow_independent_next_work() {
             at: 5,
         },
     );
-    assert_eq!(k.domains().unwrap().held(Resource::Workers), Ok(1));
+    assert_eq!(k.domains().unwrap().held(Resource::WorkerSlots), Ok(1));
     assert_eq!(k.domains().unwrap().held(Resource::DiskBytes), Ok(64));
     assert_eq!(
         k.domains()
@@ -122,7 +122,7 @@ fn global_pool_refuses_two_programs_double_allocating() {
     assert!(matches!(
         k.admit(op),
         Err(KernelError::Domain(DomainError::Capacity(
-            Resource::Workers
+            Resource::WorkerSlots
         )))
     ));
     assert_eq!(k.domains().unwrap().domains().len(), 1);
@@ -186,7 +186,7 @@ fn stale_receipts_missing_helpers_and_wrong_epochs_never_release() {
         );
         assert!(k.admit(op).is_err());
     }
-    assert_eq!(k.domains().unwrap().held(Resource::Workers), Ok(1));
+    assert_eq!(k.domains().unwrap().held(Resource::WorkerSlots), Ok(1));
 }
 #[test]
 fn admin_disposition_and_cancel_never_claim_cleanup() {
@@ -214,7 +214,7 @@ fn admin_disposition_and_cancel_never_claim_cleanup() {
     let r = k.domains().unwrap().domain(&i.id).unwrap();
     assert_eq!(r.outcome, HistoricalOutcome::Unknown);
     assert_eq!(r.phase, DomainPhase::Bound);
-    assert!(r.holds(Resource::Workers));
+    assert!(r.holds(Resource::WorkerSlots));
     let op = domain_operation(
         &k,
         "late",
@@ -249,7 +249,7 @@ fn cancellation_before_creation_cannot_be_restarted_and_refunds_only_future_allo
     let r = k.domains().unwrap().domain(&i.id).unwrap();
     assert_eq!(r.phase, DomainPhase::CancelledBeforeCreate);
     assert_eq!(r.outcome, HistoricalOutcome::NotDispatched);
-    assert!(!r.holds(Resource::Workers));
+    assert!(!r.holds(Resource::WorkerSlots));
     assert_eq!(
         r.measured_consumption(Consumption::CpuExecutionMillis),
         None
@@ -447,7 +447,7 @@ fn exact_recovered_closure_after_lost_identity_and_revocation_never_reopens_payl
     assert_eq!(r.outcome, HistoricalOutcome::Unknown);
     assert_eq!(r.phase, DomainPhase::Closed);
     assert!(r.cancelled);
-    assert_eq!(k.domains().unwrap().held(Resource::Workers), Ok(0));
+    assert_eq!(k.domains().unwrap().held(Resource::WorkerSlots), Ok(0));
     assert!(k.check_domain_current(&i.id, 6).is_err());
     let j = setup(&mut k, "D");
     event(
@@ -506,7 +506,7 @@ fn member_aggregate_capacity_is_not_reinterpreted_as_a_per_attempt_limit() {
     assert!(matches!(
         k.admit(op),
         Err(KernelError::Operational(OperationalError::ResourceLimit(
-            Resource::Workers
+            Resource::WorkerSlots
         )))
     ));
     let j = add_member(&mut k, "independent-member");
@@ -515,7 +515,7 @@ fn member_aggregate_capacity_is_not_reinterpreted_as_a_per_attempt_limit() {
         "independent",
         DomainEvent::Reserve { intent: j, at: 1 },
     );
-    assert_eq!(k.domains().unwrap().held(Resource::Workers), Ok(2));
+    assert_eq!(k.domains().unwrap().held(Resource::WorkerSlots), Ok(2));
 }
 #[test]
 fn cumulative_member_output_requires_exact_shared_consumption_budget() {
@@ -607,7 +607,7 @@ fn observed_binding_retains_facts_without_release_or_resource_refund() {
     assert!(r.binding_observation.as_ref() == Some(&observation));
     assert_eq!(r.phase, DomainPhase::Bound);
     assert_eq!(r.outcome, HistoricalOutcome::Unknown);
-    assert!(r.holds(Resource::Workers));
+    assert!(r.holds(Resource::WorkerSlots));
     assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
     assert!(r.closure.is_none());
     let duplicate = domain_operation(
@@ -739,7 +739,7 @@ fn cancellation_and_revocation_before_observed_binding_hold_identity_and_release
         let r = k.domains().unwrap().domain(&i.id).unwrap();
         assert_eq!(r.phase, DomainPhase::CreateUncertain);
         assert!(r.binding_observation.is_none() && r.identity.is_none());
-        assert!(r.holds(Resource::Workers));
+        assert!(r.holds(Resource::WorkerSlots));
     }
 }
 
@@ -759,7 +759,7 @@ fn partial_closure_readback_preserves_unknown_holds_and_final_debt() {
     let r = k.domains().unwrap().domain(&i.id).unwrap();
     assert_eq!(r.outcome, HistoricalOutcome::Unknown);
     assert_eq!(r.cancelled_at, Some(4));
-    assert!(r.holds(Resource::Workers));
+    assert!(r.holds(Resource::WorkerSlots));
     assert!(r.holds(Resource::RamBytes));
     assert!(r.holds(Resource::DiskBytes));
     assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
@@ -1002,7 +1002,7 @@ fn recursive_capture_retains_hidden_descendant_without_closure_or_final_usage() 
         assert!(record.closure_inspection().missing.contains(&gap));
     }
     assert_eq!(record.outcome, HistoricalOutcome::Unknown);
-    assert!(record.closure.is_none() && record.holds(Resource::Workers));
+    assert!(record.closure.is_none() && record.holds(Resource::WorkerSlots));
     assert!(record.unresolved_consumption(Consumption::CpuExecutionMillis));
     let next = setup(&mut k, "D");
     let op = domain_operation(
@@ -1019,7 +1019,7 @@ fn recursive_capture_retains_hidden_descendant_without_closure_or_final_usage() 
         matches!(
             &result,
             Err(KernelError::Operational(OperationalError::ResourceLimit(
-                Resource::Workers
+                Resource::WorkerSlots
             )))
         ),
         "unexpected refusal: {result:?}"
@@ -1144,7 +1144,7 @@ fn empty_recursive_capture_still_requires_stream_snapshot_and_final_measurement_
     let record = k.domains().unwrap().domain(&i.id).unwrap();
     assert_eq!(record.closure_inspection().missing.len(), 5);
     assert!(
-        record.holds(Resource::Workers)
+        record.holds(Resource::WorkerSlots)
             && record.unresolved_consumption(Consumption::CpuExecutionMillis)
     );
     assert!(record.closure.is_none());

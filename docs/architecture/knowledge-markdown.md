@@ -104,7 +104,7 @@ immutable `ReferenceIndex`. Failure publishes no partial index. Sequences n/n+1
 identify captures; n+2 identifies extraction, with checked arithmetic. The caller
 supplies IDs and recording time; these are unauthenticated assertions.
 
-`qualify` accepts a supplied later observation; `reinspect` performs actual Git
+`inspect_validity` accepts a supplied later observation; `reinspect` performs actual Git
 inspection. Matching candidate/profile and fully resolved relationships permit
 scoped `Current`; known mismatch is `Stale`; absent observations or unresolved
 coverage are unestablished. These functions do not mutate historical facts.

@@ -23,7 +23,7 @@ itself clear quarantined scratch, unknown remote outcomes or cumulative debt.
 Each covered reusable dimension settles at most once. Original observations,
 reservation identity and the basis for disposition remain inspectable.
 
-CPU capacity retains the existing milli-CPU meaning of `CpuMillis`. Cumulative
+CPU capacity uses `CpuMillicores`: 1000 is one CPU equivalent. Cumulative
 CPU execution has its own dimension. Charged memory is not virtual address space;
 task counts include threads where supported. Scratch bytes, objects and inodes
 are distinct. A sampled CPU cutoff is not a hard lifetime CPU cap, a kill request
@@ -49,13 +49,14 @@ operator creating competing stores or restoring old snapshots.
 New work requires current authority, accepted dependencies, exact candidate and
 package correspondence, available reusable capacity and every required cumulative
 budget. Settled capacity cannot bypass unresolved mandatory debt. A distinct new
-mission is admitted through the ordinary guards; changing an attempt label cannot
+task is admitted through the ordinary guards; changing an attempt label cannot
 make a lost original operation safe to retry.
 
 Each member's aggregate policy also limits its share of the same pool records;
 this does not introduce a separate allocation ledger. Version 4 maps cumulative
-`TimeMillis` to elapsed milliseconds and `OutputBytes` to output bytes. Unsupported
-cumulative mappings are refused, including treating milli-CPU `CpuMillis` as
+the active `ElapsedMillis` dimension to elapsed milliseconds and `OutputBytes`
+to output bytes. Historical versioned tokens remain unchanged. Unsupported
+cumulative mappings are refused, including treating milli-CPU `CpuMillicores` as
 elapsed CPU execution time.
 
 ## Outer boundary before payload release
@@ -185,9 +186,15 @@ topology/member observations detect examined changes, but do not create an atomi
 snapshot or fence. The cleanup-only observation can retain a missing main process
 with populated descendants; preparation and payload-release checks stay strict.
 
+The observer publishes the sample and returns an `AdmissionReceipt` from the
+existing journal. This is not a `ClosureReceipt`: observation publication does
+not establish closure, settle resources or authorize another effect.
+
 Tree records use a distinct versioned event in the same canonical journal. Exact
 binding, scope, configuration, cancellation and sample correspondence remain
-mandatory. CLI inspection exposes redacted tree counts and remaining proof gaps.
+mandatory. Explicit CLI schema 2 exposes redacted tree counts; both schemas
+retain the combined missing-proof assessment. The legacy projection and sample
+selection are specified in the [program contract](program-kernel.md#recursive-observation-presentation).
 A recursive sample cannot establish complete helper/stream coverage, snapshot
 exclusion or final usage, and cannot close a domain or release resources. Missing
 or changing topology, identity, membership or counters preserve uncertainty.
@@ -280,5 +287,5 @@ authority, its historical journal, debt and reservations remain held.
 
 The construction sequence is recovery/resource semantics, then the recoverable
 outer backend, then qualification of that exact profile. Compatible interfaces
-may support later provider transport, substantial engineering missions and GPE
+may support later provider transport, substantial engineering tasks and GPE
 programs, but those remain separately authorized downstream stages.

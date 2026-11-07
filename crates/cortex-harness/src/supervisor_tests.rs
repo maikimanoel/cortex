@@ -1,4 +1,4 @@
-//! Tests use only this repository's finite, provider-free development executable.
+//! TestProcesses use only this repository's finite, provider-free development executable.
 use super::*;
 use std::{
     os::unix::fs::PermissionsExt,
@@ -1074,7 +1074,7 @@ fn required_host_denials_cannot_be_enabled_by_fabricated_supported_descriptors()
         Control::Revocation,
         Control::WorkspaceIdentity,
         Control::Resource(Resource::RamBytes),
-        Control::Resource(Resource::CpuMillis),
+        Control::Resource(Resource::CpuMillicores),
     ] {
         let mut observations = original.descriptor().observations().to_vec();
         observations.push(CapabilityObservation {

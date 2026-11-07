@@ -18,7 +18,7 @@ fn policy() -> Policy {
         privacy: source("explicit-fixture-only-data"),
         capacities: vec![
             Capacity {
-                resource: Resource::Workers,
+                resource: Resource::WorkerSlots,
                 available: Some(2),
                 verification_reserve: 1,
                 declared_enforceable: true,
@@ -35,29 +35,29 @@ fn policy() -> Policy {
         max_retries: 2,
     }
 }
-fn scope(state: &ProgramState, mission: &str) -> EffectScope {
+fn scope(state: &ProgramState, task: &str) -> EffectScope {
     EffectScope {
         program: state.definition().id().clone(),
         baseline: state.definition().revision(),
-        mission: task(mission),
+        task: cortex_core::TaskId::new(task).unwrap(),
         candidate: state
             .readiness()
-            .scope(&task(mission))
+            .scope(&cortex_core::TaskId::new(task).unwrap())
             .unwrap()
             .context()
             .contract()
             .candidate()
             .clone(),
-        attempt: AttemptId::new(&format!("attempt-{mission}")).unwrap(),
+        attempt: AttemptId::new(&format!("attempt-{task}")).unwrap(),
         generation: rev(1),
-        package: PackageId::new(&format!("package-{mission}")).unwrap(),
+        package: PackageId::new(&format!("package-{task}")).unwrap(),
         package_revision: rev(1),
     }
 }
 fn demand(tokens: u64) -> Vec<Demand> {
     vec![
         Demand {
-            resource: Resource::Workers,
+            resource: Resource::WorkerSlots,
             amount: Some(1),
         },
         Demand {
@@ -66,23 +66,23 @@ fn demand(tokens: u64) -> Vec<Demand> {
         },
     ]
 }
-fn operational_grant(state: &ProgramState, mission: &str) -> OperationalGrant {
+fn operational_grant(state: &ProgramState, task: &str) -> OperationalGrant {
     OperationalGrant {
-        id: GrantId::new(&format!("effects-{mission}")).unwrap(),
+        id: GrantId::new(&format!("effects-{task}")).unwrap(),
         principal: ActorId::new("operator").unwrap(),
         policy: policy().reference,
-        scope: scope(state, mission),
+        scope: scope(state, task),
         not_before: 10,
         expires_before: 100,
         ceilings: demand(60),
         basis: source("fixture-grant"),
     }
 }
-fn intent(state: &ProgramState, mission: &str, id: &str) -> EffectIntent {
+fn intent(state: &ProgramState, task: &str, id: &str) -> EffectIntent {
     EffectIntent {
         id: EffectId::new(id).unwrap(),
-        grant: operational_grant(state, mission).id,
-        scope: scope(state, mission),
+        grant: operational_grant(state, task).id,
+        scope: scope(state, task),
         demand: demand(50),
         retry_of: None,
     }
@@ -108,34 +108,34 @@ fn setup() -> (ProgramState, OperationalProjection) {
         .unwrap();
     (state, projection)
 }
-fn reserve(state: &ProgramState, p: &mut OperationalProjection, mission: &str, id: &str, at: u64) {
+fn reserve(state: &ProgramState, p: &mut OperationalProjection, task: &str, id: &str, at: u64) {
     p.apply(
         state,
         EffectEvent::Reserve {
-            intent: intent(state, mission, id),
+            intent: intent(state, task, id),
             at,
         },
     )
     .unwrap();
 }
-fn dispatch(state: &ProgramState, p: &mut OperationalProjection, mission: &str, id: &str, at: u64) {
+fn dispatch(state: &ProgramState, p: &mut OperationalProjection, task: &str, id: &str, at: u64) {
     p.apply(
         state,
         EffectEvent::Dispatch {
             effect: EffectId::new(id).unwrap(),
-            scope: scope(state, mission),
+            scope: scope(state, task),
             at,
             basis: source("dispatch-boundary"),
         },
     )
     .unwrap();
 }
-fn absent(state: &ProgramState, p: &mut OperationalProjection, mission: &str, id: &str, at: u64) {
+fn absent(state: &ProgramState, p: &mut OperationalProjection, task: &str, id: &str, at: u64) {
     p.apply(
         state,
         EffectEvent::Reconcile {
             effect: EffectId::new(id).unwrap(),
-            scope: scope(state, mission),
+            scope: scope(state, task),
             at,
             resolution: Reconciliation::Absent,
             basis: source("exact-fixture-no-effect"),
@@ -207,7 +207,7 @@ fn concurrent_intents_cannot_spend_verification_reserve_and_rejection_is_atomic(
                 at: 11
             }
         ),
-        Err(OperationalError::ResourceLimit(Resource::Workers))
+        Err(OperationalError::ResourceLimit(Resource::WorkerSlots))
     );
     assert!(p == before);
     p.apply(
@@ -221,7 +221,7 @@ fn concurrent_intents_cannot_spend_verification_reserve_and_rejection_is_atomic(
     )
     .unwrap();
     reserve(&state, &mut p, "D", "two", 12);
-    assert_eq!(p.accounted(Resource::Workers).unwrap(), 1);
+    assert_eq!(p.accounted(Resource::WorkerSlots).unwrap(), 1);
 }
 #[test]
 fn dispatch_is_uncertain_and_replay_cannot_dispatch_again() {
@@ -280,7 +280,7 @@ fn lost_reply_revocation_and_cancel_do_not_refund_unknown_effects() {
     )
     .unwrap();
     assert_eq!(p.effects()[0].status, EffectStatus::CancellationRequested);
-    assert_eq!(p.accounted(Resource::Workers).unwrap(), 1);
+    assert_eq!(p.accounted(Resource::WorkerSlots).unwrap(), 1);
     assert!(
         p.apply(
             &state,
@@ -394,7 +394,7 @@ fn report_is_not_acceptance_or_release_and_cannot_be_rewritten() {
         },
     )
     .unwrap();
-    assert_eq!(p.accounted(Resource::Workers).unwrap(), 1);
+    assert_eq!(p.accounted(Resource::WorkerSlots).unwrap(), 1);
     assert_eq!(state.attempts()[0].status, AttemptStatus::Claimed);
     assert!(
         p.apply(
@@ -427,7 +427,7 @@ fn report_is_not_acceptance_or_release_and_cannot_be_rewritten() {
     )
     .unwrap();
     assert_eq!(p.effects()[0].report, Some(EffectOutcome::Failed));
-    assert_eq!(p.accounted(Resource::Workers).unwrap(), 0);
+    assert_eq!(p.accounted(Resource::WorkerSlots).unwrap(), 0);
     assert_eq!(p.accounted(Resource::ModelTokens).unwrap(), 40);
     assert!(
         p.apply(
@@ -588,7 +588,7 @@ fn new_policy_does_not_erase_pending_or_cumulative_resource_accounting() {
                 at: 11
             }
         ),
-        Err(OperationalError::ResourceLimit(Resource::Workers))
+        Err(OperationalError::ResourceLimit(Resource::WorkerSlots))
     );
     changed.reference = source("meaning-changed");
     changed.cumulative.clear();
@@ -596,7 +596,7 @@ fn new_policy_does_not_erase_pending_or_cumulative_resource_accounting() {
         p.apply(&state, EffectEvent::Policy(changed)),
         Err(ProgramError::Structure.into())
     );
-    assert_eq!(p.accounted(Resource::Workers).unwrap(), 1);
+    assert_eq!(p.accounted(Resource::WorkerSlots).unwrap(), 1);
 }
 #[test]
 fn duplicate_missing_unknown_and_wrong_scope_inputs_refuse_atomically() {
@@ -706,7 +706,7 @@ fn complete_event_reconstruction_preserves_unknowns_and_original_failures() {
     }
     assert!(replay == p);
     assert_eq!(replay.effects()[0].status, EffectStatus::Unknown);
-    assert_eq!(replay.accounted(Resource::Workers).unwrap(), 1);
+    assert_eq!(replay.accounted(Resource::WorkerSlots).unwrap(), 1);
 }
 
 #[test]
@@ -728,11 +728,11 @@ fn advisory_free_slots_do_not_block_current_owner_with_explicit_fixture_budget()
     assert!(
         state
             .readiness()
-            .mission(&task("A"))
+            .task(&task("A"))
             .unwrap()
             .blockers()
             .iter()
-            .any(|b| matches!(b, MissionBlocker::NoCapacity))
+            .any(|b| matches!(b, TaskBlocker::NoCapacity))
     );
     reserve(&state, &mut p, "A", "current-owner", 10);
     dispatch(&state, &mut p, "A", "current-owner", 11);
@@ -745,7 +745,7 @@ fn advisory_free_slots_do_not_block_current_owner_with_explicit_fixture_budget()
                 at: 12
             }
         ),
-        Err(OperationalError::ResourceLimit(Resource::Workers))
+        Err(OperationalError::ResourceLimit(Resource::WorkerSlots))
     );
 }
 #[test]
@@ -843,8 +843,8 @@ fn reservation_overflow_and_unknown_reconciliation_usage_preserve_original_state
     selected.capacities[1].available = Some(u64::MAX);
     selected.capacities[1].verification_reserve = 0;
     p.apply(&state, EffectEvent::Policy(selected)).unwrap();
-    for mission in ["A", "D"] {
-        let mut g = operational_grant(&state, mission);
+    for task in ["A", "D"] {
+        let mut g = operational_grant(&state, task);
         g.ceilings = demand(u64::MAX);
         p.apply(&state, EffectEvent::Grant(g)).unwrap();
     }
@@ -935,7 +935,7 @@ fn running_observation_after_cancel_request_is_retained_without_claiming_termina
         )
         .is_err()
     );
-    assert_eq!(p.accounted(Resource::Workers).unwrap(), 1);
+    assert_eq!(p.accounted(Resource::WorkerSlots).unwrap(), 1);
 }
 
 fn preview_setup() -> (ProgramState, OperationalProjection) {
@@ -952,7 +952,7 @@ fn preview_setup() -> (ProgramState, OperationalProjection) {
 }
 fn proposal(tokens: u64) -> Proposal {
     Proposal {
-        mission: task("D"),
+        task: task("D"),
         band: 0,
         waiting_rounds: 0,
         risk_rank: 0,
@@ -983,7 +983,7 @@ fn scheduler_preview_accounts_unknown_reservations_without_mutating_or_reserving
     assert!(
         result[0]
             .held
-            .contains(&WaitReason::Contention(Resource::Workers))
+            .contains(&WaitReason::Contention(Resource::WorkerSlots))
     );
     assert!(
         result[0]
@@ -1020,7 +1020,7 @@ fn scheduler_preview_releases_reusable_quantity_but_preserves_consumption_and_re
     assert!(fits[0].proposed);
     assert!(fits[0].held.is_empty());
     assert_eq!(p.accounted(Resource::ModelTokens).unwrap(), 40);
-    assert_eq!(p.accounted(Resource::Workers).unwrap(), 0);
+    assert_eq!(p.accounted(Resource::WorkerSlots).unwrap(), 0);
 }
 #[test]
 fn scheduler_preview_rejects_missing_dimensions_and_stale_policy_without_hiding_unknown_cost() {
@@ -1050,18 +1050,18 @@ fn scheduler_reports_known_reserve_shortfall_as_contention_and_preserves_zero_ne
     let mut state = ProgramState::new(definition()).unwrap();
     initialize(&mut state);
     let p = Proposal {
-        mission: task("D"),
+        task: task("D"),
         band: 0,
         waiting_rounds: 0,
         risk_rank: 0,
         cost_rank: 0,
         demand: vec![Demand {
-            resource: Resource::Workers,
+            resource: Resource::WorkerSlots,
             amount: Some(0),
         }],
     };
     let mut cap = Capacity {
-        resource: Resource::Workers,
+        resource: Resource::WorkerSlots,
         available: Some(1),
         verification_reserve: 1,
         declared_enforceable: true,
@@ -1074,7 +1074,7 @@ fn scheduler_reports_known_reserve_shortfall_as_contention_and_preserves_zero_ne
     assert!(!insufficient[0].proposed);
     assert_eq!(
         insufficient[0].held,
-        vec![WaitReason::Contention(Resource::Workers)]
+        vec![WaitReason::Contention(Resource::WorkerSlots)]
     );
 }
 
@@ -1131,7 +1131,7 @@ fn cancellation_intent_survives_unknown_running_report_and_reconstruction() {
         )
         .is_err()
     );
-    assert_eq!(p.accounted(Resource::Workers).unwrap(), 1);
+    assert_eq!(p.accounted(Resource::WorkerSlots).unwrap(), 1);
     p.apply(
         &state,
         EffectEvent::Report {

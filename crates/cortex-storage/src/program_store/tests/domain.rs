@@ -39,7 +39,7 @@ fn domain_profile_roundtrip_preserves_history_debt_and_legacy_refusal() {
     assert!(actual.domains() == k.domains());
     let r = actual.domains().unwrap().domain(&i.id).unwrap();
     assert_eq!(r.outcome, HistoricalOutcome::Unknown);
-    assert!(!r.holds(Resource::Workers));
+    assert!(!r.holds(Resource::WorkerSlots));
     assert!(r.holds(Resource::DiskBytes));
     assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
     let bytes = fs::read(f.store().join("program.db")).unwrap();
@@ -103,7 +103,7 @@ fn pool_admission_competing_clients_cannot_double_allocate() {
         .count();
     assert_eq!(winners, 1);
     let k = s.load(&key(), Access::ReadOnly).unwrap();
-    assert_eq!(k.domains().unwrap().held(Resource::Workers), Ok(1));
+    assert_eq!(k.domains().unwrap().held(Resource::WorkerSlots), Ok(1));
     assert_eq!(k.domains().unwrap().domains().len(), 1);
 }
 #[test]
@@ -185,7 +185,10 @@ fn closure_before_after_commit_faults_reconstruct_without_reexecution() {
         let current = s.load(&key(), Access::ReadOnly).unwrap();
         let record = current.domains().unwrap().domain(&i.id).unwrap();
         assert_eq!(record.outcome, HistoricalOutcome::Unknown);
-        assert_eq!(current.domains().unwrap().held(Resource::Workers), Ok(0));
+        assert_eq!(
+            current.domains().unwrap().held(Resource::WorkerSlots),
+            Ok(0)
+        );
         assert_eq!(
             current
                 .domains()
@@ -287,7 +290,7 @@ fn nested_member_amendment_checks_private_source_roots_and_allows_disjoint_neigh
             DomainInput::Amend {
                 next: Box::new(next),
                 non_impact: cortex_evidence::program::NonImpact {
-                    missions: vec![],
+                    tasks: vec![],
                     basis: source("all-contracts-changed"),
                 },
             },
@@ -393,7 +396,7 @@ fn observed_binding_encoding_roundtrip_and_tampering_refuse_downgrade() {
     let r = restored.domains().unwrap().domain(&i.id).unwrap();
     assert!(r.binding_observation.as_ref() == Some(&domain_fixture::binding(&i)));
     assert_eq!(r.phase, DomainPhase::Bound);
-    assert!(r.holds(Resource::Workers));
+    assert!(r.holds(Resource::WorkerSlots));
     assert!(s.admit(&key(), input).unwrap().duplicate);
 }
 
@@ -449,7 +452,7 @@ fn observed_binding_write_and_commit_crash_cuts_preserve_unreleased_state() {
             }
         );
         assert_eq!(r.outcome, HistoricalOutcome::Unknown);
-        assert!(r.holds(Resource::Workers));
+        assert!(r.holds(Resource::WorkerSlots));
         assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
     }
 }
@@ -507,7 +510,7 @@ fn closure_readback_roundtrip_and_version_guards_preserve_debt_and_legacy_bytes(
     assert_eq!(r.closure_observations.len(), 1);
     assert_eq!(r.cancelled_at, Some(4));
     assert_eq!(r.outcome, HistoricalOutcome::Unknown);
-    assert!(r.holds(Resource::Workers));
+    assert!(r.holds(Resource::WorkerSlots));
     assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
 }
 
@@ -543,7 +546,7 @@ fn closure_observation_publication_crash_cuts_replay_without_refund_or_effects()
         );
         assert!(r.cancelled && r.closure.is_none());
         assert_eq!(r.outcome, HistoricalOutcome::Unknown);
-        assert!(r.holds(Resource::Workers));
+        assert!(r.holds(Resource::WorkerSlots));
         assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
     }
 }
@@ -614,7 +617,7 @@ fn cancel_publication_cut_requires_replayed_durable_cancel_before_readback() {
         let after = s.load(&key(), Access::ReadOnly).unwrap();
         let record = after.domains().unwrap().domain(&i.id).unwrap();
         assert!(record.closure.is_none());
-        assert!(record.holds(Resource::Workers));
+        assert!(record.holds(Resource::WorkerSlots));
         assert_eq!(record.outcome, HistoricalOutcome::Unknown);
     }
 }
@@ -667,11 +670,177 @@ fn recursive_capture_codec_replay_and_crash_cuts_preserve_unknown() {
             record.closure_tree_observations.len(),
             usize::from(matches!(cut, Stage::AfterCommit))
         );
-        assert!(record.cancelled && record.closure.is_none() && record.holds(Resource::Workers));
+        assert!(
+            record.cancelled && record.closure.is_none() && record.holds(Resource::WorkerSlots)
+        );
         assert_eq!(record.outcome, HistoricalOutcome::Unknown);
         assert!(record.unresolved_consumption(Consumption::CpuExecutionMillis));
         if matches!(cut, Stage::AfterCommit) {
             assert!(s.admit(&key(), input).unwrap().duplicate);
         }
     }
+}
+
+// Independent original-PR19 source transcription, not encoder-generated output.
+const RECURSIVE_ORIGINAL_GOLDEN: &[u8] = br#"["tree-compat",10,["coord-fixture-program","fixture-program",1,"operator",["A","B","C","D","E","F"],["Amend","Plan","Claim","Review"],[["operator","fixture-operator"],"explicit-local-operator-metadata","1"]],["domain-closure-tree-v1",["closure-tree-observed-v1","domain-fixture-program-A",[[[["synthetic-pool","allocation-1","synthetic-host","boot-1"],"request-fixture-program-A",":1.42","invocation-domain-fixture-program-A","/owned/domain-fixture-program-A",1,42,"boot-1"],[["operator","fixture-operator"],"fixed-bootstrap-profile","1"],["fixture-program",1,"A",[[[47,115,121,110,116,104,101,116,105,99,47,99,111,114,116,101,120,45,112,114,111,103,114,97,109,45,65],[47,115,121,110,116,104,101,116,105,99,47,99,111,114,116,101,120,45,112,114,111,103,114,97,109,45,65,47,46,103,105,116],[47,115,121,110,116,104,101,116,105,99,47,99,111,114,116,101,120,45,112,114,111,103,114,97,109,45,65,47,46,103,105,116]],"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","Clean"],"attempt-A",1,"package-A",1],[7,11],null,[],true,true,7000,256,5,[["operator","fixture-operator"],"controlled-post-cancellation-readback","1"]],[["",1,42,true,[]],["child",1,43,true,[[910001,910002]]]]],5]]]"#;
+
+#[test]
+fn recursive_original_literal_preserves_positions_and_rejects_wrong_shapes() {
+    let (mut k, i) = domain_fixture::coordinator();
+    domain_fixture::observed_cancelled(&mut k, &i);
+    assert_eq!(k.revision(), 10);
+    let expected = op(
+        &k,
+        "tree-compat",
+        DomainEvent::ClosureTreeObserved {
+            domain: i.id.clone(),
+            observation: domain_fixture::closure_tree_observation(&i, 5),
+            at: 5,
+        },
+    );
+    let decoded = codec::decode_operation(RECURSIVE_ORIGINAL_GOLDEN, &k).unwrap();
+    assert!(decoded == expected);
+    assert_eq!(
+        codec::operation(&expected, k.initial().limits().bytes)
+            .unwrap()
+            .as_slice(),
+        RECURSIVE_ORIGINAL_GOLDEN
+    );
+    assert_eq!(k.revision(), 10); // Decode does not admit or execute.
+    for profile in [
+        ProgramProfile::MetadataV1,
+        ProgramProfile::FixturesV2,
+        ProgramProfile::SupervisedFixturesV3,
+    ] {
+        assert!(profile.check(&decoded).is_err());
+    }
+    assert!(ProgramProfile::RecoverableDomainsV4.check(&decoded).is_ok());
+    let wire: serde_json::Value = serde_json::from_slice(RECURSIVE_ORIGINAL_GOLDEN).unwrap();
+    for case in 0..12 {
+        let mut malformed = wire.clone();
+        match case {
+            0 => malformed[3][0] = serde_json::json!("domain-closure-tree-v2"),
+            1 => malformed[3][1][0] = serde_json::json!("closure-tree-observed-v2"),
+            2 => malformed[3][0] = serde_json::json!("domain-closure-observation-v1"),
+            3 => malformed[3][1][3] = serde_json::json!(6),
+            4 => malformed[3][1][2]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::Value::Null),
+            5 => malformed[3][1][2][1].as_array_mut().unwrap().swap(0, 1),
+            6 => malformed[3][1][2][1][1][2] = serde_json::json!(42),
+            7 => malformed[3][1][2][1][0][3] = serde_json::json!(false),
+            8 => malformed[3][1][2][0][2][2] = serde_json::json!(""),
+            9 => malformed[3][1][2][0].as_array_mut().unwrap().swap(3, 4),
+            10 => malformed[3][1][2][1][1][4][0]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!(1)),
+            _ => malformed[3][1]
+                .as_array_mut()
+                .unwrap()
+                .pop()
+                .map(|_| ())
+                .unwrap(),
+        }
+        assert!(
+            codec::decode_operation(&serde_json::to_vec(&malformed).unwrap(), &k).is_err(),
+            "malformed recursive positional case {case} was accepted"
+        );
+    }
+    let mut whitespace = RECURSIVE_ORIGINAL_GOLDEN.to_vec();
+    whitespace.push(b' ');
+    assert!(codec::decode_operation(&whitespace, &k).is_err());
+
+    // These same-typed fields may legitimately differ. Their permutation is a
+    // different observation, not an invented structural rejection condition.
+    let mut permuted = wire;
+    permuted[3][1][2][0].as_array_mut().unwrap().swap(8, 9);
+    let changed = codec::decode_operation(&serde_json::to_vec(&permuted).unwrap(), &k).unwrap();
+    assert!(changed != expected);
+    let DomainInput::Domain(event) = changed.command else {
+        panic!("domain event")
+    };
+    let DomainEvent::ClosureTreeObserved { observation, .. } = *event else {
+        panic!("tree event")
+    };
+    assert_eq!(observation.sample.cpu_micros, Some(256));
+    assert_eq!(observation.sample.memory_peak, Some(7000));
+}
+
+#[test]
+fn recursive_literal_replay_retains_admission_identity_without_closure_or_dispatch() {
+    let f = Temp::new();
+    let (mut k, i) = domain_fixture::coordinator();
+    domain_fixture::observed_cancelled(&mut k, &i);
+    let s = stored(&k, &f);
+    let input = codec::decode_operation(RECURSIVE_ORIGINAL_GOLDEN, &k).unwrap();
+    let held: Vec<_> = i
+        .effect
+        .demand
+        .iter()
+        .map(|d| (d.resource, k.domains().unwrap().held(d.resource).unwrap()))
+        .collect();
+    let mut called = false;
+    assert!(
+        s.dispatch_domain(&key(), input.clone(), |_| {
+            called = true;
+        })
+        .is_err()
+    );
+    assert!(!called);
+    assert_eq!(s.load(&key(), Access::ReadOnly).unwrap().revision(), 10);
+    let receipt = s.admit(&key(), input.clone()).unwrap();
+    assert_eq!(receipt.store, s.id());
+    assert_eq!(receipt.ordinal, 11);
+    assert!(!receipt.duplicate);
+    let reopened = ProgramStore::open(&f.store(), &key(), Access::ReadOnly, limits()).unwrap();
+    let recovered = reopened.load(&key(), Access::ReadOnly).unwrap();
+    assert_eq!(recovered.revision(), 11);
+    assert_eq!(recovered.operations().len(), 11);
+    let record = recovered.domains().unwrap().domain(&i.id).unwrap();
+    assert_eq!(record.closure_tree_observations.len(), 1);
+    assert!(record.cancelled && record.closure.is_none() && record.settlements.is_empty());
+    assert_eq!(record.outcome, HistoricalOutcome::Unknown);
+    for (resource, amount) in held {
+        assert_eq!(recovered.domains().unwrap().held(resource), Ok(amount));
+        assert!(record.holds(resource));
+    }
+    for reservation in &i.consumption {
+        assert!(record.unresolved_consumption(reservation.dimension));
+    }
+    assert_eq!(
+        codec::operation(
+            recovered.operations().last().unwrap(),
+            k.initial().limits().bytes
+        )
+        .unwrap()
+        .as_slice(),
+        RECURSIVE_ORIGINAL_GOLDEN
+    );
+    let duplicate = reopened.admit(&key(), input.clone()).unwrap();
+    assert_eq!(duplicate.store, receipt.store);
+    assert_eq!(duplicate.ordinal, receipt.ordinal);
+    assert!(duplicate.duplicate);
+    assert_eq!(
+        reopened
+            .reconcile(&key(), k.initial(), &input, Access::ReadOnly)
+            .unwrap(),
+        Reconciliation::Present(duplicate)
+    );
+    let mut changed =
+        serde_json::from_slice::<serde_json::Value>(RECURSIVE_ORIGINAL_GOLDEN).unwrap();
+    changed[3][1][2][0].as_array_mut().unwrap().swap(8, 9);
+    let changed = codec::decode_operation(&serde_json::to_vec(&changed).unwrap(), &k).unwrap();
+    assert!(reopened.admit(&key(), changed.clone()).is_err());
+    assert_eq!(
+        reopened
+            .reconcile(&key(), k.initial(), &changed, Access::ReadOnly)
+            .unwrap(),
+        Reconciliation::Conflict
+    );
+    assert_eq!(
+        reopened.load(&key(), Access::ReadOnly).unwrap().revision(),
+        11
+    );
 }

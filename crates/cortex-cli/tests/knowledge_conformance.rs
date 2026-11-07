@@ -7,7 +7,7 @@ mod support;
 
 use cortex_cli::{
     inspect, inspect_candidate,
-    knowledge::{ExtractionError, extract_json_references, qualify, reinspect},
+    knowledge::{ExtractionError, extract_json_references, inspect_validity, reinspect},
 };
 use cortex_core::{CandidateId, TaskContract, TaskId, binding::*, knowledge::*};
 use cortex_evidence::{ExecutionObservation, Provenance, unified::*};
@@ -194,7 +194,7 @@ fn pointer_identity_distinguishes_object_keys_from_array_positions() {
         assert_eq!(reference.target(), &expected_target, "{from}");
     }
     assert_eq!(index.incoming("/array").unwrap().count(), 0);
-    assert!(!index.complete());
+    assert!(!index.all_references_resolved());
     assert_unverified(&index);
     assert_eq!(snapshot(&fixture.repo), before);
 }
@@ -342,7 +342,7 @@ fn occurrence_spans_are_exact_utf8_byte_ranges_with_escaped_names_and_crlf() {
             .collect::<Vec<_>>(),
         ["/a~1b/$ref", "/雪/$ref"]
     );
-    assert!(index.complete());
+    assert!(index.all_references_resolved());
     assert_eq!(fixture.extract("spans.json").unwrap(), index);
 }
 
@@ -414,7 +414,7 @@ fn reference_limit_is_independent_of_node_and_source_byte_limits() {
         assert_eq!(reference.target(), &ReferenceTarget::Local(String::new()));
     }
     assert!(index.node("/1023/$ref").is_ok());
-    assert!(index.complete());
+    assert!(index.all_references_resolved());
     assert_unverified(&index);
     assert!(matches!(
         fixture.extract("over.json"),
@@ -532,7 +532,7 @@ fn missing_partial_and_uncertain_context_never_establish_current_validity() {
     let index = fixture.extract("source.json").unwrap();
     let original = index.clone();
     let before = snapshot(&fixture.repo);
-    let missing = qualify(&index, None).unwrap();
+    let missing = inspect_validity(&index, None).unwrap();
     assert_eq!(missing.validity(), None);
     assert_eq!(
         missing.correspondence(),
@@ -540,7 +540,7 @@ fn missing_partial_and_uncertain_context_never_establish_current_validity() {
     );
     let actual = inspect_candidate(&fixture.repo.path, &fixture.contract, id(4)).unwrap();
     assert_eq!(
-        qualify(&index, Some(&actual)).unwrap().validity(),
+        inspect_validity(&index, Some(&actual)).unwrap().validity(),
         Some(Validity::Current)
     );
     let state = actual.state();
@@ -593,7 +593,7 @@ fn missing_partial_and_uncertain_context_never_establish_current_validity() {
             RepositoryState::new(repository, head, vec![], coverage, consistency).unwrap(),
             basis,
         );
-        let view = qualify(&index, Some(&uncertain)).unwrap();
+        let view = inspect_validity(&index, Some(&uncertain)).unwrap();
         assert_eq!(view.validity(), None);
         assert_eq!(
             view.correspondence(),
@@ -602,7 +602,7 @@ fn missing_partial_and_uncertain_context_never_establish_current_validity() {
         assert_unverified(view.index());
     }
     let reused = inspect_candidate(&fixture.repo.path, &fixture.contract, id(3)).unwrap();
-    let view = qualify(&index, Some(&reused)).unwrap();
+    let view = inspect_validity(&index, Some(&reused)).unwrap();
     assert_eq!(view.validity(), Some(Validity::Stale));
     assert_eq!(
         view.correspondence(),
@@ -621,7 +621,7 @@ fn current_extraction_cannot_supply_missing_verification_or_manufacture_pass() {
     let index = fixture.extract("source.json").unwrap();
     let current = inspect_candidate(&fixture.repo.path, &fixture.contract, id(4)).unwrap();
     assert_eq!(
-        qualify(&index, Some(&current)).unwrap().validity(),
+        inspect_validity(&index, Some(&current)).unwrap().validity(),
         Some(Validity::Current)
     );
     let profile = VerificationProfile::new(

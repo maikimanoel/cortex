@@ -200,11 +200,11 @@ completes neither CAP-EVD-003 nor CAP-WFL-004 or Milestone 003/004. Its scoped
 The caller supplies a `ReadinessProjection`, immutable `EdgeEvidenceContract`,
 mutable canonical `EvidenceRecord` slice, borrowed `SupportRequest` and positive
 finite `SupportLimits`. `EdgeScopeSnapshot::capture` retains graph/edge identity,
-producer/consumer full mission scopes/generations, artifact/revision/candidate,
+producer/consumer full task scopes/generations, artifact/revision/candidate,
 dependency kind, exact readiness level and required predicates. Its notification
 cursor is historical only; unrelated Signal/capacity changes do not invalidate the
 same semantic scope. The artifact has its own explicit repository/worktree
-requirement; its candidate need not equal either mission candidate.
+requirement; its candidate need not equal either task candidate.
 
 Each `PredicateCorrespondence` retains the exact full verification task, revision,
 single criterion and candidate requirement, complete expected `VerificationProfile`
@@ -240,7 +240,7 @@ positive relevant checks and matching conclusive oracle are necessary but still
 require exact criterion/profile/artifact/edge coverage. Result, applicability and
 validity remain the existing independent dimensions. Even complete support does
 not confer CONTRACT_STABLE review, provisional authority, INTEGRATED_ACCEPTED
-acceptance or whole-mission completion. Authority is always `Unavailable`. No
+acceptance or whole-task completion. Authority is always `Unavailable`. No
 G1 review/attestation/event, dependency release, permission, reservation or dispatch
 is constructed. Genuine coordinator/operational acceptance remains separate.
 

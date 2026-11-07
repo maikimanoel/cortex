@@ -1,14 +1,15 @@
 //! Redacted retained facts. Inspection never contacts a manager.
+use super::schema::Schema;
 use cortex_core::program::domain::*;
 use serde_json::{Value, json};
 
-pub(super) fn view(projection: &DomainProjection) -> Value {
+pub(super) fn view(projection: &DomainProjection, schema: Schema) -> Value {
     let pool = projection.pool();
     let capacities: Vec<_> = pool
         .into_iter()
         .flat_map(|p| &p.capacities)
         .map(|c| {
-            json!({"dimension":format!("{:?}",c.resource),
+            json!({"dimension":schema.resource(c.resource),
             "declared_total":c.available,"verification_reserve":c.verification_reserve,
             "held":projection.held(c.resource).ok(),
             "enforcement":"NOT_ESTABLISHED_BY_JOURNAL"})
@@ -28,7 +29,7 @@ pub(super) fn view(projection: &DomainProjection) -> Value {
         .collect();
     let records: Vec<_> = projection.domains().iter().map(|d| {
         let capacity: Vec<_> = pool.into_iter().flat_map(|p| &p.capacities).map(|c| {
-            json!({"dimension":format!("{:?}",c.resource),"held":d.holds(c.resource),
+            json!({"dimension":schema.resource(c.resource),"held":d.holds(c.resource),
                 "admitted_quantity":d.intent.effect.demand.iter().find(|r|r.resource==c.resource).and_then(|r|r.amount)})
         }).collect();
         let usage: Vec<_> = d.intent.consumption.iter().map(|r| {
@@ -56,8 +57,7 @@ pub(super) fn view(projection: &DomainProjection) -> Value {
             "present_capability_evidence":if d.closure.is_some(){"CLOSURE_RECEIPT_RETAINED"}else{"NO_CLOSURE_PROOF"},
             "domain_identity_recorded":d.identity.is_some(),"cancellation_requested":d.cancelled,
             "retained_binding_observation":binding_view(d.binding_observation.as_ref()),
-            "native_closure_inspection":closure_view(d),
-            "retained_cgroup_tree_observation":tree_view(d),
+            "native_closure_inspection":closure_view(d, schema),
             "administrative_disposition":format!("{:?}",d.disposition),
             "reusable_capacity":capacity,"cumulative_consumption":usage,
             "closure_evidence_recorded":d.closure.is_some(),"additional_settlements":d.settlements.len(),"closure_source":"CALLER_ASSERTION_NOT_AUTHENTICATED",
@@ -73,32 +73,26 @@ pub(super) fn view(projection: &DomainProjection) -> Value {
         "live_provider":"UNAVAILABLE","physical_reserves":"NOT_ESTABLISHED"})
 }
 
-fn tree_view(record: &DomainRecord) -> Value {
-    let latest = record.closure_tree_observations.last().map(|tree| {
-        json!({
-            "observed_at":tree.sample.observed_at,
-            "nodes":tree.nodes.len(),
-            "observed_members":tree.nodes.iter().map(|node|node.members.len()).sum::<usize>(),
-            "any_population":tree.nodes.iter().any(|node|node.populated),
-            "sampled_cpu_micros":tree.sample.cpu_micros,
-            "sampled_memory_peak_bytes":tree.sample.memory_peak,
-            "private_identity_values":"OMITTED"
+fn recursive_sample(record: &DomainRecord) -> Value {
+    record
+        .closure_tree_observations
+        .last()
+        .map(|tree| {
+            json!({
+                "observed_at":tree.sample.observed_at,
+                "nodes":tree.nodes.len(),
+                "observed_members":tree.nodes.iter().map(|node|node.members.len()).sum::<usize>(),
+                "any_population":tree.nodes.iter().any(|node|node.populated),
+                "sampled_cpu_micros":tree.sample.cpu_micros,
+                "sampled_memory_peak_bytes":tree.sample.memory_peak,
+                "measurement_is_final":false,
+                "private_identity_values":"OMITTED"
+            })
         })
-    });
-    json!({
-        "retained_observations":record.closure_tree_observations.len(),
-        "latest":latest,
-        "coverage":"BOUNDED_RECURSIVE_CGROUP_READBACK_NON_ATOMIC",
-        "whole_domain_closure_proven":false,
-        "helper_and_stream_coverage_proven":false,
-        "snapshot_exclusion_proven":false,
-        "final_consumption_proven":false,
-        "current_liveness":"NOT_OBSERVED",
-        "settlement_authorized":false
-    })
+        .unwrap_or(Value::Null)
 }
 
-fn closure_view(record: &DomainRecord) -> Value {
+fn closure_view(record: &DomainRecord, schema: Schema) -> Value {
     let inspection = record.closure_inspection();
     let latest = record.closure_observations.last().map(|observation| {
         json!({
@@ -113,7 +107,7 @@ fn closure_view(record: &DomainRecord) -> Value {
             "private_identity_values":"OMITTED"
         })
     });
-    json!({
+    let mut view = json!({
         "status":"HOLD_INCOMPLETE_NATIVE_PROOF",
         "retained_observations":inspection.retained_observations,
         "latest":latest,
@@ -124,7 +118,19 @@ fn closure_view(record: &DomainRecord) -> Value {
         "current_liveness":"NOT_OBSERVED",
         "settlement_authorized":false,
         "next_action":"RETAIN_HOLDS_UNTIL_APPLICABLE_WHOLE_DOMAIN_AND_RESOURCE_PROOF"
-    })
+    });
+    if schema == Schema::Canonical {
+        view["latest_recursive_observation"] = recursive_sample(record);
+        view["recursive_sample_membership_coverage"] =
+            json!("BOUNDED_RECURSIVE_CGROUP_READBACK_NON_ATOMIC");
+        view["combined_native_inspection_basis"] =
+            json!("LATEST_DIRECT_OR_RECURSIVE_SAMPLE_AND_LATEST_RECURSIVE_POPULATION_AND_MEMBERS");
+        view["whole_domain_closure_proven"] = json!(false);
+        view["helper_and_stream_coverage_proven"] = json!(false);
+        view["snapshot_exclusion_proven"] = json!(false);
+        view["final_consumption_proven"] = json!(false);
+    }
+    view
 }
 
 fn binding_view(observation: Option<&DomainBindingObservation>) -> Value {

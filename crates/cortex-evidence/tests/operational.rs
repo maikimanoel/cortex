@@ -149,7 +149,7 @@ fn absent_or_wrong_package_and_unscoped_policy_are_refused_without_partial_reser
         Command::FixtureEffect(Box::new(EffectEvent::Policy(new_policy))),
     );
     input.grant.id = GrantId::new("narrow").unwrap();
-    input.grant.missions = vec![task("A")];
+    input.grant.tasks = vec![task("A")];
     assert!(k.admit(input).is_err());
     assert_eq!(k.fixture_effects().policies().len(), 1);
 }

@@ -102,8 +102,8 @@ fn exact_borrowed_endpoints_cycle_order_and_provenance_are_additive() {
     let set = collection(vec![b.clone(), a.clone()]).unwrap();
     assert_eq!(set, collection(vec![a.clone(), b.clone()]).unwrap());
     assert_eq!(set.sources(), &[a, b]);
-    assert!(set.complete());
-    assert!(set.sources().iter().all(|s| !s.complete()));
+    assert!(set.all_references_resolved());
+    assert!(set.sources().iter().all(|s| !s.all_references_resolved()));
     assert_eq!(set.references().len(), 2);
     let incoming: Vec<_> = set.incoming(&path(b"a.json"), "/Id").unwrap().collect();
     assert_eq!(incoming.len(), 1);
@@ -167,7 +167,7 @@ fn relative_paths_preserve_raw_parent_bytes_and_downward_identity() {
         .next()
         .unwrap();
     assert_eq!(incoming.from().path().bytes(), b"raw-\xff/schema.json");
-    assert!(set.complete());
+    assert!(set.all_references_resolved());
     assert_eq!(
         set.endpoint(&path(b"raw-\xef\xbf\xbd/models/user.json"), "")
             .unwrap_err(),
@@ -206,7 +206,7 @@ fn unsupported_unselected_and_missing_targets_are_not_invented() {
     let a = source(b"a.json", 3, nodes, refs);
     let b = blank(b"common.json", 4);
     let set = collection(vec![a, b]).unwrap();
-    assert!(!set.complete());
+    assert!(!set.all_references_resolved());
     for occurrence in set.references() {
         let (_, expected) = cases
             .iter()
@@ -534,4 +534,13 @@ fn correspondence_distinguishes_missing_incomplete_stale_and_later_capture() {
     );
     // Querying cannot mutate a saved context or turn extraction into a capture.
     assert_eq!(set.candidate().observation(), &observed(2));
+}
+
+#[test]
+fn nonempty_source_set_with_no_references_differs_from_zero_sources() {
+    let set = collection(vec![blank(b"empty-references", 3)]).unwrap();
+    assert!(set.all_references_resolved());
+    assert_eq!(set.sources().len(), 1);
+    assert!(set.sources()[0].all_references_resolved());
+    assert_eq!(collection(vec![]).unwrap_err(), SourceSetError::Empty);
 }

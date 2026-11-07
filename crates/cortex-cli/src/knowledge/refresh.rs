@@ -353,9 +353,9 @@ impl<'a> RefreshView<'a> {
     }
 }
 
-/// Qualify a snapshot against a caller-supplied later capture. Performs no I/O.
+/// Inspect snapshot validity against a caller-supplied later capture. Performs no I/O.
 /// Caller assertions cannot substitute for real reinspection or authenticate IDs.
-pub fn qualify<'a>(
+pub fn inspect_validity<'a>(
     generation: &'a RefreshGeneration,
     latest: Option<&CandidateObservation>,
 ) -> Result<RefreshView<'a>, SourceSetExtractionError> {
@@ -368,7 +368,9 @@ pub fn qualify<'a>(
         Some(Validity::Stale)
     } else {
         match &correspondence {
-            BindingDecision::Compatible(_) if generation.set.complete() => Some(Validity::Current),
+            BindingDecision::Compatible(_) if generation.set.all_references_resolved() => {
+                Some(Validity::Current)
+            }
             BindingDecision::Incompatible(_) | BindingDecision::Stale(_) => Some(Validity::Stale),
             _ => None,
         }
@@ -381,8 +383,8 @@ pub fn qualify<'a>(
     })
 }
 
-/// Obtain a real bounded later repository capture and qualify the refresh profile.
-/// Legacy source-set qualification deliberately continues to reject this profile.
+/// Obtain a real bounded later repository capture and inspect refresh-profile validity.
+/// The legacy source-set validity inspection still rejects this refresh profile.
 pub fn reinspect<'a>(
     repo: &Path,
     generation: &'a RefreshGeneration,
@@ -394,7 +396,7 @@ pub fn reinspect<'a>(
         id,
     )
     .map_err(ExtractionError::Inspection)?;
-    qualify(generation, Some(&latest))
+    inspect_validity(generation, Some(&latest))
 }
 
 #[cfg(test)]
