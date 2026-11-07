@@ -57,6 +57,7 @@ pub(super) fn view(projection: &DomainProjection) -> Value {
             "domain_identity_recorded":d.identity.is_some(),"cancellation_requested":d.cancelled,
             "retained_binding_observation":binding_view(d.binding_observation.as_ref()),
             "native_closure_inspection":closure_view(d),
+            "retained_cgroup_tree_observation":tree_view(d),
             "administrative_disposition":format!("{:?}",d.disposition),
             "reusable_capacity":capacity,"cumulative_consumption":usage,
             "closure_evidence_recorded":d.closure.is_some(),"additional_settlements":d.settlements.len(),"closure_source":"CALLER_ASSERTION_NOT_AUTHENTICATED",
@@ -70,6 +71,31 @@ pub(super) fn view(projection: &DomainProjection) -> Value {
         "inspection_authority":"NONE","host_reinspection":false,
         "current_liveness":"NOT_OBSERVED","host_qualification":"NOT_INFERRED",
         "live_provider":"UNAVAILABLE","physical_reserves":"NOT_ESTABLISHED"})
+}
+
+fn tree_view(record: &DomainRecord) -> Value {
+    let latest = record.closure_tree_observations.last().map(|tree| {
+        json!({
+            "observed_at":tree.sample.observed_at,
+            "nodes":tree.nodes.len(),
+            "observed_members":tree.nodes.iter().map(|node|node.members.len()).sum::<usize>(),
+            "any_population":tree.nodes.iter().any(|node|node.populated),
+            "sampled_cpu_micros":tree.sample.cpu_micros,
+            "sampled_memory_peak_bytes":tree.sample.memory_peak,
+            "private_identity_values":"OMITTED"
+        })
+    });
+    json!({
+        "retained_observations":record.closure_tree_observations.len(),
+        "latest":latest,
+        "coverage":"BOUNDED_RECURSIVE_CGROUP_READBACK_NON_ATOMIC",
+        "whole_domain_closure_proven":false,
+        "helper_and_stream_coverage_proven":false,
+        "snapshot_exclusion_proven":false,
+        "final_consumption_proven":false,
+        "current_liveness":"NOT_OBSERVED",
+        "settlement_authorized":false
+    })
 }
 
 fn closure_view(record: &DomainRecord) -> Value {

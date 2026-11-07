@@ -16,6 +16,8 @@ mod domain_manager;
 #[cfg(target_os = "linux")]
 mod domain_runtime;
 #[cfg(target_os = "linux")]
+mod domain_tree;
+#[cfg(target_os = "linux")]
 pub use domain_manager::{
     DomainCause, DomainDiagnostic, DomainPhaseDiagnostic, ServiceLimits, ServiceSelection,
     SystemdNonceDomain,
@@ -24,7 +26,8 @@ pub use domain_manager::{
 pub use domain_runtime::{
     DomainOperations, DomainPreparation, DomainRecoveryObservation, DomainRun, PreparedNonceDomain,
     cancel_nonce_domain, cancel_prepared_nonce_domain, execute_nonce_domain, inspect_nonce_domain,
-    observe_nonce_domain_closure, prepare_nonce_domain, release_nonce_domain,
+    observe_nonce_domain_closure, observe_nonce_domain_closure_tree, prepare_nonce_domain,
+    release_nonce_domain,
 };
 
 #[cfg(target_os = "linux")]
