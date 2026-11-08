@@ -786,6 +786,60 @@ struct DurableFixture {
 fn durable(mode: &str) -> DurableFixture {
     durable_with_transport(mode, None)
 }
+fn seed_store(
+    path: &Path,
+    key: &StoreKey,
+    initial: &cortex_core::program::ProgramDefinition,
+    operations: &[Operation],
+) -> ProgramStore {
+    // Preparing the encrypted fixture is separate from the supervised operation.
+    // Keep its finite setup budget outside the returned handle's original window.
+    let preparation = ProgramStore::create_supervised_fixture(
+        path,
+        key,
+        initial.clone(),
+        ReadLimits::new(16_000_000, Duration::from_secs(5)).unwrap(),
+    )
+    .expect("fixture preparation must create one store");
+    for (index, operation) in operations.iter().enumerate() {
+        let receipt = preparation
+            .admit(key, operation.clone())
+            .unwrap_or_else(|failure| {
+                panic!(
+                    "fixture preparation failed at ordinal {} of {}: {failure:?}",
+                    index + 1,
+                    operations.len()
+                )
+            });
+        assert!(!receipt.duplicate);
+        assert_eq!(receipt.ordinal, (index + 1) as u64);
+    }
+    let identity = preparation.id();
+    drop(preparation);
+    let store = ProgramStore::open(
+        path,
+        key,
+        Access::ReadOnly,
+        ReadLimits::new(16_000_000, Duration::from_millis(200)).unwrap(),
+    )
+    .expect("fixture operation handle must reopen the prepared store");
+    assert!(store.id() == identity, "fixture store identity changed");
+    assert_eq!(store.read_limits().timeout(), Duration::from_millis(200));
+    assert_eq!(store.read_limits().bytes(), 16_000_000);
+    let retained = store
+        .load(key, Access::ReadOnly)
+        .expect("fixture operation handle must reconstruct prepared history");
+    assert!(
+        retained.initial() == initial,
+        "fixture initial contract changed"
+    );
+    assert_eq!(retained.revision(), operations.len() as u64);
+    assert!(
+        retained.operations() == operations,
+        "fixture operation history changed"
+    );
+    store
+}
 fn durable_with_transport(mode: &str, transport: Option<TransportLimits>) -> DurableFixture {
     let root = Temp::new();
     let repo = root.0.join("repo");
@@ -818,16 +872,12 @@ fn durable_with_transport(mode: &str, transport: Option<TransportLimits>) -> Dur
     .unwrap();
     support::prepare(&mut kernel, &scope, &spec);
     let key = StoreKey::new(&[73_u8; 32]).unwrap();
-    let store = ProgramStore::create_supervised_fixture(
+    let store = seed_store(
         &root.0.join("store"),
         &key,
-        kernel.initial().clone(),
-        ReadLimits::new(16_000_000, Duration::from_millis(200)).unwrap(),
-    )
-    .unwrap();
-    for operation in kernel.operations() {
-        store.admit(&key, operation.clone()).unwrap();
-    }
+        kernel.initial(),
+        kernel.operations(),
+    );
     let dispatch = support::dispatch_operation(&kernel, &scope);
     DurableFixture {
         root,
@@ -1190,13 +1240,7 @@ fn a_pin_cannot_cross_to_different_required_controls_with_identical_package_byte
     use cortex_core::program::executor::*;
     let f = durable("count");
     let original = f.store.load(&f.key, Access::ReadOnly).unwrap();
-    let store = ProgramStore::create_supervised_fixture(
-        &f.root.0.join("other-store"),
-        &f.key,
-        original.initial().clone(),
-        ReadLimits::new(16_000_000, Duration::from_millis(200)).unwrap(),
-    )
-    .unwrap();
+    let mut operations = Vec::new();
     for operation in original.operations() {
         let mut changed = operation.clone();
         if let WorkflowCommand::PrepareExecutorInput(ref mut request) = changed.command {
@@ -1224,8 +1268,14 @@ fn a_pin_cannot_cross_to_different_required_controls_with_identical_package_byte
                 Requirements::new(request.requirements.reference().clone(), requirements, 3)
                     .unwrap();
         }
-        store.admit(&f.key, changed).unwrap();
+        operations.push(changed);
     }
+    let store = seed_store(
+        &f.root.0.join("other-store"),
+        &f.key,
+        original.initial(),
+        &operations,
+    );
     let before = store.load(&f.key, Access::ReadOnly).unwrap().revision();
     assert!(matches!(
         execute_fixture(
