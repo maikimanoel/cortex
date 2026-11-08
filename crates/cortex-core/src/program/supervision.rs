@@ -98,6 +98,9 @@ pub struct ScopeControls {
 /// This is data consumed by the existing authority/journal path, not a grant.
 #[derive(Clone, PartialEq, Eq)]
 pub struct OwnedScopeSpec {
+    /// Explicit charged-memory accounting scope for new admissions. Historical
+    /// specifications lacked this correspondence and retain None on replay.
+    pub memory_resource: Option<Box<super::memory::MemoryResource>>,
     /// Exact request/configuration identity.
     pub reference: SourceReference,
     /// Fresh single-use unit name: `cortex-qualification-<ASCII identifier>.scope`.
@@ -166,6 +169,32 @@ pub struct ScopeObservation {
     pub memory_peak_bytes: Option<u64>,
     /// Latest retained process/thread peak, when available.
     pub tasks_peak: Option<u64>,
+}
+impl ScopeObservation {
+    /// The legacy owned-scope mechanism reports charged memory, but its identity
+    /// lacks a retained host/boot pair. Do not invent a fully scoped measurement.
+    pub fn charged_memory_peak(&self) -> super::memory::MemoryObservation {
+        super::memory::MemoryObservation::new(
+            super::memory::MemoryCorrespondence::ScopeUnestablished(
+                super::memory::MemoryBasis::CgroupCharged,
+            ),
+            self.memory_peak_bytes,
+        )
+    }
+    /// Retained control readback, separate from observed use. The legacy scope
+    /// identity does not establish a complete host/boot measurement scope.
+    pub fn charged_memory_limit(&self) -> Option<super::memory::MemoryLimit> {
+        self.controls.as_ref().and_then(|c| {
+            super::memory::MemoryLimit::new(
+                super::memory::MemoryCorrespondence::ScopeUnestablished(
+                    super::memory::MemoryBasis::CgroupCharged,
+                ),
+                c.memory_bytes,
+                super::memory::MemoryLimitKind::ReadBack,
+            )
+            .ok()
+        })
+    }
 }
 /// Explicit opt-in publication requirement. Existing specifications retain their
 /// historical meaning when this policy is absent.
@@ -352,6 +381,14 @@ fn absolute_bounded_path(path: &std::path::Path, bounds: ProgramLimits) -> bool 
             .any(|c| matches!(c, Component::ParentDir | Component::CurDir))
 }
 impl OwnedScopeSpec {
+    /// Exact declared accounting dimension. Historical absence stays unestablished.
+    pub fn memory_dimension(&self) -> super::scheduling::Resource {
+        self.memory_resource
+            .clone()
+            .map(super::scheduling::Resource::MemoryBytes)
+            .unwrap_or(super::scheduling::Resource::UnspecifiedMemoryBytes)
+    }
+
     /// Validate an exact bounded request without inspecting host support or
     /// manufacturing authority from paths, names or caller provenance.
     pub fn validate(
@@ -381,6 +418,12 @@ impl OwnedScopeSpec {
             if !absolute_bounded_path(path, bounds) || path == std::path::Path::new("/") {
                 return Err(ProgramError::Structure);
             }
+        }
+        if self.memory_resource.as_ref().is_some_and(|m| {
+            m.basis() != super::memory::MemoryBasis::CgroupCharged
+                || !matches!(m.scope(), super::memory::MemoryScope::AccountingPool(_))
+        }) {
+            return Err(ProgramError::Structure);
         }
         let c = &self.controls;
         if c.cpu_quota_us == 0

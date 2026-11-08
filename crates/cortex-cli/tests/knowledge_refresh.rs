@@ -254,11 +254,15 @@ fn unchanged_bytes_on_new_candidate_reuse_parsing_but_rebind_every_identity() {
         assert!(s.provenance().version().contains("origin=refresh:"));
     }
     assert_eq!(
-        reinspect(&r.path, &original, id(20)).unwrap().validity(),
+        reinspect(&r.path, &original, id(20))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Stale)
     );
     assert_eq!(
-        reinspect(&r.path, next, id(20)).unwrap().validity(),
+        reinspect(&r.path, next, id(20))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Current)
     );
     assert_full_reconstruction(&r, next);
@@ -445,7 +449,9 @@ fn dirty_same_head_wrong_repository_candidate_and_unborn_never_publish() {
         assert_eq!(cache.retained(), Some(&prior));
         assert_eq!(snapshot(&r), before);
         assert_eq!(
-            reinspect(&r.path, &prior, id(20)).unwrap().validity(),
+            reinspect(&r.path, &prior, id(20))
+                .unwrap()
+                .resolved_projection_validity(),
             Some(Validity::Stale)
         );
     }
@@ -683,10 +689,15 @@ fn actual_refresh_consumer_distinguishes_current_stale_unestablished_and_legacy_
     let c = contract(&r);
     let mut cache = RefreshCache::new();
     let g = both(&r, 1, &mut cache);
-    assert_eq!(inspect_validity(g, None).unwrap().validity(), None);
+    assert_eq!(
+        inspect_validity(g, None)
+            .unwrap()
+            .resolved_projection_validity(),
+        None
+    );
     for n in 3..=5 {
         let view = reinspect(&r.path, g, id(n)).unwrap();
-        assert_eq!(view.validity(), Some(Validity::Stale));
+        assert_eq!(view.resolved_projection_validity(), Some(Validity::Stale));
         assert_eq!(
             view.correspondence(),
             &BindingDecision::Stale(BindingStaleness::ObservationOrder)
@@ -694,7 +705,7 @@ fn actual_refresh_consumer_distinguishes_current_stale_unestablished_and_legacy_
     }
     let view = reinspect(&r.path, g, id(6)).unwrap();
     assert!(view.profile_matches());
-    assert_eq!(view.validity(), Some(Validity::Current));
+    assert_eq!(view.resolved_projection_validity(), Some(Validity::Current));
     assert_eq!(view.generation(), g);
     let latest = inspect_candidate(&r.path, &c, id(6)).unwrap();
     let incomplete = CandidateObservation::new(
@@ -711,14 +722,21 @@ fn actual_refresh_consumer_distinguishes_current_stale_unestablished_and_legacy_
         latest.basis().cloned(),
     );
     assert_eq!(
-        inspect_validity(g, Some(&incomplete)).unwrap().validity(),
+        inspect_validity(g, Some(&incomplete))
+            .unwrap()
+            .resolved_projection_validity(),
         None
     );
     let legacy = source_set::reinspect(&r.path, g.set(), id(8)).unwrap();
     assert!(!legacy.profile_matches());
-    assert_eq!(legacy.validity(), Some(Validity::Stale));
+    assert_eq!(legacy.resolved_projection_validity(), Some(Validity::Stale));
     let only = refresh(&r, &c, 10, &[b"a.json"], &mut cache).unwrap();
-    assert_eq!(reinspect(&r.path, only, id(20)).unwrap().validity(), None);
+    assert_eq!(
+        reinspect(&r.path, only, id(20))
+            .unwrap()
+            .resolved_projection_validity(),
+        None
+    );
 }
 
 #[test]

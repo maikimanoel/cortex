@@ -22,7 +22,7 @@ impl DomainId {
     }
 }
 /// Physical pool correspondence supplied by the operator; labels are not proof.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PoolIdentity {
     /// Stable physical allocation reference, not a program-local alias.
     pub physical: String,
@@ -127,6 +127,26 @@ pub struct DomainIdentity {
     pub boot: String,
 }
 impl DomainIdentity {
+    /// Derive charged-memory correspondence from the retained actual incarnation.
+    /// Structural correspondence is not authenticated measurement or final usage.
+    pub fn charged_memory_resource(&self) -> Result<super::memory::MemoryResource, DomainError> {
+        use super::memory::*;
+        self.validate()?;
+        MemoryResource::new(
+            MemoryBasis::CgroupCharged,
+            MemoryScope::Cgroup {
+                host: self.pool.host.clone(),
+                boot: self.boot.clone(),
+                manager: self.manager.clone(),
+                invocation: self.invocation.clone(),
+                path: self.control_group.clone(),
+                device: self.cgroup_device,
+                inode: self.cgroup_inode,
+            },
+        )
+        .map_err(|_| DomainError::Correspondence)
+    }
+
     /// Validate structural identity, without authenticating observations.
     pub fn validate(&self) -> Result<(), DomainError> {
         self.pool.validate()?;
@@ -203,6 +223,18 @@ pub struct DomainBindingObservation {
     pub basis: SourceReference,
 }
 impl DomainBindingObservation {
+    /// Charged-memory control read back from this exact bound cgroup.
+    /// It is neither consumption nor independent enforcement qualification.
+    pub fn charged_memory_limit(&self) -> Result<super::memory::MemoryLimit, DomainError> {
+        self.validate()?;
+        super::memory::MemoryLimit::new(
+            super::memory::MemoryCorrespondence::Scoped(self.identity.charged_memory_resource()?),
+            self.controls.memory_bytes,
+            super::memory::MemoryLimitKind::ReadBack,
+        )
+        .map_err(|_| DomainError::Structure)
+    }
+
     /// Validate bounded correspondence without authenticating host assertions.
     pub fn validate(&self) -> Result<(), DomainError> {
         self.identity.validate()?;
@@ -270,6 +302,16 @@ pub struct DomainClosureObservation {
     pub basis: SourceReference,
 }
 impl DomainClosureObservation {
+    /// Actual charged-memory peak sample of the retained cgroup incarnation.
+    /// Missing counters remain missing; this is not final usage or pool occupancy.
+    pub fn charged_memory_peak(&self) -> Result<super::memory::MemoryObservation, DomainError> {
+        self.validate()?;
+        Ok(super::memory::MemoryObservation::new(
+            super::memory::MemoryCorrespondence::Scoped(self.identity.charged_memory_resource()?),
+            self.memory_peak,
+        ))
+    }
+
     /// Validate the bounded sample without treating it as physical closure proof.
     pub fn validate(&self) -> Result<(), DomainError> {
         self.identity.validate()?;
@@ -790,7 +832,7 @@ impl DomainRecord {
                 .effect
                 .demand
                 .iter()
-                .any(|d| d.resource == resource)
+                .any(|d| d.resource.clone() == resource)
             && !self
                 .closure
                 .iter()
@@ -877,18 +919,18 @@ impl DomainProjection {
     pub fn held(&self, resource: Resource) -> Result<u64, DomainError> {
         self.domains
             .iter()
-            .filter(|d| d.holds(resource))
+            .filter(|d| d.holds(resource.clone()))
             .try_fold(0u64, |n, d| {
                 n.checked_add(
                     d.intent
                         .effect
                         .demand
                         .iter()
-                        .find(|v| v.resource == resource)
+                        .find(|v| v.resource.clone() == resource)
                         .and_then(|v| v.amount)
                         .ok_or(DomainError::Structure)?,
                 )
-                .ok_or(DomainError::Capacity(resource))
+                .ok_or(DomainError::Capacity(resource.clone()))
             })
     }
     /// Account known use and future reservations; an unknown post-create debit blocks.
@@ -943,8 +985,9 @@ impl DomainProjection {
                 }
                 let mut seen = BTreeSet::new();
                 for c in &pool.capacities {
-                    if !reusable(c.resource)
-                        || !seen.insert(c.resource)
+                    if matches!(&c.resource, Resource::MemoryBytes(m) if !m.accounts_pool(&pool.identity))
+                        || !reusable(c.resource.clone())
+                        || !seen.insert(c.resource.clone())
                         || !c.declared_enforceable
                         || c.available.is_none_or(|n| n <= c.verification_reserve)
                     {
@@ -984,7 +1027,7 @@ impl DomainProjection {
                 }
                 let mut seen = BTreeSet::new();
                 for d in &intent.effect.demand {
-                    if !seen.insert(d.resource) || d.amount.is_none_or(|n| n == 0) {
+                    if !seen.insert(d.resource.clone()) || d.amount.is_none_or(|n| n == 0) {
                         return Err(DomainError::Structure);
                     }
                 }
@@ -993,20 +1036,23 @@ impl DomainProjection {
                         .effect
                         .demand
                         .iter()
-                        .find(|d| d.resource == cap.resource)
+                        .find(|d| d.resource.clone() == cap.resource.clone())
                         .and_then(|d| d.amount)
-                        .ok_or(DomainError::Capacity(cap.resource))?;
+                        .ok_or(DomainError::Capacity(cap.resource.clone()))?;
                     if self
-                        .held(cap.resource)?
+                        .held(cap.resource.clone())?
                         .checked_add(requested)
                         .is_none_or(|n| n > cap.available.unwrap_or(0) - cap.verification_reserve)
                     {
-                        return Err(DomainError::Capacity(cap.resource));
+                        return Err(DomainError::Capacity(cap.resource.clone()));
                     }
                 }
                 if intent.effect.demand.iter().any(|d| {
-                    reusable(d.resource)
-                        && !pool.capacities.iter().any(|c| c.resource == d.resource)
+                    reusable(d.resource.clone())
+                        && !pool
+                            .capacities
+                            .iter()
+                            .any(|c| c.resource.clone() == d.resource.clone())
                 }) {
                     return Err(DomainError::Structure);
                 }
@@ -1249,15 +1295,15 @@ impl DomainProjection {
                         }
                         let mut seen = BTreeSet::new();
                         for resource in &receipt.released {
-                            if !record.holds(*resource)
-                                || !reusable(*resource)
-                                || !seen.insert(*resource)
+                            if !record.holds(resource.clone())
+                                || !reusable(resource.clone())
+                                || !seen.insert(resource.clone())
                                 || !record
                                     .intent
                                     .effect
                                     .demand
                                     .iter()
-                                    .any(|d| d.resource == *resource)
+                                    .any(|d| d.resource.clone() == *resource)
                             {
                                 return Err(DomainError::Structure);
                             }
@@ -1312,7 +1358,8 @@ fn reusable(resource: Resource) -> bool {
             | Resource::BuildJobs
             | Resource::TestProcesses
             | Resource::CpuMillicores
-            | Resource::RamBytes
+            | Resource::UnspecifiedMemoryBytes
+            | Resource::MemoryBytes(_)
             | Resource::DiskBytes
     )
 }

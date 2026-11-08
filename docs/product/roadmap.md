@@ -34,6 +34,11 @@ This does not require a fixed checklist, formal method or agent topology for eve
 | 006 — Unified Integration | PLANNED | 005 and all scheduled subsystem contracts | End-to-end evidence/authority/temporal coherence, exports, actual interoperability/portability and security validation with no bypass paths |
 | 007 — Public Readiness | PLANNED; publication is separately gated | 006 plus owner decisions | Reviewed release candidate, licensing/history/privacy/distribution decisions, preparation evidence; separate explicit owner launch authorization |
 
+The [semantic dimension extension](../architecture/semantic-contracts.md) refines
+memory accounting correspondence and the existing Knowledge inspection consumers.
+Its versioned representations and CLI migration do not complete a milestone,
+qualify a host, grant provider execution or activate the next GPE campaign.
+
 ## 001 and 001A: preserve the foundation
 
 001 delivers [CAP-CORE-001](capability-catalog.md#cap-core-001),

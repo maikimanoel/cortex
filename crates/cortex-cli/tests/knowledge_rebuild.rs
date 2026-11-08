@@ -372,7 +372,7 @@ fn assert_validity(repo: &Repo, set: &ReferenceSet, sequence: u64, expected: Opt
     read_only(repo, || {
         let retained = set.clone();
         let view = reinspect(&repo.path, set, id(sequence)).unwrap();
-        assert_eq!(view.validity(), expected);
+        assert_eq!(view.resolved_projection_validity(), expected);
         assert!(view.profile_matches());
         assert!(std::ptr::eq(view.set(), set));
         if let BindingDecision::Compatible(bound) = view.correspondence() {
@@ -825,14 +825,19 @@ fn dirty_and_incomplete_observation_transitions_cannot_establish_current() {
         );
         read_only(&repo, || {
             let view = inspect_validity(&set, Some(&partial)).unwrap();
-            assert_eq!(view.validity(), None);
+            assert_eq!(view.resolved_projection_validity(), None);
             assert_eq!(
                 view.correspondence(),
                 &BindingDecision::Insufficient(reason)
             );
         });
     }
-    assert_eq!(inspect_validity(&set, None).unwrap().validity(), None);
+    assert_eq!(
+        inspect_validity(&set, None)
+            .unwrap()
+            .resolved_projection_validity(),
+        None
+    );
 
     fs::write(repo.path.join("a.json"), A_OTHER).unwrap();
     let dirty = read_only(&repo, || inspect_candidate(&repo.path, &c, id(11)).unwrap());
@@ -846,7 +851,9 @@ fn dirty_and_incomplete_observation_transitions_cannot_establish_current() {
         }]
     );
     assert_eq!(
-        inspect_validity(&set, Some(&dirty)).unwrap().validity(),
+        inspect_validity(&set, Some(&dirty))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Stale)
     );
     assert_validity(&repo, &set, 12, Some(Validity::Stale));

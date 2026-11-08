@@ -3,7 +3,7 @@ use super::*;
 use std::collections::BTreeMap;
 
 /// Independently accounted resource dimensions; units are explicit in each variant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Resource {
     /// Declared logical worker capacity units. Reuse or cumulative charging is
     /// determined by the consuming profile, not by this unit or observed PIDs.
@@ -15,9 +15,11 @@ pub enum Resource {
     /// CPU rate/capacity in millicores: 1000 is one CPU equivalent.
     /// This is not cumulative CPU execution time.
     CpuMillicores,
-    /// Memory bytes under the consuming profile. Legacy values do not encode
-    /// an accounting basis; resident and charged memory are not interchangeable.
-    RamBytes,
+    /// Historical bytes whose measurement/accounting basis was not retained.
+    /// Replay preserves these values; they cannot justify a new memory admission.
+    UnspecifiedMemoryBytes,
+    /// Bytes with an explicit validated accounting basis and identity scope.
+    MemoryBytes(Box<super::memory::MemoryResource>),
     /// Managed disk bytes.
     DiskBytes,
     /// Elapsed milliseconds.
@@ -28,6 +30,32 @@ pub enum Resource {
     CiJobs,
     /// Model tokens, when actually measurable.
     ModelTokens,
+}
+impl Resource {
+    /// Construct a dimension with explicit validated memory meaning.
+    pub fn memory(
+        basis: super::memory::MemoryBasis,
+        scope: super::memory::MemoryScope,
+    ) -> Result<Self, ProgramError> {
+        Ok(Self::MemoryBytes(Box::new(
+            super::memory::MemoryResource::new(basis, scope)?,
+        )))
+    }
+    /// Require a logical accounting pool when memory enters an allocation.
+    /// Physical observation scopes are not additive reservations. Historical
+    /// unestablished units remain representable; current admission rejects them.
+    pub fn validate_accounting_scope(&self) -> Result<(), ProgramError> {
+        if matches!(self, Self::MemoryBytes(memory)
+            if !matches!(memory.scope(), super::memory::MemoryScope::AccountingPool(_)))
+        {
+            return Err(ProgramError::Structure);
+        }
+        Ok(())
+    }
+    /// Whether this historical dimension lacks a measurement/accounting basis.
+    pub fn memory_basis_unestablished(&self) -> bool {
+        matches!(self, Self::UnspecifiedMemoryBytes)
+    }
 }
 /// Explicit simulation capacity, never a measured host guarantee.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,12 +135,13 @@ pub fn simulate(
     let mut free = BTreeMap::new();
     let mut insufficient_reserve = BTreeSet::new();
     for c in capacities {
+        c.resource.validate_accounting_scope()?;
         if c.available.is_some_and(|v| v < c.verification_reserve) {
-            insufficient_reserve.insert(c.resource);
+            insufficient_reserve.insert(c.resource.clone());
         }
         if free
             .insert(
-                c.resource,
+                c.resource.clone(),
                 c.available
                     .map(|v| v.saturating_sub(c.verification_reserve)),
             )
@@ -123,11 +152,14 @@ pub fn simulate(
     }
     let mut ids = BTreeSet::new();
     for p in proposals {
+        for demand in &p.demand {
+            demand.resource.validate_accounting_scope()?;
+        }
         if !ids.insert(p.task.as_str())
             || p.demand.len() > 10
             || p.demand
                 .iter()
-                .map(|d| d.resource)
+                .map(|d| d.resource.clone())
                 .collect::<BTreeSet<_>>()
                 .len()
                 != p.demand.len()
@@ -168,28 +200,33 @@ pub fn simulate(
             held.push(WaitReason::Preconditions);
         }
         for d in &p.demand {
-            let cap = capacities.iter().find(|c| c.resource == d.resource);
+            if d.resource.memory_basis_unestablished() {
+                held.push(WaitReason::Unknown(d.resource.clone()));
+            }
+            let cap = capacities
+                .iter()
+                .find(|c| c.resource.clone() == d.resource.clone());
             if cap.is_some_and(|c| !c.declared_enforceable) {
-                held.push(WaitReason::Unenforceable(d.resource));
+                held.push(WaitReason::Unenforceable(d.resource.clone()));
             }
-            if insufficient_reserve.contains(&d.resource) {
-                held.push(WaitReason::Contention(d.resource));
+            if insufficient_reserve.contains(&d.resource.clone()) {
+                held.push(WaitReason::Contention(d.resource.clone()));
             }
-            match (d.amount, free.get(&d.resource).copied().flatten()) {
+            match (d.amount, free.get(&d.resource.clone()).copied().flatten()) {
                 (Some(required), Some(available)) if required > available => {
-                    if !insufficient_reserve.contains(&d.resource) {
-                        held.push(WaitReason::Contention(d.resource));
+                    if !insufficient_reserve.contains(&d.resource.clone()) {
+                        held.push(WaitReason::Contention(d.resource.clone()));
                     }
                 }
                 (Some(_), Some(_)) => {}
-                _ => held.push(WaitReason::Unknown(d.resource)),
+                _ => held.push(WaitReason::Unknown(d.resource.clone())),
             }
         }
         let proposed = held.is_empty();
         if proposed {
             for d in &p.demand {
                 let quantity = free
-                    .get_mut(&d.resource)
+                    .get_mut(&d.resource.clone())
                     .and_then(Option::as_mut)
                     .expect("checked capacity");
                 *quantity -= d.amount.expect("checked demand");

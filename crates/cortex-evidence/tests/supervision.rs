@@ -267,3 +267,145 @@ fn a_process_observation_cannot_supply_its_own_coordination_scope() {
             .is_empty()
     );
 }
+
+#[test]
+fn historical_unestablished_memory_reconstructs_but_cannot_prepare_or_dispatch_again() {
+    use cortex_core::program::scheduling::Resource;
+    let (mut current, scope, spec) = configured_scope_kernel(None);
+    prepare(&mut current, &scope, &spec);
+    let mut history = current.operations().to_vec();
+    for operation in &mut history {
+        if let Command::SupervisedEffect(event) = &mut operation.command {
+            match event.as_mut() {
+                EffectEvent::Policy(policy) => {
+                    for capacity in &mut policy.capacities {
+                        if matches!(capacity.resource, Resource::MemoryBytes(_)) {
+                            capacity.resource = Resource::UnspecifiedMemoryBytes;
+                        }
+                    }
+                }
+                EffectEvent::Grant(grant) => {
+                    for demand in &mut grant.ceilings {
+                        if matches!(demand.resource, Resource::MemoryBytes(_)) {
+                            demand.resource = Resource::UnspecifiedMemoryBytes;
+                        }
+                    }
+                }
+                EffectEvent::Reserve { intent, .. } => {
+                    for demand in &mut intent.demand {
+                        if matches!(demand.resource, Resource::MemoryBytes(_)) {
+                            demand.resource = Resource::UnspecifiedMemoryBytes;
+                        }
+                    }
+                }
+                EffectEvent::PrepareProcess { spec, .. } => {
+                    spec.containment.as_mut().unwrap().memory_resource = None
+                }
+                _ => {}
+            }
+        }
+    }
+    for prepared in [false, true] {
+        let count = history.len() - usize::from(!prepared);
+        let mut inputs = history[..count].iter().cloned();
+        let mut restored = CoordinationKernel::new_supervised_fixture(current.initial().clone())
+            .unwrap()
+            .reconstruct(|_| Ok::<_, KernelError>(inputs.next()))
+            .unwrap();
+        assert!(restored.operations() == &history[..count]);
+        assert!(
+            restored
+                .admit(history[count - 1].clone())
+                .unwrap()
+                .duplicate
+        );
+        let next = if prepared {
+            dispatch_operation(&restored, &scope)
+        } else {
+            let mut legacy_spec = spec.clone();
+            legacy_spec.containment.as_mut().unwrap().memory_resource = None;
+            operation(
+                &restored,
+                "new-prepare",
+                Command::SupervisedEffect(Box::new(EffectEvent::PrepareProcess {
+                    effect: intent(&scope).id,
+                    scope: scope.clone(),
+                    at: 2,
+                    spec: Box::new(legacy_spec),
+                })),
+            )
+        };
+        let before = restored.revision();
+        assert!(matches!(
+            restored.admit(next),
+            Err(KernelError::Operational(OperationalError::UnknownResource(
+                Resource::UnspecifiedMemoryBytes
+            )))
+        ));
+        assert_eq!(restored.revision(), before);
+        assert!(restored.fixture_effects().effects()[0].pending());
+        if prepared {
+            // The legacy inspection remains an advisory projection. Retaining
+            // its old raw quantity cannot authorize a new settlement today.
+            let mut dispatched_history = history.clone();
+            dispatched_history.push(dispatch_operation(&restored, &scope));
+            let mut inputs = dispatched_history.into_iter();
+            let mut dispatched =
+                CoordinationKernel::new_supervised_fixture(current.initial().clone())
+                    .unwrap()
+                    .reconstruct(|_| Ok::<_, KernelError>(inputs.next()))
+                    .unwrap();
+            let mut terminal = observation(
+                &spec,
+                1,
+                ProcessCompletion::Exited {
+                    code: Some(0),
+                    signal: None,
+                },
+                Quiescence::OwnedScopeEmpty,
+            );
+            terminal.containment = Some(Box::new(scope_observation(
+                spec.containment.as_ref().unwrap(),
+                Some(false),
+            )));
+            effect(
+                &mut dispatched,
+                "legacy-terminal",
+                EffectEvent::ProcessObserved {
+                    effect: intent(&scope).id,
+                    scope: scope.clone(),
+                    at: 4,
+                    observation: terminal,
+                },
+            );
+            let recovery = dispatched
+                .fixture_effects()
+                .inspect_process_recovery(&intent(&scope).id, &scope)
+                .unwrap();
+            assert!(recovery.blockers.is_empty());
+            let resolution = recovery
+                .candidate
+                .expect("legacy advisory projection retained");
+            let prior = dispatched.revision();
+            let reconcile = operation(
+                &dispatched,
+                "new-reconcile",
+                Command::SupervisedEffect(Box::new(EffectEvent::Reconcile {
+                    effect: intent(&scope).id,
+                    scope: scope.clone(),
+                    at: 5,
+                    resolution,
+                    basis: source("legacy-proposal-is-not-admission"),
+                })),
+            );
+            assert!(matches!(
+                dispatched.admit(reconcile),
+                Err(KernelError::Operational(OperationalError::UnknownResource(
+                    Resource::UnspecifiedMemoryBytes
+                )))
+            ));
+            assert_eq!(dispatched.revision(), prior);
+            assert!(dispatched.fixture_effects().effects()[0].pending());
+        }
+    }
+}

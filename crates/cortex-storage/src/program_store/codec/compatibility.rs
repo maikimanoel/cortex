@@ -34,7 +34,7 @@ fn retained_resource_dependency_and_consumption_tokens_are_not_rust_spellings() 
         assert!(Resource::read(&json!(renamed)).is_err());
     }
     for (value, token) in [
-        (Resource::RamBytes, "RamBytes"),
+        (Resource::UnspecifiedMemoryBytes, "RamBytes"),
         (Resource::DiskBytes, "DiskBytes"),
         (Resource::OutputBytes, "OutputBytes"),
         (Resource::CiJobs, "CiJobs"),
@@ -271,4 +271,128 @@ fn retained_signal_position_and_constructor_rejection_are_independent_of_rust_na
     ] {
         assert!(Notification::read(&invalid).is_err());
     }
+}
+
+#[test]
+fn memory_resource_versions_preserve_legacy_bytes_and_explicit_scope() {
+    use cortex_core::program::{domain::PoolIdentity, memory::*};
+    let resource = Resource::memory(
+        MemoryBasis::CgroupCharged,
+        MemoryScope::AccountingPool(PoolIdentity {
+            physical: "physical".into(),
+            incarnation: "allocation".into(),
+            host: "host".into(),
+            boot: "boot".into(),
+        }),
+    )
+    .unwrap();
+    // Literal positional specification, independent of the new writer.
+    const BYTES: &[u8] = br#"["memory-resource-v1","cgroup-charged",["accounting-pool-v1",["physical","allocation","host","boot"]]]"#;
+    roundtrip(resource, BYTES);
+    roundtrip(Resource::UnspecifiedMemoryBytes, br#""RamBytes""#);
+    assert!(Resource::read(&json!("UnspecifiedMemoryBytes")).is_err());
+    for bytes in [
+        br#"["memory-resource-v2","cgroup-charged",["accounting-pool-v1",["physical","allocation","host","boot"]]]"#.as_slice(),
+        br#"["memory-resource-v1","unknown",["accounting-pool-v1",["physical","allocation","host","boot"]]]"#.as_slice(),
+        br#"["memory-resource-v1","process-resident",["cgroup-v1","host","boot","manager","invocation","/scope",1,2]]"#.as_slice(),
+        br#"["memory-resource-v1","cgroup-charged",["cgroup-v1","host","boot","manager","invocation","/scope",1,0]]"#.as_slice(),
+        br#"["memory-resource-v1","process-resident",["process-v1","host","boot",1]]"#.as_slice(),
+    ] {
+        assert!(Resource::read(&serde_json::from_slice::<V>(bytes).unwrap()).is_err());
+    }
+}
+
+#[test]
+fn scoped_memory_wrapper_keeps_thirteen_field_legacy_scope_and_rejects_lossy_forms() {
+    use cortex_core::{
+        program::{domain::PoolIdentity, memory::*, supervision::*},
+        temporal::SourceReference,
+    };
+    // Positional bytes independently specified from the accepted 13-field layout.
+    const OLD: &[u8] = br#"[[["operator","codec"],"fixture","1"],"cortex-qualification-codec.scope",[47,99],[47,114],[47,108],[["operator","codec"],"fixture","1"],[47,109],[["operator","codec"],"fixture","1"],[100000,100000,536870912,0,8],2000,500,500,["scope-only-inert-v1"]]"#;
+    const MEMORY: &str = r#"["memory-resource-v1","cgroup-charged",["accounting-pool-v1",["physical","allocation","host","boot"]]]"#;
+    let reference = SourceReference::operator_reported("codec", "fixture", "1").unwrap();
+    let mut scope = OwnedScopeSpec {
+        memory_resource: None,
+        reference: reference.clone(),
+        unit: "cortex-qualification-codec.scope".into(),
+        delegated_root: "/c".into(),
+        runtime_dir: "/r".into(),
+        launcher: "/l".into(),
+        launcher_identity: reference.clone(),
+        manager: "/m".into(),
+        manager_identity: reference,
+        controls: ScopeControls {
+            cpu_quota_us: 100000,
+            cpu_period_us: 100000,
+            memory_bytes: 536870912,
+            swap_bytes: 0,
+            tasks_max: 8,
+        },
+        cpu_time_ms: 2000,
+        cancellation_grace_ms: 500,
+        escalation_ms: 500,
+        isolation: ScopeIsolation::ScopeOnlyInertFixture,
+    };
+    roundtrip(scope.clone(), OLD);
+    let memory = MemoryResource::new(
+        MemoryBasis::CgroupCharged,
+        MemoryScope::AccountingPool(PoolIdentity {
+            physical: "physical".into(),
+            incarnation: "allocation".into(),
+            host: "host".into(),
+            boot: "boot".into(),
+        }),
+    )
+    .unwrap();
+    scope.memory_resource = Some(Box::new(memory));
+    let bytes = format!(
+        "[\"owned-scope-memory-v1\",{},{}]",
+        std::str::from_utf8(OLD).unwrap(),
+        MEMORY
+    );
+    roundtrip(scope.clone(), bytes.as_bytes());
+    let valid: V = serde_json::from_str(&bytes).unwrap();
+    // The original decoder's exact-13-fields boundary cannot silently drop scope.
+    assert!(arr(&valid, 13).is_err());
+    for case in 0..6 {
+        let mut invalid = valid.clone();
+        match case {
+            0 => invalid[0] = json!("owned-scope-memory-v2"),
+            1 => {
+                invalid.as_array_mut().unwrap().pop();
+            }
+            2 => {
+                invalid[1].as_array_mut().unwrap().pop();
+            }
+            3 => invalid[2][1] = json!("process-resident"),
+            4 => invalid[2] = json!("RamBytes"),
+            _ => {
+                invalid[2][2] = json!([
+                    "cgroup-v1",
+                    "host",
+                    "boot",
+                    "manager",
+                    "invocation",
+                    "/scope",
+                    1,
+                    2
+                ])
+            }
+        }
+        assert!(OwnedScopeSpec::read(&invalid).is_err(), "case {case}");
+    }
+    scope.memory_resource = Some(Box::new(
+        MemoryResource::new(
+            MemoryBasis::ProcessResident,
+            MemoryScope::AccountingPool(PoolIdentity {
+                physical: "physical".into(),
+                incarnation: "allocation".into(),
+                host: "host".into(),
+                boot: "boot".into(),
+            }),
+        )
+        .unwrap(),
+    ));
+    assert!(scope.write().is_err());
 }

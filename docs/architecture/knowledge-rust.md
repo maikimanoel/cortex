@@ -148,3 +148,19 @@ These files define acceptance mechanisms; actual counts, commands, candidate,
 toolchain and delivery results belong in the external candidate-scoped handoff.
 This increment does not complete CAP-KNW-001, 003-B, Milestone 003 or a multi-format
 consumer, and releases no downstream consumer automatically.
+
+## Independent inspection dimensions
+
+The [inspection contract version 2](semantic-contracts.md#knowledge-inspection-contract-version-2)
+separates supplied candidate/profile correspondence, bounded extraction coverage,
+resolution of emitted references and support for a particular lexical claim.
+The view exposes `extraction_coverage()`, `reference_resolution()` and
+`inspect_claim()`; `resolved_projection_validity()` explicitly names the retained
+resolution-dependent summary. It is not a completeness or semantic-truth flag.
+
+The adapter's supported subset and omissions above still apply. Zero emitted
+references may satisfy `all_references_resolved()` without complete extraction.
+A retained unresolved reference can support its lexical occurrence while its
+target remains outside coverage or missing. Source acquisition remains exclusive
+to the documented extraction/reinspection paths; inspecting a retained view does
+not acquire files or refresh provenance.

@@ -27,12 +27,13 @@
 //!     }
 //!     let view = reinspect(repo, &set, ObservationId::new("sources", 6)?)?;
 //!     // Current validity, if established, is scoped; relations stay Unverified.
-//!     let _validity = view.validity();
+//!     let _validity = view.resolved_projection_validity();
 //!     Ok(())
 //! }
 //! ```
 
 use super::{ExtractionError, json};
+use cortex_core::knowledge::inspection::*;
 use cortex_core::{
     binding::*,
     knowledge::{source_set::*, *},
@@ -203,9 +204,24 @@ impl<'a> SourceSetView<'a> {
     pub fn correspondence(&self) -> &BindingDecision {
         &self.correspondence
     }
-    /// Evidence vocabulary; None is unestablished, never an implicit Current.
-    pub fn validity(&self) -> Option<Validity> {
+    /// Preserved version-1 resolved-projection predicate, not generic knowledge validity.
+    /// Current requires correspondence, profile match and all emitted references resolved.
+    pub fn resolved_projection_validity(&self) -> Option<Validity> {
         self.validity
+    }
+    /// Bounded extraction scope and omissions, not a completeness judgment.
+    pub fn extraction_coverage(&self) -> ExtractionCoverage {
+        super::coverage(self.profile_matches, ExtractionProfile::JsonSourceSet)
+    }
+    /// Emitted-reference resolution within the selected-source collection.
+    pub fn reference_resolution(&self) -> ReferenceResolution {
+        ReferenceResolution::for_set(self.set)
+    }
+    /// Evaluate a lexical claim in this collection under current source/profile correspondence.
+    /// It does not alter the resolution retained by each source snapshot.
+    pub fn inspect_claim(&self, claim: ReferenceClaim<'_>) -> ClaimInspection<'a> {
+        super::claim_context_gap(claim, self.profile_matches, &self.correspondence)
+            .unwrap_or_else(|| inspect_retained_set_claim(self.set, claim))
     }
     /// Exact collection and every per-source mechanism/profile match.
     pub fn profile_matches(&self) -> bool {

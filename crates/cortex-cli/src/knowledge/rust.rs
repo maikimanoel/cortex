@@ -64,6 +64,7 @@ mod lexer;
 mod parser;
 
 use super::KnowledgeView;
+use cortex_core::knowledge::inspection::*;
 use cortex_core::{binding::*, knowledge::*};
 use cortex_evidence::unified::Validity;
 use std::{error::Error, fmt, path::Path, time::SystemTime};
@@ -216,6 +217,7 @@ pub fn inspect_validity<'a>(
         correspondence,
         validity,
         profile_matches: profile,
+        coverage: super::coverage(profile, ExtractionProfile::RustLexical),
     })
 }
 /// Obtain a real later bounded capture and inspect validity without changing the historical index.

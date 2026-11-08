@@ -81,9 +81,9 @@ Old indexes remain inspectable against their original candidate without relabeli
 source data; `reinspect` actually obtains the observation.
 Both reuse Core binding, without making a verification judgment:
 
-| Context | Existing Evidence validity |
+| Context | Resolved-projection validity summary |
 | --- | --- |
-| Compatible clean candidate, matching adapter profile, all references resolved within the declared subset | `Some(Current)` for this captured context/coverage only |
+| Compatible clean candidate, matching adapter profile, all emitted references resolved within the declared subset | `Some(Current)` for this captured context/coverage only |
 | Demonstrated candidate/revision/state or adapter-profile mismatch | `Some(Stale)`; original facts remain historical |
 | Missing/uncertain observation or unresolved reference coverage | `None` (unestablished), never implicit CURRENT |
 
@@ -206,7 +206,7 @@ is not a recoverable-memory guarantee.
 Refresh collection/source mechanisms and profiles are distinct from legacy profiles.
 They declare the resolver dependency and actual parsed/reused provenance. Refresh
 `inspect_validity`/`reinspect` use existing correspondence and Evidence validity: matching
-supported complete coverage can be CURRENT, known mismatch is STALE, and missing or
+supported profile and fully resolved emitted references can yield a CURRENT resolved-projection summary, known mismatch is STALE, and missing or
 uncertain coverage is unestablished. Legacy source-set validity inspection deliberately
 rejects the new profile. Parse reuse does not re-execute parsing, authenticate an
 origin, establish semantic truth or grant authority. Historical snapshots stay intact.
@@ -301,3 +301,19 @@ declared extraction/clean-commit boundary. Reopen for parser/rule/feature/host c
 profile interoperability or broader coverage. Dirty snapshots, broader incremental
 updates, additional languages, validation, graph persistence, interchange and privacy
 lifecycle remain open/planned.
+
+## Independent inspection dimensions
+
+The [inspection contract version 2](semantic-contracts.md#knowledge-inspection-contract-version-2)
+separates supplied candidate/profile correspondence, bounded extraction coverage,
+resolution of emitted references and support for a particular lexical claim.
+The view exposes `extraction_coverage()`, `reference_resolution()` and
+`inspect_claim()`; `resolved_projection_validity()` explicitly names the retained
+resolution-dependent summary. It is not a completeness or semantic-truth flag.
+
+The adapter's supported subset and omissions above still apply. Zero emitted
+references may satisfy `all_references_resolved()` without complete extraction.
+A retained unresolved reference can support its lexical occurrence while its
+target remains outside coverage or missing. Source acquisition remains exclusive
+to the documented extraction/reinspection paths; inspecting a retained view does
+not acquire files or refresh provenance.

@@ -13,7 +13,7 @@
 //!         assert!(span.end() <= index.bytes().len());
 //!     }
 //!     let current = reinspect(repo, &index, ObservationId::new("schema", 4)?)?;
-//!     // Inspect current.validity()/correspondence(); neither grants authority.
+//!     // Inspect current.resolved_projection_validity()/correspondence(); neither grants authority.
 //!     Ok(())
 //! }
 //! ```
@@ -31,6 +31,7 @@ pub mod rust;
 pub mod source_set;
 #[cfg(test)]
 use crate::support;
+use cortex_core::knowledge::inspection::*;
 use cortex_core::{binding::*, knowledge::*};
 use cortex_evidence::unified::Validity;
 use std::{error::Error, fmt, path::Path, time::SystemTime};
@@ -153,6 +154,7 @@ pub struct KnowledgeView<'a> {
     correspondence: BindingDecision,
     validity: Option<Validity>,
     profile_matches: bool,
+    coverage: ExtractionCoverage,
 }
 impl<'a> KnowledgeView<'a> {
     /// Retained historical facts remain inspectable even when stale/unestablished.
@@ -163,15 +165,61 @@ impl<'a> KnowledgeView<'a> {
     pub fn correspondence(&self) -> &BindingDecision {
         &self.correspondence
     }
-    /// Existing Evidence vocabulary; None means unestablished, never implicit CURRENT.
-    pub fn validity(&self) -> Option<Validity> {
+    /// Version-1 aggregate predicate, explicitly scoped to resolved projection reuse.
+    /// Current requires source/profile correspondence and all emitted references resolved.
+    /// This does not summarize extraction coverage or support for an arbitrary claim.
+    pub fn resolved_projection_validity(&self) -> Option<Validity> {
         self.validity
+    }
+    /// Bounded extraction scope and explicit omissions, independent of resolution.
+    pub fn extraction_coverage(&self) -> ExtractionCoverage {
+        self.coverage
+    }
+    /// Resolution counts for emitted references in this single-source snapshot.
+    pub fn reference_resolution(&self) -> ReferenceResolution {
+        ReferenceResolution::for_index(self.index)
+    }
+    /// Evaluate one lexical proposition under the supplied current source/profile context.
+    /// No I/O, semantic verification, acceptance or permission is performed.
+    pub fn inspect_claim(&self, claim: ReferenceClaim<'_>) -> ClaimInspection<'a> {
+        claim_context_gap(claim, self.profile_matches, &self.correspondence)
+            .unwrap_or_else(|| inspect_retained_index_claim(self.index, claim))
     }
     /// Whether adapter/parser/rule configuration matches this implementation.
     pub fn profile_matches(&self) -> bool {
         self.profile_matches
     }
 }
+
+fn coverage(profile_matches: bool, profile: ExtractionProfile) -> ExtractionCoverage {
+    if profile_matches {
+        ExtractionCoverage::Bounded(profile)
+    } else {
+        ExtractionCoverage::Unestablished
+    }
+}
+
+fn claim_context_gap<'a>(
+    claim: ReferenceClaim<'_>,
+    profile_matches: bool,
+    correspondence: &BindingDecision,
+) -> Option<ClaimInspection<'a>> {
+    if matches!(
+        claim.kind(),
+        ReferenceClaimKind::SemanticRelationship | ReferenceClaimKind::CompleteExtraction
+    ) {
+        Some(ClaimInspection::Unsupported(claim.kind()))
+    } else if !profile_matches {
+        Some(ClaimInspection::NotEstablished(ClaimGap::ProfileMismatch))
+    } else if !matches!(correspondence, BindingDecision::Compatible(_)) {
+        Some(ClaimInspection::NotEstablished(
+            ClaimGap::SourceCorrespondence,
+        ))
+    } else {
+        None
+    }
+}
+
 /// Inspect validity against an explicitly supplied later capture. No I/O or assessment.
 ///
 /// Trusted callers must really reobserve; changing an ID alone establishes no freshness.
@@ -199,6 +247,7 @@ pub fn inspect_validity<'a>(
         correspondence,
         validity,
         profile_matches: profile,
+        coverage: coverage(profile, ExtractionProfile::JsonReferences),
     })
 }
 /// Perform a real later bounded capture, then inspect retained knowledge validity; no mutation.

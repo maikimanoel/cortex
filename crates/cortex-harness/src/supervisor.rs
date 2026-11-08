@@ -297,7 +297,7 @@ pub fn inspect_fixture(
         return Err(HarnessError::Contract);
     }
     for requirement in input.requirements().required() {
-        match requirement.control {
+        match requirement.control.clone() {
             Control::StandardInput
             | Control::StructuredOutput
             | Control::Timeout

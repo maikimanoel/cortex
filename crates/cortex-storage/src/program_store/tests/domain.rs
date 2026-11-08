@@ -779,7 +779,12 @@ fn recursive_literal_replay_retains_admission_identity_without_closure_or_dispat
         .effect
         .demand
         .iter()
-        .map(|d| (d.resource, k.domains().unwrap().held(d.resource).unwrap()))
+        .map(|d| {
+            (
+                d.resource.clone(),
+                k.domains().unwrap().held(d.resource.clone()).unwrap(),
+            )
+        })
         .collect();
     let mut called = false;
     assert!(
@@ -803,7 +808,10 @@ fn recursive_literal_replay_retains_admission_identity_without_closure_or_dispat
     assert!(record.cancelled && record.closure.is_none() && record.settlements.is_empty());
     assert_eq!(record.outcome, HistoricalOutcome::Unknown);
     for (resource, amount) in held {
-        assert_eq!(recovered.domains().unwrap().held(resource), Ok(amount));
+        assert_eq!(
+            recovered.domains().unwrap().held(resource.clone()),
+            Ok(amount)
+        );
         assert!(record.holds(resource));
     }
     for reservation in &i.consumption {
@@ -843,4 +851,165 @@ fn recursive_literal_replay_retains_admission_identity_without_closure_or_dispat
         reopened.load(&key(), Access::ReadOnly).unwrap().revision(),
         11
     );
+}
+
+#[test]
+fn memory_scope_survives_store_reconstruction_and_wrong_pool_refuses() {
+    use cortex_core::program::{memory::*, scheduling::*};
+    let f = Temp::new();
+    let (k, i) = domain_fixture::coordinator();
+    let store = stored(&k, &f);
+    let actual = store.load(&key(), Access::ReadOnly).unwrap();
+    assert!(actual.has_scoped_memory());
+    assert_eq!(
+        actual.domains().unwrap().pool().unwrap().capacities,
+        k.domains().unwrap().pool().unwrap().capacities
+    );
+    let mut wrong = i.clone();
+    let mut other = wrong.pool.clone();
+    other.incarnation = "different".into();
+    wrong
+        .effect
+        .demand
+        .iter_mut()
+        .find(|d| matches!(d.resource, Resource::MemoryBytes(_)))
+        .unwrap()
+        .resource = Resource::memory(
+        MemoryBasis::CgroupCharged,
+        MemoryScope::AccountingPool(other),
+    )
+    .unwrap();
+    let before = snapshot(&f);
+    assert!(
+        store
+            .admit(
+                &key(),
+                op(
+                    &actual,
+                    "wrong-memory-pool",
+                    DomainEvent::Reserve {
+                        intent: wrong,
+                        at: 1
+                    }
+                )
+            )
+            .is_err()
+    );
+    assert_eq!(snapshot(&f), before);
+    store
+        .admit(
+            &key(),
+            op(
+                &actual,
+                "correct-memory-pool",
+                DomainEvent::Reserve { intent: i, at: 1 },
+            ),
+        )
+        .unwrap();
+    let recovered = store.load(&key(), Access::ReadOnly).unwrap();
+    assert_eq!(
+        recovered
+            .domains()
+            .unwrap()
+            .held(domain_fixture::memory_resource()),
+        Ok(256)
+    );
+}
+
+#[test]
+fn legacy_memory_replays_without_authorizing_a_new_create_or_erasing_bytes() {
+    use serde_json::Value;
+    fn legacy(v: &mut Value) {
+        if v.get(0).and_then(Value::as_str) == Some("memory-resource-v1") {
+            *v = Value::String("RamBytes".into());
+            return;
+        }
+        if let Some(a) = v.as_array_mut() {
+            for v in a {
+                legacy(v);
+            }
+        }
+    }
+    let f = Temp::new();
+    let (mut k, i) = domain_fixture::coordinator();
+    domain_fixture::event(
+        &mut k,
+        "historical-reserve",
+        DomainEvent::Reserve {
+            intent: i.clone(),
+            at: 1,
+        },
+    );
+    let store =
+        ProgramStore::create_domain_fixture(&f.store(), &key(), k.initial().clone(), limits())
+            .unwrap();
+    // Synthetic old representation written directly: no real historical store/key.
+    // The old resource token and all original positional fields remain intact.
+    let conn = history_store::connect(&store.location, &key(), Access::Recover).unwrap();
+    let mut originals = Vec::new();
+    for (n, o) in k.operations().iter().enumerate() {
+        let bytes = codec::operation(o, k.initial().limits().bytes).unwrap();
+        let mut value: Value = serde_json::from_slice(&bytes).unwrap();
+        legacy(&mut value);
+        let bytes = serde_json::to_vec(&value).unwrap();
+        conn.execute(
+            "INSERT INTO program_inputs VALUES(?1,?2,?3)",
+            rusqlite::params![n as i64 + 1, o.id.as_str(), &bytes],
+        )
+        .unwrap();
+        originals.push(bytes);
+    }
+    drop(conn);
+    let recovered = store.load(&key(), Access::ReadOnly).unwrap();
+    assert!(!recovered.has_scoped_memory());
+    for (o, bytes) in recovered.operations().iter().zip(originals) {
+        assert_eq!(
+            codec::operation(o, recovered.initial().limits().bytes)
+                .unwrap()
+                .as_slice(),
+            bytes
+        );
+    }
+    assert_eq!(
+        recovered
+            .domains()
+            .unwrap()
+            .held(Resource::UnspecifiedMemoryBytes),
+        Ok(256)
+    );
+    let before = snapshot(&f);
+    let refused = store.admit(
+        &key(),
+        op(
+            &recovered,
+            "new-create",
+            DomainEvent::CreateRequested {
+                domain: i.id.clone(),
+                at: 2,
+            },
+        ),
+    );
+    assert!(refused.is_err());
+    assert_eq!(snapshot(&f), before);
+    // Exact idempotent replay remains a receipt, never a second external effect.
+    assert!(
+        store
+            .admit(&key(), recovered.operations().last().unwrap().clone())
+            .unwrap()
+            .duplicate
+    );
+    store
+        .admit(
+            &key(),
+            op(
+                &recovered,
+                "cancel-retained",
+                DomainEvent::Cancel {
+                    domain: i.id,
+                    at: 2,
+                    basis: domain_fixture::source("cancel"),
+                },
+            ),
+        )
+        .unwrap();
 }

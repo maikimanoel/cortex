@@ -6,7 +6,140 @@ use cortex_core::program::{
 };
 
 identifiers!(EffectId);
-symbols!(Resource;WorkerSlots => "Workers",BuildJobs => "Builds",TestProcesses => "Tests",CpuMillicores => "CpuMillis",RamBytes => "RamBytes",DiskBytes => "DiskBytes",ElapsedMillis => "TimeMillis",OutputBytes => "OutputBytes",CiJobs => "CiJobs",ModelTokens => "ModelTokens");
+impl Wire for Resource {
+    fn write(&self) -> Result<V, ProgramStoreError> {
+        use cortex_core::program::memory::*;
+        if let Self::MemoryBytes(memory) = self {
+            let basis = match memory.basis() {
+                MemoryBasis::ProcessResident => "process-resident",
+                MemoryBasis::SummedProcessResident => "summed-process-resident",
+                MemoryBasis::CgroupCharged => "cgroup-charged",
+            };
+            let scope = match memory.scope() {
+                MemoryScope::AccountingPool(pool) => json!(["accounting-pool-v1", pool.write()?]),
+                MemoryScope::Process(p) => {
+                    json!(["process-v1", p.host, p.boot, p.pid, p.start_ticks])
+                }
+                MemoryScope::ProcessSet(members) => json!([
+                    "process-set-v1",
+                    members
+                        .iter()
+                        .map(|p| json!([p.host, p.boot, p.pid, p.start_ticks]))
+                        .collect::<Vec<_>>()
+                ]),
+                MemoryScope::Cgroup {
+                    host,
+                    boot,
+                    manager,
+                    invocation,
+                    path,
+                    device,
+                    inode,
+                } => json!([
+                    "cgroup-v1",
+                    host,
+                    boot,
+                    manager,
+                    invocation,
+                    path,
+                    device,
+                    inode
+                ]),
+            };
+            return Ok(json!(["memory-resource-v1", basis, scope]));
+        }
+        Ok(json!(match self {
+            Self::WorkerSlots => "Workers",
+            Self::BuildJobs => "Builds",
+            Self::TestProcesses => "Tests",
+            Self::CpuMillicores => "CpuMillis",
+            Self::UnspecifiedMemoryBytes => "RamBytes",
+            Self::DiskBytes => "DiskBytes",
+            Self::ElapsedMillis => "TimeMillis",
+            Self::OutputBytes => "OutputBytes",
+            Self::CiJobs => "CiJobs",
+            Self::ModelTokens => "ModelTokens",
+            Self::MemoryBytes(_) => return Err(bad()),
+        }))
+    }
+    fn read(v: &V) -> Result<Self, ProgramStoreError> {
+        use cortex_core::program::memory::*;
+        if v.is_array() {
+            let a = arr(v, 3)?;
+            if a[0].as_str() != Some("memory-resource-v1") {
+                return Err(bad());
+            }
+            let basis = match a[1].as_str() {
+                Some("process-resident") => MemoryBasis::ProcessResident,
+                Some("summed-process-resident") => MemoryBasis::SummedProcessResident,
+                Some("cgroup-charged") => MemoryBasis::CgroupCharged,
+                _ => return Err(bad()),
+            };
+            let scope = match a[2].get(0).and_then(V::as_str) {
+                Some("accounting-pool-v1") => {
+                    let s = arr(&a[2], 2)?;
+                    MemoryScope::AccountingPool(read(&s[1])?)
+                }
+                Some("process-v1") => {
+                    let s = arr(&a[2], 5)?;
+                    MemoryScope::Process(MemoryProcessIdentity {
+                        host: read(&s[1])?,
+                        boot: read(&s[2])?,
+                        pid: read(&s[3])?,
+                        start_ticks: read(&s[4])?,
+                    })
+                }
+                Some("process-set-v1") => {
+                    let s = arr(&a[2], 2)?;
+                    MemoryScope::ProcessSet(
+                        s[1].as_array()
+                            .ok_or_else(bad)?
+                            .iter()
+                            .map(|v| {
+                                let p = arr(v, 4)?;
+                                Ok(MemoryProcessIdentity {
+                                    host: read(&p[0])?,
+                                    boot: read(&p[1])?,
+                                    pid: read(&p[2])?,
+                                    start_ticks: read(&p[3])?,
+                                })
+                            })
+                            .collect::<Result<_, ProgramStoreError>>()?,
+                    )
+                }
+                Some("cgroup-v1") => {
+                    let s = arr(&a[2], 8)?;
+                    MemoryScope::Cgroup {
+                        host: read(&s[1])?,
+                        boot: read(&s[2])?,
+                        manager: read(&s[3])?,
+                        invocation: read(&s[4])?,
+                        path: read(&s[5])?,
+                        device: read(&s[6])?,
+                        inode: read(&s[7])?,
+                    }
+                }
+                _ => return Err(bad()),
+            };
+            return Ok(Self::MemoryBytes(Box::new(
+                MemoryResource::new(basis, scope).map_err(|_| bad())?,
+            )));
+        }
+        Ok(match v.as_str().ok_or_else(bad)? {
+            "Workers" => Self::WorkerSlots,
+            "Builds" => Self::BuildJobs,
+            "Tests" => Self::TestProcesses,
+            "CpuMillis" => Self::CpuMillicores,
+            "RamBytes" => Self::UnspecifiedMemoryBytes,
+            "DiskBytes" => Self::DiskBytes,
+            "TimeMillis" => Self::ElapsedMillis,
+            "OutputBytes" => Self::OutputBytes,
+            "CiJobs" => Self::CiJobs,
+            "ModelTokens" => Self::ModelTokens,
+            _ => return Err(bad()),
+        })
+    }
+}
 symbols!(EffectMode;ControlledFixture => "ControlledFixture",SupervisedFixture => "SupervisedFixture",ExternalExecutor => "ExternalExecutor");
 symbols!(EffectOutcome;Succeeded => "Succeeded",Failed => "Failed",Interrupted => "Interrupted");
 impl Wire for u32 {

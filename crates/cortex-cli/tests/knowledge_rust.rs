@@ -141,7 +141,9 @@ fn exact_committed_structure_grouped_aliases_and_byte_spans_are_read_only() {
     assert_eq!(next.nodes(), g.nodes());
     assert_eq!(next.references(), g.references());
     assert_eq!(
-        rust::reinspect(&r.path, &g, id(4)).unwrap().validity(),
+        rust::reinspect(&r.path, &g, id(4))
+            .unwrap()
+            .resolved_projection_validity(),
         None
     );
     assert_eq!(snapshot(&r), before);
@@ -266,12 +268,21 @@ fn current_stale_missing_observation_and_profile_qualification_retain_original_f
     let g = extract(&r, &c).unwrap();
     assert!(g.all_references_resolved());
     assert_eq!(
-        rust::reinspect(&r.path, &g, id(4)).unwrap().validity(),
+        rust::reinspect(&r.path, &g, id(4))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Current)
     );
-    assert_eq!(rust::inspect_validity(&g, None).unwrap().validity(), None);
     assert_eq!(
-        rust::reinspect(&r.path, &g, id(3)).unwrap().validity(),
+        rust::inspect_validity(&g, None)
+            .unwrap()
+            .resolved_projection_validity(),
+        None
+    );
+    assert_eq!(
+        rust::reinspect(&r.path, &g, id(3))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Stale)
     );
     let old = ReferenceIndex::new(
@@ -291,7 +302,7 @@ fn current_stale_missing_observation_and_profile_qualification_retain_original_f
     .unwrap();
     let view = rust::reinspect(&r.path, &old, id(5)).unwrap();
     assert!(!view.profile_matches());
-    assert_eq!(view.validity(), Some(Validity::Stale));
+    assert_eq!(view.resolved_projection_validity(), Some(Validity::Stale));
     assert!(
         !cortex_cli::knowledge::inspect_validity(
             &g,
@@ -306,13 +317,17 @@ fn current_stale_missing_observation_and_profile_qualification_retain_original_f
         Err(ExtractionError::Candidate(_))
     ));
     assert_eq!(
-        rust::reinspect(&r.path, &g, id(7)).unwrap().validity(),
+        rust::reinspect(&r.path, &g, id(7))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Stale)
     );
     r.git(&["add", "source.rs"]);
     r.git(&["commit", "-m", "changed source"]);
     assert_eq!(
-        rust::reinspect(&r.path, &g, id(8)).unwrap().validity(),
+        rust::reinspect(&r.path, &g, id(8))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Stale)
     );
     let new = extract(&r, &contract(&r)).unwrap();

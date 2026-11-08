@@ -29,12 +29,13 @@
 //!         ObservationId::new("refresh", 1)?, vec![SourcePath::new(b"schema.json")?],
 //!         std::time::UNIX_EPOCH, &mut cache)?;
 //!     let view = reinspect(repo, generation, ObservationId::new("refresh", 5)?)?;
-//!     let _validity = view.validity(); // Scoped correspondence, never an assessment.
+//!     let _validity = view.resolved_projection_validity(); // Scoped correspondence, never an assessment.
 //!     Ok(())
 //! }
 //! ```
 
 use super::{ExtractionError, json, source_set::SourceSetExtractionError};
+use cortex_core::knowledge::inspection::*;
 use cortex_core::{
     CandidateId,
     binding::*,
@@ -343,9 +344,24 @@ impl<'a> RefreshView<'a> {
     pub fn correspondence(&self) -> &BindingDecision {
         &self.correspondence
     }
-    /// None means unestablished; Current is scoped to captured coverage only.
-    pub fn validity(&self) -> Option<Validity> {
+    /// Preserved version-1 resolved-projection predicate, not generic knowledge validity.
+    /// Current requires correspondence, profile match and all emitted references resolved.
+    pub fn resolved_projection_validity(&self) -> Option<Validity> {
         self.validity
+    }
+    /// Bounded extraction scope and omissions, not a completeness judgment.
+    pub fn extraction_coverage(&self) -> ExtractionCoverage {
+        super::coverage(self.profile_matches, ExtractionProfile::JsonSourceSet)
+    }
+    /// Emitted-reference resolution within the selected-source collection.
+    pub fn reference_resolution(&self) -> ReferenceResolution {
+        ReferenceResolution::for_set(&self.generation.set)
+    }
+    /// Evaluate a lexical claim in this collection under current source/profile correspondence.
+    /// It does not alter the resolution retained by each source snapshot.
+    pub fn inspect_claim(&self, claim: ReferenceClaim<'_>) -> ClaimInspection<'a> {
+        super::claim_context_gap(claim, self.profile_matches, &self.correspondence)
+            .unwrap_or_else(|| inspect_retained_set_claim(&self.generation.set, claim))
     }
     /// Exact refresh, resolver and per-source parse provenance support.
     pub fn profile_matches(&self) -> bool {
@@ -490,7 +506,7 @@ mod tests {
         cache.retained.as_mut().unwrap().parsing[0].parser_profile = "unknown-rules";
         let stale = reinspect(&r.path, cache.retained().unwrap(), id(30)).unwrap();
         assert!(!stale.profile_matches());
-        assert_eq!(stale.validity(), Some(Validity::Stale));
+        assert_eq!(stale.resolved_projection_validity(), Some(Validity::Stale));
         refresh_json_source_set(
             &r.path,
             &contract(&r),
@@ -546,7 +562,9 @@ mod tests {
                 cache.retained().unwrap() as *const RefreshGeneration
             );
             assert_eq!(
-                reinspect(&r.path, &old, id(20)).unwrap().validity(),
+                reinspect(&r.path, &old, id(20))
+                    .unwrap()
+                    .resolved_projection_validity(),
                 Some(Validity::Stale)
             );
         }

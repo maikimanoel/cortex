@@ -79,7 +79,7 @@ fn create(f: &Temp) -> ProgramStore {
     }
     s
 }
-fn command(f: &Temp) -> Command {
+fn current_command(f: &Temp) -> Command {
     let mut c = Command::new(env!("CARGO_BIN_EXE_cortex"));
     c.args(["program", "inspect", "--store"])
         .arg(f.store())
@@ -95,6 +95,13 @@ fn command(f: &Temp) -> Command {
         ]);
     c
 }
+// Historical assertions explicitly select their retained presentation contract.
+fn command(f: &Temp) -> Command {
+    let mut c = current_command(f);
+    c.args(["--schema-version", "1"]);
+    c
+}
+
 fn run(mut command: Command, bytes: &[u8]) -> Output {
     let mut child = command
         .stdin(Stdio::piped())
@@ -131,6 +138,24 @@ fn snapshot(f: &Temp) -> Vec<(PathBuf, Vec<u8>, u64, i64, i64)> {
     v.sort_by(|a, b| a.0.cmp(&b.0));
     v
 }
+// Newly scoped memory cannot be flattened into either retained legacy schema.
+// Historical byte oracles are exercised separately using accepted baseline data.
+fn assert_scoped_legacy_refusals(fixture: &Temp) {
+    let before = snapshot(fixture);
+    for schema in ["1", "2"] {
+        let mut command = current_command(fixture);
+        command.args(["--json", "--schema-version", schema]);
+        let output = run(command, &[0x57; 32]);
+        assert_eq!(output.status.code(), Some(3));
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["schema"], format!("cortex.program.v{schema}"));
+        assert_eq!(value["reason"], "SCHEMA_CANNOT_REPRESENT_MEMORY");
+        assert!(value.get("domain_projection").is_none());
+        assert!(value.get("supervised_projection").is_none());
+    }
+    assert_eq!(snapshot(fixture), before);
+}
+
 #[test]
 fn human_and_json_inspection_expose_causes_without_modifying_store() {
     let f = Temp::new();
@@ -478,7 +503,8 @@ fn owned_scope_inspection_keeps_requested_observed_and_unknown_facts_separate() 
         s.admit(&key(), op.clone()).unwrap();
     }
     let before = snapshot(&f);
-    let mut c = command(&f);
+    assert_scoped_legacy_refusals(&f);
+    let mut c = current_command(&f);
     c.arg("--json");
     let output = run(c, &[0x57; 32]);
     assert!(output.status.success());
@@ -510,6 +536,19 @@ fn owned_scope_inspection_keeps_requested_observed_and_unknown_facts_separate() 
         536_870_912_u64
     );
     assert_eq!(first["populated"], true);
+    assert_eq!(
+        effect["containment_request"]["memory_limit"]["role"],
+        "REQUESTED_LIMIT"
+    );
+    assert_eq!(first["memory_limit"]["role"], "LIMIT_READBACK");
+    assert!(first["memory_limit"]["resource"].is_null());
+    assert_eq!(first["memory_peak_observation"]["role"], "SAMPLED_USAGE");
+    assert_eq!(first["memory_peak_observation"]["basis"], "CgroupCharged");
+    assert!(first["memory_peak_observation"]["resource"].is_null());
+    assert_eq!(
+        first["memory_peak_observation"]["measurement_is_final"],
+        false
+    );
     let last = &effect["observations"][1]["containment"];
     assert!(last["controls_readback"].is_null());
     assert!(last["populated"].is_null());
@@ -767,7 +806,8 @@ fn recovery_inspection_explains_missing_scope_and_helper_without_changing_the_jo
         store.admit(&key(), op.clone()).unwrap();
     }
     let before = snapshot(&f);
-    let mut c = command(&f);
+    assert_scoped_legacy_refusals(&f);
+    let mut c = current_command(&f);
     c.arg("--json");
     let result = run(c, &[0x57; 32]);
     assert!(result.status.success());
@@ -856,7 +896,8 @@ fn domain_inspection_keeps_unknown_debt_and_disk_after_process_closure() {
         store.admit(&key(), operation.clone()).unwrap();
     }
     let before = snapshot(&f);
-    let mut c = command(&f);
+    assert_scoped_legacy_refusals(&f);
+    let mut c = current_command(&f);
     c.arg("--json");
     let output = run(c, &[0x57; 32]);
     assert!(
@@ -877,7 +918,7 @@ fn domain_inspection_keeps_unknown_debt_and_disk_after_process_closure() {
     assert_eq!(projection["host_reinspection"], false);
     assert_eq!(projection["current_liveness"], "NOT_OBSERVED");
     let resources = record["reusable_capacity"].as_array().unwrap();
-    for (dimension, held) in [("Workers", false), ("RamBytes", false), ("DiskBytes", true)] {
+    for (dimension, held) in [("WorkerSlots", false), ("DiskBytes", true)] {
         assert_eq!(
             resources
                 .iter()
@@ -886,6 +927,13 @@ fn domain_inspection_keeps_unknown_debt_and_disk_after_process_closure() {
             held
         );
     }
+    let memory = resources
+        .iter()
+        .find(|r| r["dimension"]["kind"] == "MemoryBytes")
+        .unwrap();
+    assert_eq!(memory["held"], false);
+    assert_eq!(memory["dimension"]["basis"], "CgroupCharged");
+    assert_eq!(memory["dimension"]["scope_kind"], "ACCOUNTING_POOL");
     assert_eq!(record["cumulative_consumption"][0]["unresolved_debt"], true);
     assert!(record["cumulative_consumption"][0]["measured_final"].is_null());
     assert!(projection["cumulative_consumption"][0]["known_consumption_or_future_debit"].is_null());
@@ -899,7 +947,7 @@ fn domain_inspection_keeps_unknown_debt_and_disk_after_process_closure() {
     assert!(!text.contains("/owned/"));
     assert!(!text.contains("synthetic-host"));
     assert!(!text.contains("invocation-domain"));
-    let human = run(command(&f), &[0x57; 32]);
+    let human = run(current_command(&f), &[0x57; 32]);
     assert!(human.status.success());
     let text = String::from_utf8(human.stdout).unwrap();
     assert!(text.contains("UNKNOWN"));
@@ -949,7 +997,8 @@ fn domain_inspection_projects_later_measurement_without_rewriting_unknown() {
         store.admit(&key(), operation.clone()).unwrap();
     }
     let before = snapshot(&f);
-    let mut c = command(&f);
+    assert_scoped_legacy_refusals(&f);
+    let mut c = current_command(&f);
     c.arg("--json");
     let output = run(c, &[0x57; 32]);
     assert!(output.status.success());
@@ -1026,7 +1075,8 @@ fn prepared_domain_inspection_retains_bounded_observations_without_live_effects(
         store.admit(&key(), operation.clone()).unwrap();
     }
     let before = snapshot(&f);
-    let mut command = command(&f);
+    assert_scoped_legacy_refusals(&f);
+    let mut command = current_command(&f);
     command.arg("--json");
     let result = run(command, &[0x57; 32]);
     assert!(result.status.success());
@@ -1043,15 +1093,21 @@ fn prepared_domain_inspection_retains_bounded_observations_without_live_effects(
     assert_eq!(binding["controls"]["charged_memory_bytes"], 256);
     assert_eq!(binding["controls"]["tasks"], 8);
     assert_eq!(binding["current_liveness"], "NOT_OBSERVED");
+    assert_eq!(
+        domain["prepared_handle_availability"],
+        "UNESTABLISHED_BY_JOURNAL"
+    );
+    assert_eq!(binding["memory_limit"]["role"], "LIMIT_READBACK");
+    assert_eq!(binding["memory_limit"]["bytes"], 256);
     assert_eq!(binding["whole_domain_closure_proven"], false);
     assert_eq!(binding["snapshot_exclusion_proven"], false);
     assert_eq!(projection["host_reinspection"], false);
     assert_eq!(projection["inspection_authority"], "NONE");
     assert!(
-        domain["next_permissible_action"]
+        domain["next_step_guidance"]
             .as_str()
             .unwrap()
-            .contains("RELEASE_WITHHELD")
+            .contains("REVIEW_RETAINED_BINDING_AND_CURRENT_RELEASE_PREREQUISITES")
     );
     assert!(
         domain["reusable_capacity"]
@@ -1071,12 +1127,12 @@ fn prepared_domain_inspection_retains_bounded_observations_without_live_effects(
     ] {
         assert!(!text.contains(private));
     }
-    let human = run(self::command(&f), &[0x57; 32]);
+    let human = run(self::current_command(&f), &[0x57; 32]);
     assert!(human.status.success());
     assert!(
         String::from_utf8(human.stdout)
             .unwrap()
-            .contains("RELEASE_WITHHELD")
+            .contains("REVIEW_RETAINED_BINDING_AND_CURRENT_RELEASE_PREREQUISITES")
     );
     assert_eq!(snapshot(&f), before);
     let replay = store.load(&key(), Access::ReadOnly).unwrap();
@@ -1131,18 +1187,33 @@ fn prepared_domain_inspection_retains_bounded_observations_without_live_effects(
         store.admit(&key(), operation.clone()).unwrap();
     }
     let before = snapshot(&f);
-    let mut cmd = self::command(&f);
+    assert_scoped_legacy_refusals(&f);
+    let mut cmd = self::current_command(&f);
     cmd.arg("--json");
     let output = run(cmd, &[0x57; 32]);
     assert!(output.status.success());
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let domain = &value["domain_projection"]["domains"][0];
     let proof = &domain["native_closure_inspection"];
-    assert_eq!(proof["status"], "HOLD_INCOMPLETE_NATIVE_PROOF");
-    assert_eq!(proof["retained_observations"], 1);
-    assert_eq!(proof["latest"]["populated"], false);
-    assert_eq!(proof["latest"]["sampled_cpu_micros"], 7000);
-    assert_eq!(proof["latest"]["measurement_is_final"], false);
+    assert_eq!(proof["native_support_status"], "INCOMPLETE");
+    assert_eq!(proof["retained_native_observation_count"], 1);
+    assert_eq!(proof["latest_direct_observation"]["populated"], false);
+    assert_eq!(
+        proof["latest_direct_observation"]["sampled_cpu_micros"],
+        7000
+    );
+    assert_eq!(
+        proof["latest_direct_observation"]["measurement_is_final"],
+        false
+    );
+    assert_eq!(
+        proof["latest_direct_observation"]["memory_peak_observation"]["bytes"],
+        128
+    );
+    assert_eq!(
+        proof["latest_direct_observation"]["memory_peak_observation"]["basis"],
+        "CgroupCharged"
+    );
     assert_eq!(proof["settlement_authorized"], false);
     assert_eq!(proof["separate_caller_receipt_recorded"], false);
     assert!(
@@ -1176,12 +1247,12 @@ fn prepared_domain_inspection_retains_bounded_observations_without_live_effects(
     ] {
         assert!(!text.contains(private));
     }
-    let human = run(self::command(&f), &[0x57; 32]);
+    let human = run(self::current_command(&f), &[0x57; 32]);
     assert!(human.status.success());
     assert!(
         String::from_utf8(human.stdout)
             .unwrap()
-            .contains("HOLD_INCOMPLETE_NATIVE_PROOF")
+            .contains("INCOMPLETE")
     );
     assert_eq!(before, snapshot(&f));
     assert!(
@@ -1198,14 +1269,14 @@ fn prepared_domain_inspection_retains_bounded_observations_without_live_effects(
 }
 
 #[test]
-fn explicit_program_schema_preserves_default_bytes_and_changes_only_selected_projection() {
+fn explicit_historical_schemas_preserve_their_selected_projection() {
     let f = Temp::new();
     create(&f);
     let before = snapshot(&f);
     for json in [false, true] {
         let mut legacy = command(&f);
-        let mut explicit_legacy = command(&f);
-        let mut canonical = command(&f);
+        let mut explicit_legacy = current_command(&f);
+        let mut canonical = current_command(&f);
         explicit_legacy.args(["--schema-version", "1"]);
         canonical.args(["--schema-version", "2"]);
         if json {
@@ -1266,7 +1337,7 @@ fn schema_selection_rejects_unsupported_duplicate_and_missing_values_before_key_
     let before = snapshot(&f);
     for extra in [
         vec!["--schema-version", "0"],
-        vec!["--schema-version", "3"],
+        vec!["--schema-version", "4"],
         vec!["--schema-version", "02"],
         vec!["--schema-version", "private-invalid-version"],
         vec!["--schema-version"],
@@ -1274,7 +1345,7 @@ fn schema_selection_rejects_unsupported_duplicate_and_missing_values_before_key_
         vec!["--schema-version", "bad", "--schema-version", "1"],
     ] {
         // No key is supplied: argument refusal must happen before key acquisition.
-        let output = command(&f)
+        let output = current_command(&f)
             .args(extra)
             .stdin(Stdio::null())
             .output()
@@ -1324,13 +1395,9 @@ fn canonical_domain_projection_distinguishes_receipt_presence_from_native_proof_
                 .unwrap();
         }
         let before = snapshot(&f);
-        let mut legacy = command(&f);
-        legacy.arg("--json");
-        let old = run(legacy, &[0x57; 32]);
-        assert!(old.status.success());
-        let old: serde_json::Value = serde_json::from_slice(&old.stdout).unwrap();
-        let mut canonical = command(&f);
-        canonical.args(["--json", "--schema-version", "2"]);
+        assert_scoped_legacy_refusals(&f);
+        let mut canonical = current_command(&f);
+        canonical.args(["--json", "--schema-version", "3"]);
         let output = run(canonical, &[0x57; 32]);
         assert!(
             output.status.success(),
@@ -1340,12 +1407,17 @@ fn canonical_domain_projection_distinguishes_receipt_presence_from_native_proof_
         let new: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         let projection = &new["domain_projection"];
         let d = &projection["domains"][0];
-        let original = &old["domain_projection"]["domains"][0];
-        assert_eq!(projection["schema"], "cortex.domains.v2");
-        assert_eq!(d["historical_outcome"], original["historical_outcome"]);
+        assert_eq!(projection["schema"], "cortex.domains.v3");
+        assert_eq!(
+            d["historical_outcome"],
+            serde_json::json!({"kind":"UNKNOWN"})
+        );
         assert_eq!(
             d["cumulative_consumption"],
-            original["cumulative_consumption"]
+            serde_json::json!([{
+                "dimension":"CpuExecutionMillis", "retained_declared_debit":30,
+                "measured_final":null, "unresolved_debt":true, "proven_upper_bound":null
+            }])
         );
         assert_eq!(d["historical_outcome"]["kind"], "UNKNOWN");
         assert_eq!(d["cumulative_consumption"][0]["unresolved_debt"], true);
@@ -1383,13 +1455,25 @@ fn canonical_domain_projection_distinguishes_receipt_presence_from_native_proof_
         let native = &d["native_closure_inspection"];
         assert_eq!(native["native_support_status"], "INCOMPLETE");
         assert_eq!(native["retained_native_observation_count"], 1);
-        assert_eq!(
-            native["latest_direct_observation"],
-            original["native_closure_inspection"]["latest"]
-        );
+        let sample = &native["latest_direct_observation"];
+        assert_eq!(sample["observed_at"], 5);
+        assert_eq!(sample["direct_member_count"], 0);
+        assert_eq!(sample["main_present"], false);
+        assert_eq!(sample["populated"], false);
+        assert_eq!(sample["restart_prevented_readback"], true);
+        assert_eq!(sample["sampled_cpu_micros"], 7000);
+        assert_eq!(sample["memory_peak_observation"]["bytes"], 256);
+        assert_eq!(sample["memory_peak_observation"]["basis"], "CgroupCharged");
+        assert_eq!(sample["measurement_is_final"], false);
         assert_eq!(
             native["native_observation_missing_proofs"],
-            original["native_closure_inspection"]["native_observation_missing_proofs"]
+            serde_json::json!([
+                "WholeDomainCoverage",
+                "HelperCoverage",
+                "StreamCoverage",
+                "SnapshotExclusion",
+                "FinalConsumption"
+            ])
         );
         assert_eq!(native["settlement_authorized"], false);
         assert_eq!(
@@ -1397,19 +1481,13 @@ fn canonical_domain_projection_distinguishes_receipt_presence_from_native_proof_
             "DO_NOT_USE_PARTIAL_NATIVE_SAMPLES_AS_CLOSURE_OR_SETTLEMENT"
         );
         assert!(native["latest_recursive_observation"].is_null());
-        let old_capacity = original["reusable_capacity"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|v| v["dimension"] == "Workers")
-            .unwrap();
+
         let new_capacity = d["reusable_capacity"]
             .as_array()
             .unwrap()
             .iter()
             .find(|v| v["dimension"] == "WorkerSlots")
             .unwrap();
-        assert_eq!(old_capacity["held"], new_capacity["held"]);
         assert_eq!(new_capacity["held"], !receipt);
         assert_eq!(snapshot(&f), before);
     }
@@ -1455,88 +1533,116 @@ fn recursive_closure_projection_retains_hidden_descendant_without_physical_proof
             store.admit(&key(), operation.clone()).unwrap();
         }
         let before = snapshot(&f);
-        for schema in ["1", "2"] {
-            let mut c = command(&f);
-            c.args(["--json", "--schema-version", schema]);
-            let output = run(c, &[0x57; 32]);
-            assert!(output.status.success());
-            let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-            let d = &value["domain_projection"]["domains"][0];
-            let native = &d["native_closure_inspection"];
-            assert!(d.get("retained_cgroup_tree_observation").is_none());
-            assert_eq!(d["historical_outcome"]["kind"], "UNKNOWN");
-            assert_eq!(d["cumulative_consumption"][0]["unresolved_debt"], true);
-            assert_eq!(d["retry_authorized"], false);
-            assert_eq!(native["settlement_authorized"], false);
-            assert_eq!(native["current_liveness"], "NOT_OBSERVED");
-            for gap in [
-                "RemainingMembers",
-                "PopulatedDomain",
-                "WholeDomainCoverage",
-                "HelperCoverage",
-                "StreamCoverage",
-                "SnapshotExclusion",
-                "FinalConsumption",
-            ] {
-                assert!(
-                    native["native_observation_missing_proofs"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .any(|g| g == gap)
-                );
-            }
-            if schema == "1" {
-                assert_eq!(native["retained_observations"], 2);
-                assert_eq!(native["latest"]["observed_at"], direct_at);
-                assert_eq!(native["latest"]["populated"], false);
-                assert_eq!(d["closure_evidence_recorded"], false);
-                assert!(native.get("latest_recursive_observation").is_none());
-                assert!(native.get("combined_native_inspection_basis").is_none());
-                let mut default = command(&f);
-                default.arg("--json");
-                assert_eq!(output.stdout, run(default, &[0x57; 32]).stdout);
-            } else {
-                assert_eq!(native["retained_native_observation_count"], 2);
-                assert_eq!(
-                    native["latest_direct_observation"]["observed_at"],
-                    direct_at
-                );
-                assert_eq!(native["latest_direct_observation"]["populated"], false);
-                let tree = &native["latest_recursive_observation"];
-                assert_eq!(tree["observed_at"], tree_at);
-                assert_eq!(tree["nodes"], 2);
-                assert_eq!(tree["observed_members"], 1);
-                assert_eq!(tree["any_population"], true);
-                assert_eq!(tree["measurement_is_final"], false);
-                assert_eq!(native["native_support_status"], "INCOMPLETE");
-                assert_eq!(d["closure_receipt_recorded"], false);
-                assert_eq!(
-                    native["combined_native_inspection_basis"],
-                    "LATEST_DIRECT_OR_RECURSIVE_SAMPLE_AND_LATEST_RECURSIVE_POPULATION_AND_MEMBERS"
-                );
-                assert_eq!(
-                    native["direct_sample_membership_coverage"],
-                    "BOUNDED_DIRECT_MEMBERS_NON_ATOMIC"
-                );
-                assert_eq!(
-                    native["recursive_sample_membership_coverage"],
-                    "BOUNDED_RECURSIVE_CGROUP_READBACK_NON_ATOMIC"
-                );
-                for proof in [
-                    "whole_domain_closure_proven",
-                    "helper_and_stream_coverage_proven",
-                    "snapshot_exclusion_proven",
-                    "final_consumption_proven",
-                ] {
-                    assert_eq!(native[proof], false);
-                }
-            }
-            let text = String::from_utf8(output.stdout).unwrap();
-            for private in ["private-child-node", "910001", "910002"] {
-                assert!(!text.contains(private));
-            }
-            assert_eq!(snapshot(&f), before);
+        assert_scoped_legacy_refusals(&f);
+        let schema = "3";
+        let mut c = current_command(&f);
+        c.args(["--json", "--schema-version", schema]);
+        let output = run(c, &[0x57; 32]);
+        assert!(output.status.success());
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let d = &value["domain_projection"]["domains"][0];
+        let native = &d["native_closure_inspection"];
+        assert!(d.get("retained_cgroup_tree_observation").is_none());
+        assert_eq!(d["historical_outcome"]["kind"], "UNKNOWN");
+        assert_eq!(d["cumulative_consumption"][0]["unresolved_debt"], true);
+        assert_eq!(d["retry_authorized"], false);
+        assert_eq!(native["settlement_authorized"], false);
+        assert_eq!(native["current_liveness"], "NOT_OBSERVED");
+        for gap in [
+            "RemainingMembers",
+            "PopulatedDomain",
+            "WholeDomainCoverage",
+            "HelperCoverage",
+            "StreamCoverage",
+            "SnapshotExclusion",
+            "FinalConsumption",
+        ] {
+            assert!(
+                native["native_observation_missing_proofs"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|g| g == gap)
+            );
+        }
+
+        assert_eq!(native["retained_native_observation_count"], 2);
+        assert_eq!(
+            native["latest_direct_observation"]["observed_at"],
+            direct_at
+        );
+        assert_eq!(native["latest_direct_observation"]["populated"], false);
+        let tree = &native["latest_recursive_observation"];
+        assert_eq!(tree["observed_at"], tree_at);
+        assert_eq!(tree["nodes"], 2);
+        assert_eq!(tree["observed_members"], 1);
+        assert_eq!(tree["any_population"], true);
+        assert_eq!(tree["measurement_is_final"], false);
+        assert_eq!(native["native_support_status"], "INCOMPLETE");
+        assert_eq!(d["closure_receipt_recorded"], false);
+        assert_eq!(
+            native["combined_native_inspection_basis"],
+            "LATEST_DIRECT_OR_RECURSIVE_SAMPLE_AND_LATEST_RECURSIVE_POPULATION_AND_MEMBERS"
+        );
+        assert_eq!(
+            native["direct_sample_membership_coverage"],
+            "BOUNDED_DIRECT_MEMBERS_NON_ATOMIC"
+        );
+        assert_eq!(
+            native["recursive_sample_membership_coverage"],
+            "BOUNDED_RECURSIVE_CGROUP_READBACK_NON_ATOMIC"
+        );
+        for proof in [
+            "whole_domain_closure_proven",
+            "helper_and_stream_coverage_proven",
+            "snapshot_exclusion_proven",
+            "final_consumption_proven",
+        ] {
+            assert_eq!(native[proof], false);
+        }
+        let mut default = current_command(&f);
+        default.arg("--json");
+        assert_eq!(output.stdout, run(default, &[0x57; 32]).stdout);
+        let text = String::from_utf8(output.stdout).unwrap();
+        for private in ["private-child-node", "910001", "910002"] {
+            assert!(!text.contains(private));
+        }
+        assert_eq!(snapshot(&f), before);
+    }
+}
+
+#[test]
+fn default_program_schema_is_explicit_current_in_both_presentations() {
+    let fixture = Temp::new();
+    create(&fixture);
+    let before = snapshot(&fixture);
+    for machine in [false, true] {
+        let mut default = current_command(&fixture);
+        let mut explicit = current_command(&fixture);
+        explicit.args(["--schema-version", "3"]);
+        if machine {
+            default.arg("--json");
+            explicit.arg("--json");
+        }
+        let default = run(default, &[0x57; 32]);
+        let explicit = run(explicit, &[0x57; 32]);
+        assert!(default.status.success());
+        assert!(explicit.status.success());
+        assert_eq!(default.stdout, explicit.stdout);
+        assert_eq!(default.stderr, explicit.stderr);
+        if machine {
+            let value: serde_json::Value = serde_json::from_slice(&default.stdout).unwrap();
+            assert_eq!(value["schema"], "cortex.program.v3");
+            assert!(value.get("missions").is_none());
+            assert!(value.get("tasks").is_some());
+            assert_eq!(value["execution_authority"], "UNAVAILABLE");
+        } else {
+            assert!(
+                String::from_utf8(default.stdout)
+                    .unwrap()
+                    .contains("Task A:")
+            );
         }
     }
+    assert_eq!(snapshot(&fixture), before);
 }

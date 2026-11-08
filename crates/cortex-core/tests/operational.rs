@@ -1166,3 +1166,109 @@ fn cancellation_intent_survives_unknown_running_report_and_reconstruction() {
     assert!(replay == p);
     assert!(replay.effects()[0].cancellation_requested);
 }
+
+#[test]
+fn generic_allocation_rejects_physical_observation_scopes_and_accepts_exact_accounting_pools() {
+    use cortex_core::program::{domain::PoolIdentity, memory::*};
+    let mut state = ProgramState::new(definition()).unwrap();
+    initialize(&mut state);
+    let process = MemoryProcessIdentity {
+        host: "host".into(),
+        boot: "boot".into(),
+        pid: 1,
+        start_ticks: 10,
+    };
+    let resources = [
+        Resource::memory(
+            MemoryBasis::ProcessResident,
+            MemoryScope::Process(process.clone()),
+        )
+        .unwrap(),
+        Resource::memory(
+            MemoryBasis::SummedProcessResident,
+            MemoryScope::ProcessSet(vec![process]),
+        )
+        .unwrap(),
+        Resource::memory(
+            MemoryBasis::CgroupCharged,
+            MemoryScope::Cgroup {
+                host: "host".into(),
+                boot: "boot".into(),
+                manager: "manager".into(),
+                invocation: "invocation".into(),
+                path: "/owned/scope".into(),
+                device: 1,
+                inode: 2,
+            },
+        )
+        .unwrap(),
+    ];
+    let capacity = |resource| Capacity {
+        resource,
+        available: Some(1024),
+        verification_reserve: 256,
+        declared_enforceable: true,
+    };
+    let proposal = |resource| Proposal {
+        task: task("A"),
+        band: 0,
+        waiting_rounds: 0,
+        risk_rank: 0,
+        cost_rank: 0,
+        demand: vec![Demand {
+            resource,
+            amount: Some(512),
+        }],
+    };
+    for resource in resources {
+        let mut policy = policy();
+        policy.capacities.push(capacity(resource.clone()));
+        assert!(
+            OperationalProjection::new()
+                .apply(&state, EffectEvent::Policy(policy))
+                .is_err()
+        );
+        assert!(
+            simulate(
+                &state,
+                &[proposal(resource.clone())],
+                &[capacity(resource.clone())]
+            )
+            .is_err()
+        );
+        assert!(simulate(&state, &[proposal(resource)], &[]).is_err());
+    }
+    for basis in [
+        MemoryBasis::ProcessResident,
+        MemoryBasis::SummedProcessResident,
+        MemoryBasis::CgroupCharged,
+    ] {
+        let resource = Resource::memory(
+            basis,
+            MemoryScope::AccountingPool(PoolIdentity {
+                physical: "pool".into(),
+                incarnation: "allocation".into(),
+                host: "host".into(),
+                boot: "boot".into(),
+            }),
+        )
+        .unwrap();
+        let mut policy = policy();
+        policy.capacities.push(capacity(resource.clone()));
+        OperationalProjection::new()
+            .apply(&state, EffectEvent::Policy(policy))
+            .unwrap();
+        let decisions =
+            simulate(&state, &[proposal(resource.clone())], &[capacity(resource)]).unwrap();
+        assert!(decisions[0].proposed);
+    }
+    let unknown = Resource::UnspecifiedMemoryBytes;
+    let held = simulate(
+        &state,
+        &[proposal(unknown.clone())],
+        &[capacity(unknown.clone())],
+    )
+    .unwrap();
+    assert!(!held[0].proposed);
+    assert!(held[0].held.contains(&WaitReason::Unknown(unknown)));
+}

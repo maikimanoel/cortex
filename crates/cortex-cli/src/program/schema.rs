@@ -1,11 +1,16 @@
 //! Explicit presentation versions. Legacy spellings are protocol data, not Rust names.
-use cortex_core::program::scheduling::Resource;
+use cortex_core::program::{
+    memory::{MemoryBasis, MemoryLimit, MemoryLimitKind, MemoryObservation, MemoryScope},
+    scheduling::Resource,
+};
 use serde_json::{Value, json};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Schema {
     Legacy,
     Canonical,
+    /// Explicit resource semantics; the current default presentation.
+    Current,
 }
 
 impl Schema {
@@ -13,46 +18,48 @@ impl Schema {
         match self {
             Self::Legacy => "cortex.program.v1",
             Self::Canonical => "cortex.program.v2",
+            Self::Current => "cortex.program.v3",
         }
     }
     pub(super) fn tasks_key(self) -> &'static str {
         match self {
             Self::Legacy => "missions",
-            Self::Canonical => "tasks",
+            Self::Canonical | Self::Current => "tasks",
         }
     }
     pub(super) fn task_label(self) -> &'static str {
         match self {
             Self::Legacy => "Mission",
-            Self::Canonical => "Task",
+            Self::Canonical | Self::Current => "Task",
         }
     }
     pub(super) fn guidance_key(self) -> &'static str {
         match self {
             Self::Legacy => "next_permissible_action",
-            Self::Canonical => "next_step_guidance",
+            Self::Canonical | Self::Current => "next_step_guidance",
         }
     }
     pub(super) fn task_blocker(self) -> &'static str {
         // The v1 protocol used the redacted type Debug spelling for non-edge blockers.
         match self {
             Self::Legacy => "MissionBlocker([redacted])",
-            Self::Canonical => "TaskBlocker([redacted])",
+            Self::Canonical | Self::Current => "TaskBlocker([redacted])",
         }
     }
-    pub(super) fn resource(self, resource: Resource) -> &'static str {
+    pub(super) fn resource(self, resource: &Resource) -> &'static str {
         match (self, resource) {
             (Self::Legacy, Resource::WorkerSlots) => "Workers",
-            (Self::Canonical, Resource::WorkerSlots) => "WorkerSlots",
+            (Self::Canonical | Self::Current, Resource::WorkerSlots) => "WorkerSlots",
             (Self::Legacy, Resource::BuildJobs) => "Builds",
-            (Self::Canonical, Resource::BuildJobs) => "BuildJobs",
+            (Self::Canonical | Self::Current, Resource::BuildJobs) => "BuildJobs",
             (Self::Legacy, Resource::TestProcesses) => "Tests",
-            (Self::Canonical, Resource::TestProcesses) => "TestProcesses",
+            (Self::Canonical | Self::Current, Resource::TestProcesses) => "TestProcesses",
             (Self::Legacy, Resource::CpuMillicores) => "CpuMillis",
-            (Self::Canonical, Resource::CpuMillicores) => "CpuMillicores",
+            (Self::Canonical | Self::Current, Resource::CpuMillicores) => "CpuMillicores",
             (Self::Legacy, Resource::ElapsedMillis) => "TimeMillis",
-            (Self::Canonical, Resource::ElapsedMillis) => "ElapsedMillis",
-            (_, Resource::RamBytes) => "RamBytes",
+            (Self::Canonical | Self::Current, Resource::ElapsedMillis) => "ElapsedMillis",
+            (_, Resource::UnspecifiedMemoryBytes) => "RamBytes",
+            (_, Resource::MemoryBytes(_)) => "MemoryBytes",
             (_, Resource::DiskBytes) => "DiskBytes",
             (_, Resource::OutputBytes) => "OutputBytes",
             (_, Resource::CiJobs) => "CiJobs",
@@ -143,6 +150,17 @@ impl Schema {
                     json!("DO_NOT_USE_PARTIAL_NATIVE_SAMPLES_AS_CLOSURE_OR_SETTLEMENT");
             }
         }
+        if self == Self::Current {
+            for (field, version) in [
+                ("fixture_projection", "cortex.fixture-effects.v3"),
+                ("supervised_projection", "cortex.supervised-fixtures.v3"),
+                ("domain_projection", "cortex.domains.v3"),
+            ] {
+                if let Some(projection) = value.get_mut(field).filter(|v| !v.is_null()) {
+                    projection["schema"] = json!(version);
+                }
+            }
+        }
     }
 }
 
@@ -170,15 +188,15 @@ mod tests {
             (Resource::TestProcesses, "Tests", "TestProcesses"),
             (Resource::CpuMillicores, "CpuMillis", "CpuMillicores"),
             (Resource::ElapsedMillis, "TimeMillis", "ElapsedMillis"),
-            (Resource::RamBytes, "RamBytes", "RamBytes"),
+            (Resource::UnspecifiedMemoryBytes, "RamBytes", "RamBytes"),
             (Resource::DiskBytes, "DiskBytes", "DiskBytes"),
             (Resource::OutputBytes, "OutputBytes", "OutputBytes"),
             (Resource::CiJobs, "CiJobs", "CiJobs"),
             (Resource::ModelTokens, "ModelTokens", "ModelTokens"),
         ];
         for (resource, legacy, canonical) in expected {
-            assert_eq!(Schema::Legacy.resource(resource), legacy);
-            assert_eq!(Schema::Canonical.resource(resource), canonical);
+            assert_eq!(Schema::Legacy.resource(&resource), legacy);
+            assert_eq!(Schema::Canonical.resource(&resource), canonical);
         }
         assert_eq!(Schema::Legacy.task_blocker(), "MissionBlocker([redacted])");
         assert_eq!(Schema::Canonical.task_blocker(), "TaskBlocker([redacted])");
@@ -238,6 +256,159 @@ mod guidance_tests {
             );
             assert!(domain["closure_receipt_source"].is_null());
             assert_eq!(domain["retry_authorized"], false);
+        }
+    }
+}
+
+// These are schema-3 protocol tokens, independent of Rust Debug spelling.
+fn memory_basis_token(basis: MemoryBasis) -> &'static str {
+    match basis {
+        MemoryBasis::ProcessResident => "ProcessResident",
+        MemoryBasis::SummedProcessResident => "SummedProcessResident",
+        MemoryBasis::CgroupCharged => "CgroupCharged",
+    }
+}
+
+/// Assign output-local scope references by exact retained scope equality. The
+/// ordinals disclose correspondence within this output, not private identities or
+/// stable cross-run identities. They are not proofs of physical pool independence.
+#[derive(Default)]
+pub(super) struct ResourceProjection {
+    scopes: Vec<MemoryScope>,
+}
+impl ResourceProjection {
+    pub(super) fn observation(&mut self, value: &MemoryObservation) -> Value {
+        json!({"role":"SAMPLED_USAGE", "basis":memory_basis_token(value.basis()),
+            "bytes":value.bytes(), "measurement_is_final":false,
+            "resource":value.resource().map(|r|self.project(Schema::Current, &Resource::MemoryBytes(Box::new(r.clone())))),
+            "missing_scope_is_unknown":true, "qualification":"NOT_INFERRED"})
+    }
+    pub(super) fn limit(&mut self, value: &MemoryLimit) -> Value {
+        json!({"role":match value.kind() {MemoryLimitKind::Requested=>"REQUESTED_LIMIT",MemoryLimitKind::ReadBack=>"LIMIT_READBACK"},
+            "basis":memory_basis_token(value.basis()), "bytes":value.bytes(),
+            "resource":value.resource().map(|r|self.project(Schema::Current, &Resource::MemoryBytes(Box::new(r.clone())))),
+            "missing_scope_is_unknown":true, "usage":"NOT_INFERRED", "qualification":"NOT_INFERRED"})
+    }
+
+    pub(super) fn project(&mut self, schema: Schema, resource: &Resource) -> Value {
+        if schema != Schema::Current {
+            return json!(schema.resource(resource));
+        }
+        match resource {
+            Resource::UnspecifiedMemoryBytes => json!({
+                "kind":"MemoryBytes", "basis":"UNESTABLISHED", "scope_kind":"UNESTABLISHED",
+                "scope_id":null, "measurement_or_enforcement":"NOT_INFERRED"
+            }),
+            Resource::MemoryBytes(memory) => {
+                let scope = memory.scope();
+                let index = match self.scopes.iter().position(|s| s == scope) {
+                    Some(index) => index,
+                    None => {
+                        self.scopes.push(scope.clone());
+                        self.scopes.len() - 1
+                    }
+                };
+                let basis = memory_basis_token(memory.basis());
+                let kind = match scope {
+                    MemoryScope::AccountingPool(_) => "ACCOUNTING_POOL",
+                    MemoryScope::Process(_) => "PROCESS_INCARNATION",
+                    MemoryScope::ProcessSet(_) => "EXACT_PROCESS_SET",
+                    MemoryScope::Cgroup { .. } => "CGROUP_INCARNATION",
+                };
+                json!({"kind":"MemoryBytes", "basis":basis, "scope_kind":kind,
+                    "scope_id":index, "scope_id_lifetime":"THIS_INSPECTION_OUTPUT",
+                    "identity_values":"REDACTED", "measurement_or_enforcement":"NOT_INFERRED"})
+            }
+            _ => json!(schema.resource(resource)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod memory_projection_tests {
+    use super::*;
+    use cortex_core::program::{domain::PoolIdentity, memory::MemoryResource};
+
+    fn memory(incarnation: &str) -> Resource {
+        Resource::MemoryBytes(Box::new(
+            MemoryResource::new(
+                MemoryBasis::CgroupCharged,
+                MemoryScope::AccountingPool(PoolIdentity {
+                    physical: "private-physical".to_owned(),
+                    incarnation: incarnation.to_owned(),
+                    host: "private-host".to_owned(),
+                    boot: "private-boot".to_owned(),
+                }),
+            )
+            .unwrap(),
+        ))
+    }
+
+    #[test]
+    fn memory_scopes_have_output_local_correspondence_without_identity_disclosure() {
+        let a = memory("private-first");
+        let b = memory("private-second");
+        let mut projection = ResourceProjection::default();
+        let first = projection.project(Schema::Current, &a);
+        let other = projection.project(Schema::Current, &b);
+        let repeated = projection.project(Schema::Current, &a);
+        assert_eq!(first, repeated);
+        assert_eq!(first["basis"], "CgroupCharged");
+        assert_eq!(first["scope_kind"], "ACCOUNTING_POOL");
+        assert_ne!(first["scope_id"], other["scope_id"]);
+        assert_eq!(first["measurement_or_enforcement"], "NOT_INFERRED");
+        for value in [&first, &other, &repeated] {
+            assert!(!value.to_string().contains("private-"));
+        }
+    }
+
+    #[test]
+    fn historical_memory_basis_is_unestablished_not_charged_or_resident() {
+        let mut projection = ResourceProjection::default();
+        let old = Resource::UnspecifiedMemoryBytes;
+        assert_eq!(projection.project(Schema::Legacy, &old), json!("RamBytes"));
+        assert_eq!(
+            projection.project(Schema::Canonical, &old),
+            json!("RamBytes")
+        );
+        let current = projection.project(Schema::Current, &old);
+        assert_eq!(current["basis"], "UNESTABLISHED");
+        assert_eq!(current["scope_kind"], "UNESTABLISHED");
+        assert!(current["scope_id"].is_null());
+    }
+    #[test]
+    fn observation_and_limit_tokens_do_not_imply_usage_or_scope() {
+        use cortex_core::program::memory::MemoryCorrespondence;
+        let mut projection = ResourceProjection::default();
+        for (basis, token) in [
+            (MemoryBasis::ProcessResident, "ProcessResident"),
+            (MemoryBasis::SummedProcessResident, "SummedProcessResident"),
+            (MemoryBasis::CgroupCharged, "CgroupCharged"),
+        ] {
+            for bytes in [None, Some(0), Some(5)] {
+                let observation =
+                    MemoryObservation::new(MemoryCorrespondence::ScopeUnestablished(basis), bytes);
+                let value = projection.observation(&observation);
+                assert_eq!(value["basis"], token);
+                assert_eq!(value["bytes"], json!(bytes));
+                assert!(value["resource"].is_null());
+                assert_eq!(value["role"], "SAMPLED_USAGE");
+                assert_eq!(value["measurement_is_final"], false);
+            }
+            for (kind, role) in [
+                (MemoryLimitKind::Requested, "REQUESTED_LIMIT"),
+                (MemoryLimitKind::ReadBack, "LIMIT_READBACK"),
+            ] {
+                let limit =
+                    MemoryLimit::new(MemoryCorrespondence::ScopeUnestablished(basis), 5, kind)
+                        .unwrap();
+                let value = projection.limit(&limit);
+                assert_eq!(value["basis"], token);
+                assert_eq!(value["role"], role);
+                assert_eq!(value["bytes"], 5);
+                assert!(value["resource"].is_null());
+                assert_eq!(value["usage"], "NOT_INFERRED");
+            }
         }
     }
 }

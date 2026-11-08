@@ -147,7 +147,7 @@ impl OperationalProjection {
         };
         let mut usage = Vec::with_capacity(record.intent.demand.len());
         for demand in &record.intent.demand {
-            let amount = match demand.resource {
+            let amount = match demand.resource.clone() {
                 Resource::WorkerSlots => Some(1),
                 Resource::ElapsedMillis => Some(observation.elapsed_ms),
                 Resource::OutputBytes => observation
@@ -157,10 +157,16 @@ impl OperationalProjection {
                     .containment
                     .as_ref()
                     .and_then(|s| s.cpu_capacity_millicores()),
-                Resource::RamBytes => observation
+                // No complete host/boot correspondence is retained by ScopeObservation.
+                // Raw charged bytes cannot be relabeled as a scoped pool measurement.
+                Resource::MemoryBytes(_) => None,
+                // Preserve the historical advisory projection without assigning a
+                // basis or scope to its legacy dimension. Current kernel admission
+                // rejects new reconciliations containing this unestablished unit.
+                Resource::UnspecifiedMemoryBytes => observation
                     .containment
                     .as_ref()
-                    .and_then(|s| s.memory_peak_bytes),
+                    .and_then(|captured| captured.memory_peak_bytes),
                 _ => None,
             };
             let Some(amount) = amount else {
@@ -168,7 +174,7 @@ impl OperationalProjection {
                 return Ok(view);
             };
             usage.push(Demand {
-                resource: demand.resource,
+                resource: demand.resource.clone(),
                 amount: Some(amount),
             });
         }

@@ -255,6 +255,16 @@ impl SystemdNonceDomain {
             return Err(issue(phase, DomainCause::Correspondence));
         }
         use cortex_core::program::scheduling::Resource;
+        if intent.effect.demand.iter().any(|d| match &d.resource {
+            Resource::UnspecifiedMemoryBytes => true,
+            Resource::MemoryBytes(m) => {
+                m.basis() != cortex_core::program::memory::MemoryBasis::CgroupCharged
+                    || !m.accounts_pool(&intent.pool)
+            }
+            _ => false,
+        }) {
+            return Err(issue(phase, DomainCause::Correspondence));
+        }
         let l = &self.selection.limits;
         let required_cpu = l
             .cpu_quota_us
@@ -264,14 +274,21 @@ impl SystemdNonceDomain {
             .ok_or_else(|| issue(phase, DomainCause::Contract))?;
         for (resource, amount) in [
             (Resource::WorkerSlots, 1),
-            (Resource::RamBytes, l.memory_bytes),
+            (
+                Resource::memory(
+                    cortex_core::program::memory::MemoryBasis::CgroupCharged,
+                    cortex_core::program::memory::MemoryScope::AccountingPool(intent.pool.clone()),
+                )
+                .map_err(|_| issue(phase, DomainCause::Contract))?,
+                l.memory_bytes,
+            ),
             (Resource::CpuMillicores, required_cpu),
         ] {
             if intent
                 .effect
                 .demand
                 .iter()
-                .find(|d| d.resource == resource)
+                .find(|d| d.resource.clone() == resource)
                 .and_then(|d| d.amount)
                 .is_none_or(|n| n < amount)
             {

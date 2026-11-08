@@ -181,7 +181,12 @@ fn explicit_feature_endpoints_are_literal_and_duplicate_occurrences_keep_distinc
         g.node("/k:features/k:default/i:0").unwrap().span(),
         g.node("/k:features/k:default/i:1").unwrap().span()
     );
-    assert_eq!(reinspect(&r.path, &g, id(4)).unwrap().validity(), None);
+    assert_eq!(
+        reinspect(&r.path, &g, id(4))
+            .unwrap()
+            .resolved_projection_validity(),
+        None
+    );
     assert!(
         g.references()
             .iter()
@@ -243,7 +248,9 @@ fn quoted_unicode_escaped_keys_values_and_fake_comments_have_exact_bytes() {
         ReferenceTarget::Local("/k:features/k:ação".into())
     );
     assert_eq!(
-        reinspect(&r.path, &g, id(4)).unwrap().validity(),
+        reinspect(&r.path, &g, id(4))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Current)
     );
 }
@@ -271,7 +278,9 @@ fn dirty_replaced_deleted_wrong_repository_and_sequence_overflow_refuse() {
             Err(ExtractionError::Candidate(_))
         ));
         assert_eq!(
-            reinspect(&r.path, &old, id(4)).unwrap().validity(),
+            reinspect(&r.path, &old, id(4))
+                .unwrap()
+                .resolved_projection_validity(),
             Some(Validity::Stale)
         );
     }
@@ -387,9 +396,14 @@ fn candidate_and_profile_changes_explain_staleness_and_preserve_original_facts()
     .unwrap();
     let view = reinspect(&r.path, &old, id(4)).unwrap();
     assert!(!view.profile_matches());
-    assert_eq!(view.validity(), Some(Validity::Stale));
+    assert_eq!(view.resolved_projection_validity(), Some(Validity::Stale));
     assert_eq!(view.index(), &old);
-    assert_eq!(inspect_validity(&original, None).unwrap().validity(), None);
+    assert_eq!(
+        inspect_validity(&original, None)
+            .unwrap()
+            .resolved_projection_validity(),
+        None
+    );
     let latest = inspect_candidate(&r.path, &c, id(4)).unwrap();
     assert!(
         inspect_validity(&original, Some(&latest))
@@ -398,7 +412,7 @@ fn candidate_and_profile_changes_explain_staleness_and_preserve_original_facts()
     );
     r.commit_file("Cargo.toml", "[package]\nname='changed'\n");
     let view = reinspect(&r.path, &original, id(5)).unwrap();
-    assert_eq!(view.validity(), Some(Validity::Stale));
+    assert_eq!(view.resolved_projection_validity(), Some(Validity::Stale));
     assert!(!matches!(
         view.correspondence(),
         BindingDecision::Compatible(_)

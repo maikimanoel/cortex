@@ -40,13 +40,30 @@ fn stored(root: &Temp) -> (ProgramStore, DomainIntent, DomainOperations) {
         .unwrap()
         .trim()
         .into();
+    // The runtime fixture binds the current boot. Its logical memory dimension
+    // must carry that same pool incarnation through policy, grant and demand.
+    for capacity in &mut pool.capacities {
+        if matches!(
+            capacity.resource,
+            cortex_core::program::scheduling::Resource::MemoryBytes(_)
+        ) {
+            capacity.resource = fixture::memory_resource_for(pool.identity.clone());
+        }
+    }
     fixture::event(
         &mut kernel,
         "pool",
         DomainEvent::ConfigurePool(pool.clone()),
     );
-    let mut intent = fixture::setup(&mut kernel, "A");
-    intent.pool = pool.identity;
+    let intent = fixture::setup(&mut kernel, "A");
+    assert_eq!(intent.pool, pool.identity);
+    assert!(
+        intent
+            .effect
+            .demand
+            .iter()
+            .any(|d| d.resource == fixture::memory_resource_for(pool.identity.clone()))
+    );
     fixture::event(
         &mut kernel,
         "reserve",

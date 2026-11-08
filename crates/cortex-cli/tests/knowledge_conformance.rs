@@ -289,7 +289,7 @@ fn lexical_classification_preserves_reasons_without_loading_committed_external_d
         view.correspondence(),
         BindingDecision::Compatible(_)
     ));
-    assert_eq!(view.validity(), None);
+    assert_eq!(view.resolved_projection_validity(), None);
     assert_unverified(view.index());
     assert_eq!(snapshot(&fixture.repo), before);
 }
@@ -366,7 +366,7 @@ fn source_byte_limit_accepts_256_kib_and_rejects_one_extra_valid_whitespace_byte
     assert_eq!(
         reinspect(&fixture.repo.path, &index, id(4))
             .unwrap()
-            .validity(),
+            .resolved_projection_validity(),
         Some(Validity::Current)
     );
     assert_eq!(snapshot(&fixture.repo), before);
@@ -533,14 +533,16 @@ fn missing_partial_and_uncertain_context_never_establish_current_validity() {
     let original = index.clone();
     let before = snapshot(&fixture.repo);
     let missing = inspect_validity(&index, None).unwrap();
-    assert_eq!(missing.validity(), None);
+    assert_eq!(missing.resolved_projection_validity(), None);
     assert_eq!(
         missing.correspondence(),
         &BindingDecision::Insufficient(BindingInsufficiency::ReobservationRequired)
     );
     let actual = inspect_candidate(&fixture.repo.path, &fixture.contract, id(4)).unwrap();
     assert_eq!(
-        inspect_validity(&index, Some(&actual)).unwrap().validity(),
+        inspect_validity(&index, Some(&actual))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Current)
     );
     let state = actual.state();
@@ -594,7 +596,7 @@ fn missing_partial_and_uncertain_context_never_establish_current_validity() {
             basis,
         );
         let view = inspect_validity(&index, Some(&uncertain)).unwrap();
-        assert_eq!(view.validity(), None);
+        assert_eq!(view.resolved_projection_validity(), None);
         assert_eq!(
             view.correspondence(),
             &BindingDecision::Insufficient(reason)
@@ -603,13 +605,16 @@ fn missing_partial_and_uncertain_context_never_establish_current_validity() {
     }
     let reused = inspect_candidate(&fixture.repo.path, &fixture.contract, id(3)).unwrap();
     let view = inspect_validity(&index, Some(&reused)).unwrap();
-    assert_eq!(view.validity(), Some(Validity::Stale));
+    assert_eq!(view.resolved_projection_validity(), Some(Validity::Stale));
     assert_eq!(
         view.correspondence(),
         &BindingDecision::Stale(BindingStaleness::ObservationOrder)
     );
     let current = reinspect(&fixture.repo.path, &index, id(5)).unwrap();
-    assert_eq!(current.validity(), Some(Validity::Current));
+    assert_eq!(
+        current.resolved_projection_validity(),
+        Some(Validity::Current)
+    );
     assert_unverified(current.index());
     assert_eq!(index, original);
     assert_eq!(snapshot(&fixture.repo), before);
@@ -621,7 +626,9 @@ fn current_extraction_cannot_supply_missing_verification_or_manufacture_pass() {
     let index = fixture.extract("source.json").unwrap();
     let current = inspect_candidate(&fixture.repo.path, &fixture.contract, id(4)).unwrap();
     assert_eq!(
-        inspect_validity(&index, Some(&current)).unwrap().validity(),
+        inspect_validity(&index, Some(&current))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Current)
     );
     let profile = VerificationProfile::new(
