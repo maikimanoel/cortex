@@ -799,6 +799,14 @@ fn durable_with_transport(mode: &str, transport: Option<TransportLimits>) -> Dur
         spec.args
             .push(root.0.join("launch-count").to_string_lossy().into_owned());
     }
+    if mode == "revocation-ready" {
+        spec.args.push(
+            root.0
+                .join("revocation-ready")
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
     spec.limits.executable_bytes = 16_000_000;
     spec.limits.argument_bytes = 4096;
     spec.limits.transport = transport;
@@ -979,36 +987,61 @@ fn canonical_public_dispatch_captures_identity_and_replay_never_relaunches() {
 }
 #[test]
 fn canonical_revocation_is_observed_without_an_atomic_cancellation_request() {
-    let f = durable("sleep");
+    let f = durable("revocation-ready");
+    let listener =
+        std::os::unix::net::UnixListener::bind(f.root.0.join("revocation-ready")).unwrap();
+    listener.set_nonblocking(true).unwrap();
     thread::scope(|scope| {
         let revoker = scope.spawn(|| {
             let deadline = Instant::now() + Duration::from_secs(2);
-            loop {
-                let kernel = f.store.load(&f.key, Access::ReadOnly).unwrap();
-                if kernel.fixture_effects().effects()[0]
+            // Wait for the owned child's causal notification after input EOF,
+            // rather than repeatedly taking the store's startup lifecycle lock.
+            let mut channel = loop {
+                assert!(Instant::now() < deadline, "no owned readiness notification");
+                match listener.accept() {
+                    Ok((channel, _)) => break channel,
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => thread::sleep(POLL),
+                    Err(e) => panic!("readiness channel failed: {:?}", e.kind()),
+                }
+            };
+            let peer = rustix::net::sockopt::socket_peercred(&channel).unwrap();
+            channel
+                .set_read_timeout(Some(deadline.saturating_duration_since(Instant::now())))
+                .unwrap();
+            let mut identity = [0; 16];
+            channel.read_exact(&mut identity).unwrap();
+            let pid = u64::from_be_bytes(identity[..8].try_into().unwrap());
+            let start_ticks = u64::from_be_bytes(identity[8..].try_into().unwrap());
+            assert_eq!(pid, peer.pid.as_raw_pid() as u64);
+            let kernel = f.store.load(&f.key, Access::ReadOnly).unwrap();
+            assert!(
+                kernel.fixture_effects().effects()[0]
                     .process_observations
                     .iter()
-                    .any(|o| o.completion == ProcessCompletion::Spawned)
-                {
-                    let event = EffectEvent::Revoke {
-                        grant: support::proposed_grant(&f.scope).id,
-                        at: kernel.fixture_effects().last_tick() + 1,
-                        basis: source("explicit-revocation"),
-                    };
-                    let op = support::operation(
-                        &kernel,
-                        "revoke-during-process",
-                        WorkflowCommand::SupervisedEffect(Box::new(event)),
-                    );
-                    f.store.admit(&f.key, op).unwrap();
-                    break;
-                }
-                assert!(
-                    Instant::now() < deadline,
-                    "no durable process identity observed"
-                );
-                thread::sleep(Duration::from_millis(2));
-            }
+                    .any(|o| o.completion == ProcessCompletion::Spawned
+                        && o.process
+                            .as_ref()
+                            .is_some_and(|process| u64::from(process.pid) == pid
+                                && process.start_ticks == start_ticks))
+            );
+            let event = EffectEvent::Revoke {
+                grant: support::proposed_grant(&f.scope).id,
+                at: kernel.fixture_effects().last_tick() + 1,
+                basis: source("explicit-revocation"),
+            };
+            let op = support::operation(
+                &kernel,
+                "revoke-during-process",
+                WorkflowCommand::SupervisedEffect(Box::new(event)),
+            );
+            let receipt = f.store.admit(&f.key, op).unwrap();
+            assert!(!receipt.duplicate);
+            channel
+                .set_read_timeout(Some(deadline.saturating_duration_since(Instant::now())))
+                .unwrap();
+            // Keep the finite fixture blocked until the supervisor terminates it;
+            // merely dropping this channel would allow a normal child exit.
+            assert_eq!(channel.read(&mut [0]).unwrap(), 0);
         });
         let result = execute_fixture(
             &f.store,
@@ -1022,6 +1055,7 @@ fn canonical_revocation_is_observed_without_an_atomic_cancellation_request() {
         revoker.join().unwrap();
         assert!(result.recorded.is_some(), "{:?}", result.recording_failure);
         let observation = result.observation.unwrap();
+        assert_eq!(observation.input_bytes, f.pin.spec.input_len);
         assert_eq!(
             observation.completion,
             ProcessCompletion::Interrupted {

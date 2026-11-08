@@ -113,6 +113,14 @@ fn setup_in_pool(k: &mut CoordinationKernel, task: &str, selected: &PoolContract
     );
     submit(k, &format!("ready-{task}"), Command::Notify(notification));
     if k.fixture_effects().policies().is_empty() {
+        // The member keeps its own numeric allowance. Only the memory identity
+        // follows the selected pool; the pool's capacity is not a member grant.
+        let mut capacities = pool().capacities;
+        for capacity in &mut capacities {
+            if matches!(capacity.resource, Resource::MemoryBytes(_)) {
+                capacity.resource = memory_resource_for(selected.identity.clone());
+            }
+        }
         let p = Policy {
             reference: source("domain-member-policy"),
             program: k.state().definition().id().clone(),
@@ -120,7 +128,7 @@ fn setup_in_pool(k: &mut CoordinationKernel, task: &str, selected: &PoolContract
             mode: EffectMode::SupervisedFixture,
             host: source("controlled-host"),
             privacy: source("synthetic-only"),
-            capacities: selected.capacities.clone(),
+            capacities,
             cumulative: vec![],
             max_effects: 16,
             max_retries: 0,

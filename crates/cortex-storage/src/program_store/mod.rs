@@ -25,7 +25,9 @@ use crate::history_store::{
     self, Access, Completion, ErrorKind, StoreError, StoreId, StoreKey, location::Location,
 };
 use cortex_core::program::ProgramDefinition;
-use cortex_evidence::program::{Command, CoordinationKernel, KernelError, KernelReceipt, Operation};
+use cortex_evidence::program::{
+    Command, CoordinationKernel, KernelError, KernelReceipt, Operation,
+};
 use rusqlite::{Connection, TransactionBehavior};
 use std::{
     error::Error,

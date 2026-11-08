@@ -86,6 +86,32 @@ fn main() {
     }
     let mut input = Vec::new();
     std::io::stdin().read_to_end(&mut input).unwrap();
+    if mode == "revocation-ready" {
+        // Input is sent only after the supervisor records Spawned. Report this
+        // owned incarnation without contending with its startup journal writes.
+        let mut channel = std::os::unix::net::UnixStream::connect(args.next().unwrap()).unwrap();
+        channel
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        channel
+            .set_write_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
+        let fields: Vec<_> = stat
+            .rsplit_once(')')
+            .unwrap()
+            .1
+            .split_whitespace()
+            .collect();
+        let ticks: u64 = fields[19].parse().unwrap();
+        for value in [u64::from(std::process::id()), ticks] {
+            channel.write_all(&value.to_be_bytes()).unwrap();
+        }
+        // Authority loss should terminate this process. A lost test controller
+        // or timeout is a finite fallback, never evidence of revocation.
+        let _ = channel.read(&mut [0]);
+        return;
+    }
     if let Some(marker) = descendant_marker {
         // The stream-retention scenario begins only after the entire explicit
         // package and EOF have arrived. Early parent exit would instead exercise
