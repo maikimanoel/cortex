@@ -1073,12 +1073,12 @@ fn required_host_denials_cannot_be_enabled_by_fabricated_supported_descriptors()
         Control::Descendants,
         Control::Revocation,
         Control::WorkspaceIdentity,
-        Control::Resource(Resource::RamBytes),
+        Control::Resource(Resource::UnspecifiedMemoryBytes),
         Control::Resource(Resource::CpuMillicores),
     ] {
         let mut observations = original.descriptor().observations().to_vec();
         observations.push(CapabilityObservation {
-            control,
+            control: control.clone(),
             kind: ObservationKind::ControlledFixture,
             support: Support::Supported,
             basis: source("claim-alone-is-not-host-support"),
@@ -1093,7 +1093,7 @@ fn required_host_denials_cannot_be_enabled_by_fabricated_supported_descriptors()
         .unwrap();
         let mut required = original.requirements().required().to_vec();
         required.push(Requirement {
-            control,
+            control: control.clone(),
             kind: ObservationKind::ControlledFixture,
         });
         let requirements = Requirements::new(source("new-required"), required, 3).unwrap();

@@ -25,7 +25,7 @@ use crate::history_store::{
     self, Access, Completion, ErrorKind, StoreError, StoreId, StoreKey, location::Location,
 };
 use cortex_core::program::ProgramDefinition;
-use cortex_evidence::program::{CoordinationKernel, KernelError, KernelReceipt, Operation};
+use cortex_evidence::program::{Command, CoordinationKernel, KernelError, KernelReceipt, Operation};
 use rusqlite::{Connection, TransactionBehavior};
 use std::{
     error::Error,
@@ -880,50 +880,57 @@ fn load(
         .prepare("SELECT ordinal,operation,payload FROM program_inputs ORDER BY ordinal")
         .map_err(sql)?;
     let mut rows = statement.query([]).map_err(sql)?;
-    while let Some(row) = rows.next().map_err(sql)? {
-        if kernel.operations().len() >= kernel.initial().limits().entries {
-            return Err(ProgramStoreError::Corrupt);
-        }
-        let ordinal: i64 = row.get(0).map_err(sql)?;
-        if ordinal <= 0 || ordinal as u64 != kernel.revision() + 1 {
-            return Err(ProgramStoreError::Corrupt);
-        }
-        let bytes = row
-            .get_ref(2)
-            .map_err(sql)?
-            .as_blob()
-            .map_err(|_| ProgramStoreError::Corrupt)?;
-        budget.add(bytes.len())?;
-        if budget.used > kernel.initial().limits().bytes {
-            return Err(ProgramStoreError::Capacity);
-        }
-        let input = codec::decode_operation(bytes, &kernel)?;
-        profile.check(&input)?;
-        let amendment = matches!(
-            input.command,
-            cortex_evidence::program::Command::Amend { .. }
-                | cortex_evidence::program::Command::RegisterDomainMember(_)
-                | cortex_evidence::program::Command::DomainMember { .. }
-        );
-        if row
-            .get_ref(1)
-            .map_err(sql)?
-            .as_str()
-            .map_err(|_| ProgramStoreError::Corrupt)?
-            != input.id.as_str()
-        {
-            return Err(ProgramStoreError::Corrupt);
-        }
-        let result = kernel
-            .admit(input)
-            .map_err(|_| ProgramStoreError::Corrupt)?;
-        if result.duplicate {
-            return Err(ProgramStoreError::Corrupt);
-        }
-        if amendment {
-            check_kernel_source_exclusion(location.path(), &kernel)?;
-        }
-    }
+    let mut source_changed = false;
+    kernel = kernel
+        .reconstruct(|kernel| -> Result<Option<Operation>, ProgramStoreError> {
+            if source_changed {
+                check_kernel_source_exclusion(location.path(), kernel)?;
+            }
+            let Some(row) = rows.next().map_err(sql)? else {
+                return Ok(None);
+            };
+            if kernel.operations().len() >= kernel.initial().limits().entries {
+                return Err(ProgramStoreError::Corrupt);
+            }
+            let ordinal: i64 = row.get(0).map_err(sql)?;
+            if ordinal <= 0 || ordinal as u64 != kernel.revision() + 1 {
+                return Err(ProgramStoreError::Corrupt);
+            }
+            let bytes = row
+                .get_ref(2)
+                .map_err(sql)?
+                .as_blob()
+                .map_err(|_| ProgramStoreError::Corrupt)?;
+            budget.add(bytes.len())?;
+            if budget.used > kernel.initial().limits().bytes {
+                return Err(ProgramStoreError::Capacity);
+            }
+            let input = codec::decode_operation(bytes, kernel)?;
+            profile.check(&input)?;
+            if row
+                .get_ref(1)
+                .map_err(sql)?
+                .as_str()
+                .map_err(|_| ProgramStoreError::Corrupt)?
+                != input.id.as_str()
+            {
+                return Err(ProgramStoreError::Corrupt);
+            }
+            source_changed = matches!(
+                &input.command,
+                Command::Amend { .. }
+                    | Command::RegisterDomainMember(_)
+                    | Command::DomainMember { .. }
+            );
+            Ok(Some(input))
+        })
+        .map_err(|error| match error {
+            // Invalid retained transitions remain corruption, while new admission
+            // continues to report its typed domain rejection.
+            ProgramStoreError::Domain(_) => ProgramStoreError::Corrupt,
+            other => other,
+        })?;
+    check_kernel_source_exclusion(location.path(), &kernel)?;
     budget.check()?;
     Ok((id, kernel, profile))
 }

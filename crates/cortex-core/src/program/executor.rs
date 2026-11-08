@@ -10,7 +10,7 @@ use crate::temporal::SourceReference;
 use std::{collections::BTreeSet, error::Error, fmt};
 
 /// A capability that an instruction transport or host may be required to supply.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Control {
     /// Read the complete explicit input from standard input.
     StandardInput,
@@ -149,7 +149,10 @@ impl ExecutorDescriptor {
             return Err(ExecutorError::Capacity);
         }
         let mut controls = BTreeSet::new();
-        if observations.iter().any(|o| !controls.insert(o.control)) {
+        if observations
+            .iter()
+            .any(|o| !controls.insert(o.control.clone()))
+        {
             return Err(ExecutorError::AmbiguousControl);
         }
         Ok(Self {
@@ -178,7 +181,7 @@ impl ExecutorDescriptor {
 }
 
 /// One explicit mandatory control and the evidence class required for this use.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Requirement {
     /// Exact capability whose absence must hold the proposed use.
     pub control: Control,
@@ -203,7 +206,7 @@ impl Requirements {
             return Err(ExecutorError::Capacity);
         }
         let mut controls = BTreeSet::new();
-        if required.iter().any(|r| !controls.insert(r.control)) {
+        if required.iter().any(|r| !controls.insert(r.control.clone())) {
             return Err(ExecutorError::AmbiguousControl);
         }
         Ok(Self {
@@ -256,7 +259,7 @@ pub fn negotiate(
     requirements: &Requirements,
 ) -> Vec<ControlDecision> {
     let mut required = requirements.required.iter().collect::<Vec<_>>();
-    required.sort_by_key(|r| r.control);
+    required.sort_by_key(|r| r.control.clone());
     required
         .into_iter()
         .map(|r| {
@@ -264,7 +267,7 @@ pub fn negotiate(
             match descriptor
                 .observations
                 .iter()
-                .find(|o| o.control == r.control)
+                .find(|o| o.control.clone() == r.control.clone())
             {
                 None => held.push(HoldReason::Missing),
                 Some(o) => {
@@ -282,7 +285,7 @@ pub fn negotiate(
                 }
             }
             ControlDecision {
-                control: r.control,
+                control: r.control.clone(),
                 held,
             }
         })
@@ -351,7 +354,12 @@ pub fn prepare(
     package.check(state, package.bytes())?;
     if [Control::StandardInput, Control::StructuredOutput]
         .iter()
-        .any(|control| !requirements.required.iter().any(|r| r.control == *control))
+        .any(|control| {
+            !requirements
+                .required
+                .iter()
+                .any(|r| r.control.clone() == *control)
+        })
     {
         return Err(ExecutorError::MissingTransportContract);
     }

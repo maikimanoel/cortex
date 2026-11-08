@@ -150,7 +150,12 @@ fn committed_cortex_fixture_has_exact_spans_distinct_occurrences_and_two_step_re
             .all(|r| r.origin() == RelationOrigin::Extracted
                 && r.disposition() == ValidationDisposition::Unverified)
     );
-    assert_eq!(reinspect(&r.path, &g, id(4)).unwrap().validity(), None);
+    assert_eq!(
+        reinspect(&r.path, &g, id(4))
+            .unwrap()
+            .resolved_projection_validity(),
+        None
+    );
     for private in ["invalid.example", "Core Binding", "invariants"] {
         assert!(!format!("{g:?}").contains(private));
     }
@@ -237,16 +242,27 @@ fn current_profile_qualification_and_repeated_actual_captures_preserve_git_conte
     let before = snapshot(&r);
     let g = extract(&r, &c, b"doc.md").unwrap();
     assert_eq!(
-        reinspect(&r.path, &g, id(4)).unwrap().validity(),
+        reinspect(&r.path, &g, id(4))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Current)
     );
     assert_eq!(
-        reinspect(&r.path, &g, id(5)).unwrap().validity(),
+        reinspect(&r.path, &g, id(5))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Current)
     );
-    assert_eq!(inspect_validity(&g, None).unwrap().validity(), None);
     assert_eq!(
-        reinspect(&r.path, &g, id(3)).unwrap().validity(),
+        inspect_validity(&g, None)
+            .unwrap()
+            .resolved_projection_validity(),
+        None
+    );
+    assert_eq!(
+        reinspect(&r.path, &g, id(3))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Stale)
     );
     assert_eq!(snapshot(&r), before);
@@ -268,7 +284,7 @@ fn current_profile_qualification_and_repeated_actual_captures_preserve_git_conte
         .unwrap();
         let view = reinspect(&r.path, &old, id(6)).unwrap();
         assert!(!view.profile_matches());
-        assert_eq!(view.validity(), Some(Validity::Stale));
+        assert_eq!(view.resolved_projection_validity(), Some(Validity::Stale));
         assert_eq!(view.index(), &old);
     }
     let unknown = CandidateObservation::new(
@@ -285,7 +301,9 @@ fn current_profile_qualification_and_repeated_actual_captures_preserve_git_conte
         None,
     );
     assert_eq!(
-        inspect_validity(&g, Some(&unknown)).unwrap().validity(),
+        inspect_validity(&g, Some(&unknown))
+            .unwrap()
+            .resolved_projection_validity(),
         None
     );
 }
@@ -334,7 +352,9 @@ fn dirty_mismatched_missing_symlink_and_unborn_sources_publish_no_index() {
         Err(ExtractionError::Candidate(_))
     ));
     assert_eq!(
-        reinspect(&r.path, &g, id(4)).unwrap().validity(),
+        reinspect(&r.path, &g, id(4))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Stale)
     );
     r.git(&["add", "doc.md"]);
@@ -344,7 +364,9 @@ fn dirty_mismatched_missing_symlink_and_unborn_sources_publish_no_index() {
     ));
     r.git(&["commit", "-m", "change"]);
     assert_eq!(
-        reinspect(&r.path, &g, id(5)).unwrap().validity(),
+        reinspect(&r.path, &g, id(5))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Stale)
     );
     assert!(matches!(
@@ -415,7 +437,9 @@ fn missing_committed_object_and_untracked_or_changed_configuration_never_establi
     let g = extract(&r, &c, b"doc.md").unwrap();
     r.git(&["config", "core.fileMode", "false"]);
     assert_eq!(
-        reinspect(&r.path, &g, id(4)).unwrap().validity(),
+        reinspect(&r.path, &g, id(4))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Stale)
     );
     fs::write(r.path.join("untracked.md"), "private").unwrap();
@@ -504,7 +528,7 @@ fn syntax_repair_retains_committed_near_neighbors_spans_and_scoped_current_valid
     }
     let view = reinspect(&r.path, &g, id(4)).unwrap();
     assert!(view.profile_matches());
-    assert_eq!(view.validity(), Some(Validity::Current));
+    assert_eq!(view.resolved_projection_validity(), Some(Validity::Current));
     assert_eq!(snapshot(&r), before);
 }
 
@@ -557,7 +581,9 @@ fn docs5_committed_tabbed_definitions_preserve_control_free_use_spellings_and_ne
         );
     }
     assert_eq!(
-        reinspect(&r.path, &g, id(4)).unwrap().validity(),
+        reinspect(&r.path, &g, id(4))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Current)
     );
     assert_eq!(snapshot(&r), before);

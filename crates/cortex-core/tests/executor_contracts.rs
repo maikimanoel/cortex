@@ -114,7 +114,11 @@ fn descriptor_and_requirement_constructors_reject_ambiguity_and_missing_bounds()
         kind: ObservationKind::HostQualificationReport,
     };
     assert!(matches!(
-        Requirements::new(source("profile"), vec![required, required], 2),
+        Requirements::new(
+            source("profile"),
+            vec![required.clone(), required.clone()],
+            2
+        ),
         Err(ExecutorError::AmbiguousControl)
     ));
     assert!(matches!(
@@ -153,7 +157,7 @@ fn negotiation_preserves_all_causal_holds_in_stable_order() {
     let r = Requirements::new(
         source("profile"),
         [
-            Control::Resource(Resource::RamBytes),
+            Control::Resource(Resource::UnspecifiedMemoryBytes),
             Control::Network,
             Control::Filesystem,
         ]
@@ -184,7 +188,7 @@ fn negotiation_preserves_all_causal_holds_in_stable_order() {
                 ]
             },
             ControlDecision {
-                control: Control::Resource(Resource::RamBytes),
+                control: Control::Resource(Resource::UnspecifiedMemoryBytes),
                 held: vec![HoldReason::Missing]
             },
         ]

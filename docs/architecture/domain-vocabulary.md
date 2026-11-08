@@ -122,7 +122,7 @@ a serialized identity. See [representation compatibility](#representation-compat
 | CPU capacity | A rate allocation expressed in millicores: 1000 units represent one CPU equivalent. This is distinct from cumulative consumed CPU time and from proof of physical allocation/enforcement. | `Resource::CpuMillicores`; `cpu_capacity_millicores()` |
 | CPU execution time | Cumulative consumed CPU time in an explicitly named unit. Sampling and hard lifetime enforcement are separate properties. | `CpuExecutionMillis`; sampled CPU microseconds |
 | Elapsed time | Duration in wall/monotonic time under the applicable clock contract, separate from CPU execution time and logical event ticks. Capacity/debit and consumption fields retain their separate roles. | `Resource::ElapsedMillis`; `Consumption::ElapsedMillis` |
-| Memory quantity | Bytes measured or limited under a declared accounting basis and scope. Resident-memory bytes and cgroup-charged memory bytes are distinct quantities even when both use bytes. Their correspondence must not be inferred from a generic name. | resident-memory bytes; charged-memory bytes; explicit basis where the contract supports it |
+| Memory quantity | Bytes measured or limited under a declared accounting basis and scope. Resident-memory bytes and cgroup-charged memory bytes are distinct quantities even when both use bytes. Their correspondence must not be inferred from a generic name. | `MemoryBasis`, `MemoryScope`, `MemoryResource`; historical unknown basis: `Resource::UnspecifiedMemoryBytes` |
 | Storage quantity | Bytes, file objects, pathnames and inodes are independent dimensions. Logical image size does not establish physical host allocation. | managed disk bytes; file count; inode count |
 | Output / input / buffering | Bounded transport quantities with separate stream, frame, event and aggregate-buffer scopes. | stdout/stderr bytes; frame bytes; event count |
 | Process / thread capacity | Kernel task limits include the tasks specified by the host mechanism; direct-process observations cover only their declared membership scope. | process count; task/thread limit |
@@ -154,7 +154,7 @@ a serialized identity. See [representation compatibility](#representation-compat
 | JSON reference source set | A selected set of JSON sources with bounded cross-document pointer resolution. Other lexical adapters cannot be passed to this JSON-specific resolver. | `ReferenceSet` |
 | Reference resolution | Whether every emitted reference in the receiver’s declared scope has a resolved target. The universal predicate is true for a valid empty reference collection; this establishes neither extraction coverage nor semantic truth. | `all_references_resolved()` |
 | Snapshot / delta | A retained bounded projection and a comparison between compatible projections. A knowledge snapshot is not a host/VM rollback guarantee. | knowledge snapshot; snapshot delta |
-| Contextual validity inspection | Examination of a retained knowledge projection against supplied candidate/profile observations, producing a view without acquiring new source data. Its current summary also depends on emitted-reference resolution. The verb inspect does not promise purity in every other API. | Knowledge `inspect_validity` |
+| Contextual validity inspection | Examination of a retained knowledge projection against supplied candidate/profile observations, producing a view without acquiring new source data. Its resolved-projection summary also depends on emitted-reference resolution; coverage and per-claim support are independent. The verb inspect does not promise purity in every other API. | Knowledge `inspect_validity` |
 | Repository reinspection | Actual reacquisition of repository observations, followed by contextual validity inspection. | `reinspect` |
 | Canonical history | Authoritative requirement/decision records with explicit corrections, supersession and temporal perspective. Logical append-only history coexists with separately authorized privacy deletion. | canonical history; `CanonicalHistory` |
 | Domain time / recording time | Domain time identifies when a fact applies; recording time identifies when it was recorded. A domain-time interval and recording-time cutoff select different perspectives; an admission ordinal is a sequence position. | `DomainInterval`; recording instant/cutoff |
@@ -196,6 +196,8 @@ imports, exhaustive matches, struct fields and method calls as applicable.
 | `program::Plan`, `plan()` / `set_plan()` | `program::OrderingPlan`, `ordering_plan()` / `set_ordering_plan()`; `CoordinationPermission::Plan` remains the broader permission |
 | `program::ResourceId`, increment `resources` | `program::ClaimScopeId`, `claim_scopes`; equality-based exclusion semantics stay unchanged |
 | `Workers`, `Builds`, `Tests`, `CpuMillis`, `TimeMillis` resource variants | `WorkerSlots`, `BuildJobs`, `TestProcesses`, `CpuMillicores`, `ElapsedMillis` with unchanged units and accounting policies |
+| `Resource::RamBytes` | `UnspecifiedMemoryBytes` only for historical unknown basis; new defined quantities use `MemoryBytes(MemoryResource)` with basis and scope |
+| Knowledge-view `validity()` | `resolved_projection_validity()`; the conjunction is unchanged and independent coverage/claim APIs expose its limits |
 | `cpu_capacity_millis()` | `cpu_capacity_millicores()`; the same checked rounding and accessor/validation boundaries apply |
 | Reference index/set `complete()` | `all_references_resolved()`; no extraction-completeness or semantic-validity claim |
 | Knowledge adapter/view `qualify()` | `inspect_validity()`; `reinspect()` still acquires new repository observations |
@@ -207,8 +209,8 @@ stable Rust ABI. Versioned machine representations use explicit mappings rather
 than the renamed types' Debug spellings. The CPU capacity accessor still returns
 `None` for a zero period or multiplication overflow, and `Some(0)` for zero quota
 with a positive period; the separate scope validator still rejects zero quota.
-`CpuExecutionMillis`, `CiJobs`, `ModelTokens` and the existing `RamBytes` dimension
-retain their meanings.
+`CpuExecutionMillis`, `CiJobs` and `ModelTokens` retain their meanings.
+Memory quantities follow the explicit basis/scope contract below.
 
 ### Retained formats and selected presentation
 
@@ -218,16 +220,18 @@ packages retain their assembler/version-specific canonical rendering and hashes.
 Historical names inside those representations are format vocabulary, not a
 second active domain model. Unsupported versions remain explicit refusals.
 
-Program inspection keeps its existing human and JSON schema by default.
-`cortex program inspect ... --schema-version 2` selects the canonical projection;
-add `--json` for its machine representation. Explicit schema version 1 retains
-the original contract. Other command families retain their own schema, errors
+Program inspection defaults to canonical schema 3, including explicit memory
+semantics. Select `--schema-version 3` explicitly to pin that contract; add
+`--json` for machine output. Explicit versions 1 and 2 retain their contracts
+for representable historical states and refuse new memory semantics they cannot
+represent without loss. Other command families retain their own schema, errors
 and exits. The [program contract](program-kernel.md#read-only-cli-schemas) specifies the
 selection and limits.
 
-`RamBytes` retains its existing profile-dependent memory meaning. A generic byte
-quantity does not establish resident or cgroup-charged measurement, and legacy
-values cannot gain a measurement basis from a label. A universal typed memory
-basis and a separate Knowledge summary for correspondence, extraction coverage,
-reference resolution and query support remain design requirements; this
-vocabulary does not change their current accounting or validity rules.
+Historical unqualified memory bytes retain an unestablished basis; they do not
+become resident or charged by a label. Active memory accounting carries a typed
+basis and identity scope. Knowledge inspection separately exposes correspondence,
+extraction coverage, emitted-reference resolution and specific lexical claim
+support. The [semantic contracts and migration](semantic-contracts.md) define
+these extensions and the default CLI transition. They preserve separate authority,
+resource policy, effect uncertainty and semantic-validation boundaries.

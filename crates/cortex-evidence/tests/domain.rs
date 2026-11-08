@@ -760,7 +760,7 @@ fn partial_closure_readback_preserves_unknown_holds_and_final_debt() {
     assert_eq!(r.outcome, HistoricalOutcome::Unknown);
     assert_eq!(r.cancelled_at, Some(4));
     assert!(r.holds(Resource::WorkerSlots));
-    assert!(r.holds(Resource::RamBytes));
+    assert!(r.holds(memory_resource()));
     assert!(r.holds(Resource::DiskBytes));
     assert!(r.unresolved_consumption(Consumption::CpuExecutionMillis));
     assert!(r.closure.is_none());

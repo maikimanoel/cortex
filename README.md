@@ -78,8 +78,9 @@ non-effectful dependency decisions, encrypted replay/recovery, deterministic
 explicit-source packages and resource simulations. `cortex-storage` owns the
 shared local encrypted infrastructure; `cortex_cli::history_store` remains a
 compatible facade. `cortex program inspect --help` describes explicit keyed,
-read-only human/JSON program inspection. The existing schema remains the default;
-`--schema-version 2` selects the canonical task/resource/closure vocabulary.
+read-only human/JSON program inspection. Schema 3 is the default canonical presentation with explicit memory semantics;
+`--schema-version 1` or `2` selects a retained presentation contract.
+See the [migration contract](docs/architecture/semantic-contracts.md).
 Stage 1 supplies no runtime, worker dispatch or protected
 merge command. The [bounded sequencing exception](docs/product/roadmap.md#gpe-b-stage-1-sequencing-exception)
 preserves all broader milestone, operational authority and host qualification gates.

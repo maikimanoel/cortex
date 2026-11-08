@@ -89,7 +89,7 @@ fn useful_incoming_query_retains_real_source_spans_and_read_only_git_state() {
         br##""#/$defs/Id""##
     );
     let view = reinspect(&r.path, &graph, id(4)).unwrap();
-    assert_eq!(view.validity(), Some(Validity::Current));
+    assert_eq!(view.resolved_projection_validity(), Some(Validity::Current));
     assert_eq!(refs[0].origin(), RelationOrigin::Extracted);
     assert_eq!(refs[0].disposition(), ValidationDisposition::Unverified);
     assert_eq!(graph.provenance().version(), PROFILE);
@@ -103,7 +103,9 @@ fn changed_candidate_or_dirty_same_head_never_relabels_historical_facts_current(
     let old = extract(&r, &c, b"schema.json").unwrap();
     fs::write(r.path.join("schema.json"), "{\"changed\":true}").unwrap();
     assert_eq!(
-        reinspect(&r.path, &old, id(4)).unwrap().validity(),
+        reinspect(&r.path, &old, id(4))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Stale)
     );
     assert!(matches!(
@@ -113,7 +115,9 @@ fn changed_candidate_or_dirty_same_head_never_relabels_historical_facts_current(
     r.git(&["add", "schema.json"]);
     r.git(&["commit", "-m", "change schema"]);
     assert_eq!(
-        reinspect(&r.path, &old, id(5)).unwrap().validity(),
+        reinspect(&r.path, &old, id(5))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Stale)
     );
     assert_eq!(old.incoming("/$defs/Id").unwrap().count(), 1);
@@ -132,7 +136,9 @@ fn changed_candidate_or_dirty_same_head_never_relabels_historical_facts_current(
     .unwrap();
     assert!(next.references().is_empty());
     assert_eq!(
-        reinspect(&r.path, &next, id(13)).unwrap().validity(),
+        reinspect(&r.path, &next, id(13))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Current)
     );
 }
@@ -148,8 +154,18 @@ fn unresolved_external_missing_and_unsupported_fragments_keep_validity_unestabli
     assert_eq!(g.references().len(), 4);
     assert!(!g.all_references_resolved());
     assert_eq!(g.nodes().len(), 9);
-    assert_eq!(reinspect(&r.path, &g, id(4)).unwrap().validity(), None);
-    assert_eq!(inspect_validity(&g, None).unwrap().validity(), None);
+    assert_eq!(
+        reinspect(&r.path, &g, id(4))
+            .unwrap()
+            .resolved_projection_validity(),
+        None
+    );
+    assert_eq!(
+        inspect_validity(&g, None)
+            .unwrap()
+            .resolved_projection_validity(),
+        None
+    );
     assert!(
         g.references()
             .iter()
@@ -245,7 +261,9 @@ fn wrong_repository_and_unborn_state_cannot_create_a_bound_index() {
         None,
     );
     assert_eq!(
-        inspect_validity(&graph, Some(&latest)).unwrap().validity(),
+        inspect_validity(&graph, Some(&latest))
+            .unwrap()
+            .resolved_projection_validity(),
         None
     );
 }
@@ -273,7 +291,7 @@ fn changed_extractor_profile_cannot_reuse_contextual_current_validity() {
     .unwrap();
     let view = reinspect(&r.path, &older, id(4)).unwrap();
     assert!(!view.profile_matches());
-    assert_eq!(view.validity(), Some(Validity::Stale));
+    assert_eq!(view.resolved_projection_validity(), Some(Validity::Stale));
     assert_eq!(view.index().incoming("/$defs/Id").unwrap().count(), 1);
 }
 #[test]

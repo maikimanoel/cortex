@@ -6,6 +6,7 @@
 
 mod scanner;
 use super::KnowledgeView;
+use cortex_core::knowledge::inspection::*;
 use cortex_core::{binding::*, knowledge::*};
 use cortex_evidence::unified::Validity;
 use std::{error::Error, fmt, path::Path, time::SystemTime};
@@ -209,6 +210,7 @@ pub fn inspect_validity<'a>(
         correspondence,
         validity,
         profile_matches,
+        coverage: super::coverage(profile_matches, ExtractionProfile::MarkdownLexical),
     })
 }
 

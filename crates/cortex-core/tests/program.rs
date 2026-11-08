@@ -336,6 +336,17 @@ fn package_is_exact_and_rejects_stale_source_or_modified_protected_bytes() {
 fn scheduler_reserves_verification_and_blocks_unknown_or_unenforceable_capacity() {
     let mut s = ProgramState::new(definition()).unwrap();
     initialize(&mut s);
+    use cortex_core::program::{domain::PoolIdentity, memory::*};
+    let memory = Resource::memory(
+        MemoryBasis::CgroupCharged,
+        MemoryScope::AccountingPool(PoolIdentity {
+            physical: "synthetic-pool".into(),
+            incarnation: "allocation".into(),
+            host: "host".into(),
+            boot: "boot".into(),
+        }),
+    )
+    .unwrap();
     let p = |id: &str, age| Proposal {
         task: task(id),
         band: 1,
@@ -348,7 +359,7 @@ fn scheduler_reserves_verification_and_blocks_unknown_or_unenforceable_capacity(
                 amount: Some(1),
             },
             Demand {
-                resource: Resource::RamBytes,
+                resource: memory.clone(),
                 amount: Some(100),
             },
         ],
@@ -361,7 +372,7 @@ fn scheduler_reserves_verification_and_blocks_unknown_or_unenforceable_capacity(
             declared_enforceable: true,
         },
         Capacity {
-            resource: Resource::RamBytes,
+            resource: memory.clone(),
             available: Some(300),
             verification_reserve: 100,
             declared_enforceable: true,
@@ -380,14 +391,14 @@ fn scheduler_reserves_verification_and_blocks_unknown_or_unenforceable_capacity(
     assert!(
         simulate(&s, &[p("A", 0)], &missing).unwrap()[0]
             .held
-            .contains(&WaitReason::Unknown(Resource::RamBytes))
+            .contains(&WaitReason::Unknown(memory.clone()))
     );
     missing[1].available = Some(300);
     missing[1].declared_enforceable = false;
     assert!(
         simulate(&s, &[p("A", 0)], &missing).unwrap()[0]
             .held
-            .contains(&WaitReason::Unenforceable(Resource::RamBytes))
+            .contains(&WaitReason::Unenforceable(memory.clone()))
     );
     assert!(simulate(&s, &[p("A", 0), p("A", 1)], &caps).is_err());
 }

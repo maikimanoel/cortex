@@ -13,6 +13,7 @@ use std::{collections::BTreeSet, error::Error, fmt};
 pub mod context;
 pub mod domain;
 pub mod executor;
+pub mod memory;
 pub mod operational;
 pub mod scheduling;
 pub mod supervision;

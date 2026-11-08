@@ -35,6 +35,7 @@ fn process() -> ProcessSpec {
         },
         identity_checkpoint: None,
         containment: Some(OwnedScopeSpec {
+            memory_resource: None,
             reference: source("scope"),
             unit: "cortex-qualification-test.scope".into(),
             delegated_root: "/sys/fs/cgroup/user.slice/user-42.slice/user@42.service".into(),

@@ -4,6 +4,8 @@
 
 /// Borrowed structural comparison of two immutable reference-set snapshots.
 pub mod delta;
+/// Independent extraction, resolution and lexical-claim inspection contracts.
+pub mod inspection;
 /// Additive, candidate-bound projection over an explicit collection of source indexes.
 pub mod source_set;
 

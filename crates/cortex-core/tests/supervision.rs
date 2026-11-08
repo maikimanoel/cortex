@@ -1024,3 +1024,121 @@ fn cancellation_expiry_and_unknown_are_checkpoint_barriers() {
         assert!(projection == before);
     }
 }
+
+#[test]
+fn declared_pool_cannot_supply_missing_boot_correspondence_for_a_scope_sample() {
+    use cortex_core::program::{domain::PoolIdentity, memory::*};
+    let mut captures = Vec::new();
+    for boot in ["boot-a", "boot-b"] {
+        let resource = Resource::memory(
+            MemoryBasis::CgroupCharged,
+            MemoryScope::AccountingPool(PoolIdentity {
+                physical: "pool".into(),
+                incarnation: "allocation".into(),
+                host: "host".into(),
+                boot: boot.into(),
+            }),
+        )
+        .unwrap();
+        let (state, _, scope) = setup();
+        let mut projection = OperationalProjection::new_supervised_fixture();
+        let mut selected_policy = scope_policy();
+        for capacity in &mut selected_policy.capacities {
+            if matches!(capacity.resource, Resource::MemoryBytes(_)) {
+                capacity.resource = resource.clone();
+            }
+        }
+        let mut grant = scope_grant(&scope);
+        let mut selected_intent = scope_intent(&scope);
+        for demand in grant.ceilings.iter_mut().chain(&mut selected_intent.demand) {
+            if matches!(demand.resource, Resource::MemoryBytes(_)) {
+                demand.resource = resource.clone();
+            }
+        }
+        let mut spec = contained_spec(&scope);
+        spec.containment.as_mut().unwrap().memory_resource = match &resource {
+            Resource::MemoryBytes(memory) => Some(memory.clone()),
+            _ => unreachable!(),
+        };
+        for event in [
+            EffectEvent::Policy(selected_policy),
+            EffectEvent::Grant(grant),
+            EffectEvent::Reserve {
+                intent: selected_intent,
+                at: 1,
+            },
+            EffectEvent::PrepareProcess {
+                effect: intent(&scope).id,
+                scope: scope.clone(),
+                at: 2,
+                spec: Box::new(spec.clone()),
+            },
+        ] {
+            projection.apply(&state, event).unwrap();
+        }
+        // A declared reservation is retained before dispatch, not observed usage.
+        assert_eq!(projection.accounted(resource.clone()).unwrap(), 536_870_912);
+        dispatch(&state, &mut projection, &scope);
+        let mut terminal = observation(
+            &scope,
+            1,
+            ProcessCompletion::Exited {
+                code: Some(0),
+                signal: None,
+            },
+            Quiescence::OwnedScopeEmpty,
+        );
+        terminal.containment = Some(Box::new(scope_observation(
+            spec.containment.as_ref().unwrap(),
+            Some(false),
+        )));
+        let captured = terminal.containment.as_ref().unwrap().charged_memory_peak();
+        assert_eq!(captured.bytes(), Some(1_048_576));
+        assert_eq!(captured.basis(), MemoryBasis::CgroupCharged);
+        assert!(captured.resource().is_none());
+        captures.push(terminal.containment.clone());
+        observed(&state, &mut projection, &scope, terminal.clone(), 4);
+        assert_eq!(
+            projection.accounted(resource.clone()),
+            Err(OperationalError::UnknownResource(resource.clone()))
+        );
+        let recovery = projection
+            .inspect_process_recovery(&intent(&scope).id, &scope)
+            .unwrap();
+        assert!(recovery.reservation_held);
+        assert_eq!(recovery.blockers, vec![RecoveryBlocker::MissingUsage]);
+        assert!(recovery.candidate.is_none());
+        let mut proposed_usage = usage(&terminal);
+        proposed_usage.push(Demand {
+            resource: Resource::CpuMillicores,
+            amount: Some(1000),
+        });
+        proposed_usage.push(Demand {
+            resource,
+            amount: captured.bytes(),
+        });
+        let before = projection.clone();
+        assert!(
+            projection
+                .apply(
+                    &state,
+                    EffectEvent::Reconcile {
+                        effect: intent(&scope).id,
+                        scope: scope.clone(),
+                        at: 5,
+                        resolution: Reconciliation::Observed {
+                            outcome: EffectOutcome::Succeeded,
+                            usage: proposed_usage
+                        },
+                        basis: source("insufficient-scope-attribution")
+                    }
+                )
+                .is_err()
+        );
+        assert!(projection == before);
+        assert!(projection.effects()[0].pending());
+    }
+    // The legacy sample is byte-for-byte equivalent under two incompatible
+    // declarations. Neither declaration proves the sample's host/boot scope.
+    assert!(captures[0] == captures[1]);
+}

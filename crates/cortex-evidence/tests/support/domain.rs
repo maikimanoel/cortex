@@ -12,6 +12,16 @@ pub fn pool_identity() -> PoolIdentity {
         boot: "boot-1".into(),
     }
 }
+pub fn memory_resource() -> Resource {
+    memory_resource_for(pool_identity())
+}
+pub fn memory_resource_for(identity: PoolIdentity) -> Resource {
+    Resource::memory(
+        memory::MemoryBasis::CgroupCharged,
+        memory::MemoryScope::AccountingPool(identity),
+    )
+    .unwrap()
+}
 pub fn pool() -> PoolContract {
     PoolContract {
         identity: pool_identity(),
@@ -24,7 +34,7 @@ pub fn pool() -> PoolContract {
                 declared_enforceable: true,
             },
             Capacity {
-                resource: Resource::RamBytes,
+                resource: memory_resource(),
                 available: Some(1024),
                 verification_reserve: 512,
                 declared_enforceable: true,
@@ -79,6 +89,14 @@ pub fn named_definition(name: &str) -> ProgramDefinition {
     .unwrap()
 }
 pub fn setup(k: &mut CoordinationKernel, task: &str) -> DomainIntent {
+    let selected = k
+        .domains()
+        .and_then(|projection| projection.pool())
+        .cloned()
+        .unwrap_or_else(pool);
+    setup_in_pool(k, task, &selected)
+}
+fn setup_in_pool(k: &mut CoordinationKernel, task: &str, selected: &PoolContract) -> DomainIntent {
     let scope = k
         .state()
         .readiness()
@@ -102,7 +120,7 @@ pub fn setup(k: &mut CoordinationKernel, task: &str) -> DomainIntent {
             mode: EffectMode::SupervisedFixture,
             host: source("controlled-host"),
             privacy: source("synthetic-only"),
-            capacities: pool().capacities,
+            capacities: selected.capacities.clone(),
             cumulative: vec![],
             max_effects: 16,
             max_retries: 0,
@@ -156,7 +174,7 @@ pub fn setup(k: &mut CoordinationKernel, task: &str) -> DomainIntent {
             amount: Some(1),
         },
         Demand {
-            resource: Resource::RamBytes,
+            resource: memory_resource_for(selected.identity.clone()),
             amount: Some(256),
         },
         Demand {
@@ -188,7 +206,7 @@ pub fn setup(k: &mut CoordinationKernel, task: &str) -> DomainIntent {
             demand,
             retry_of: None,
         },
-        pool: pool_identity(),
+        pool: selected.identity.clone(),
         request: OperationId::new(&format!(
             "request-{}-{task}",
             k.state().definition().id().as_str()
@@ -229,7 +247,7 @@ pub fn closure(i: &DomainIntent, measured: Option<u64>) -> ClosureReceipt {
         restart_prevented: true,
         snapshot_safe: true,
         quiescent: true,
-        released: vec![Resource::WorkerSlots, Resource::RamBytes],
+        released: vec![Resource::WorkerSlots, memory_resource_for(i.pool.clone())],
         consumption: vec![ConsumptionObservation {
             dimension: Consumption::CpuExecutionMillis,
             measured,
@@ -266,7 +284,12 @@ pub fn bound(k: &mut CoordinationKernel, i: &DomainIntent) {
 }
 pub fn add_member(k: &mut CoordinationKernel, name: &str) -> DomainIntent {
     let mut member = CoordinationKernel::new_supervised_fixture(named_definition(name)).unwrap();
-    let i = setup(&mut member, "A");
+    let selected = k
+        .domains()
+        .and_then(|projection| projection.pool())
+        .cloned()
+        .unwrap_or_else(pool);
+    let i = setup_in_pool(&mut member, "A", &selected);
     submit(
         k,
         &format!("register-{name}"),

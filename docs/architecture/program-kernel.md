@@ -192,8 +192,11 @@ rounds, risk/cost ranks and required resource demands. Its disclosed order is ba
 waiting age, downstream-unblocking count, risk, coordination cost and stable task ID.
 It reserves declared verification capacity in the simulation before subtracting
 worker proposals. `WorkerSlots`, `BuildJobs`, `TestProcesses`, `CpuMillicores`,
-`RamBytes`, `DiskBytes`, `ElapsedMillis`, `OutputBytes`, `CiJobs` and `ModelTokens`
-are separate dimensions. Worker slots are declared logical capacity units; their
+explicitly scoped `MemoryBytes`, `DiskBytes`, `ElapsedMillis`, `OutputBytes`,
+`CiJobs` and `ModelTokens`
+are separate dimensions. Historical `RamBytes` decodes as
+`UnspecifiedMemoryBytes` and does not establish a new memory admission basis.
+Worker slots are declared logical capacity units; their
 reusable or cumulative treatment belongs to the consuming profile. They are not
 observed people, processes or threads. Missing demand/capacity or an undeclared
 enforcement ability holds a required dimension. These assertions are not resource measurement or host
@@ -230,8 +233,9 @@ key acquisition uses a nonblocking read with an explicit elapsed deadline.
 
 ### Read-only CLI schemas
 
-Omitting `--schema-version` or selecting `--schema-version 1` retains the existing
-human and machine contracts. Structured output schema `cortex.program.v1` is
+Omitting `--schema-version` selects schema 3, the current canonical human and
+machine presentation. Explicit `--schema-version 1` retains the original
+human and machine contracts for states it can represent. Structured output schema `cortex.program.v1` is
 separate from check JSON v1. It exposes baseline/journal identity, workstreams,
 exact task candidates, dependency readiness versus eligibility, per-edge release/hold reasons, attempts,
 unknown metadata outcomes, historical support decisions and package correspondence.
@@ -259,9 +263,21 @@ from any caller-asserted receipt and actual resource disposition. Its guidance i
 presence nor schema selection grants closure, settlement, retry or new admission.
 The [domain contract](recoverable-domains.md) defines the retained proof boundary.
 
+Schema 3 uses the canonical task and closure terminology of schema 2 and adds
+explicit memory representation. Its program/fixture/supervised/domain schema
+identifiers end in `.v3`. Versions 1 and 2 cannot silently discard a new memory
+basis or scope: a state requiring that representation is refused with
+`SCHEMA_CANNOT_REPRESENT_MEMORY`. Selecting a presentation never changes the
+journal, observations, accounting or authority. See the
+[semantic contracts and migration](semantic-contracts.md).
+
+The default change is incompatible for clients that assumed an unversioned
+schema-1 response. Pin `--schema-version 1` for retained legacy states, or migrate
+to the explicit current contract. This does not change `check --json`.
+
 Missing, unsupported or repeated schema values are refused as invalid arguments
 before key acquisition, without echoing those values. The accepted values are
-exactly `1` and `2`; the parser does not normalize an unsupported spelling. Other command families, including check JSON, retain their
+exactly `1`, `2` and `3`; the parser does not normalize an unsupported spelling. Other command families, including check JSON, retain their
 existing output contracts. Exit 0 means inspected metadata, not engineering
 acceptance; 2 means invalid arguments, 3 means a store/key/inspection refusal, and
 1 means output failure. Output is requested local private program content; avoid
@@ -297,7 +313,7 @@ and a new finite roadmap program. No stage activates automatically on upgrade.
 
 ### Recursive observation presentation
 
-Schema 1 remains the default with unchanged bytes for previously supported states.
+Explicit schema 1 retains unchanged bytes for previously supported states.
 For newly retained recursive observations, its existing native inspection fields
 provide a bounded projection: `retained_observations` counts direct plus recursive
 records, `latest` still describes only the last direct sample (or null), and
@@ -305,7 +321,7 @@ records, `latest` still describes only the last direct sample (or null), and
 legacy direct membership label describes that direct sample, not the scope of all
 retained evidence. No recursive object or canonical field is added to schema 1.
 
-With `--schema-version 2`, `native_closure_inspection` exposes
+With `--schema-version 2` or `3`, `native_closure_inspection` exposes
 `latest_direct_observation` and `latest_recursive_observation` separately. Either
 can be null. `retained_native_observation_count` counts both record kinds;
 `direct_sample_membership_coverage` and `recursive_sample_membership_coverage`

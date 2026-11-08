@@ -202,11 +202,13 @@ fn exact_endpoints_spans_cycles_and_order_preserve_the_single_source_contract_re
     assert_eq!(
         knowledge::reinspect(&r.path, &legacy, id(6))
             .unwrap()
-            .validity(),
+            .resolved_projection_validity(),
         None
     );
     assert_eq!(
-        reinspect(&r.path, &set, id(6)).unwrap().validity(),
+        reinspect(&r.path, &set, id(6))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Current)
     );
     for o in set.references() {
@@ -310,7 +312,12 @@ fn unsupported_forms_unselected_documents_and_missing_locators_stay_explicit() {
             .unwrap();
         assert_eq!(o.target(), Resolution::Unresolved(*reason));
     }
-    assert_eq!(reinspect(&r.path, &set, id(6)).unwrap().validity(), None);
+    assert_eq!(
+        reinspect(&r.path, &set, id(6))
+            .unwrap()
+            .resolved_projection_validity(),
+        None
+    );
     assert_eq!(
         set.incoming(&path(b"common.json"), "/Id").unwrap().count(),
         0
@@ -665,10 +672,15 @@ fn actual_reinspection_is_later_and_distinguishes_incomplete_stale_and_current()
     let c = contract(&r);
     let set = extract(&r, &c, &[b"a.json", b"b.json"]).unwrap();
     let original = set.clone();
-    assert_eq!(inspect_validity(&set, None).unwrap().validity(), None);
+    assert_eq!(
+        inspect_validity(&set, None)
+            .unwrap()
+            .resolved_projection_validity(),
+        None
+    );
     for n in 3..=5 {
         let view = reinspect(&r.path, &set, id(n)).unwrap();
-        assert_eq!(view.validity(), Some(Validity::Stale));
+        assert_eq!(view.resolved_projection_validity(), Some(Validity::Stale));
         assert_eq!(
             view.correspondence(),
             &BindingDecision::Stale(BindingStaleness::ObservationOrder)
@@ -676,7 +688,9 @@ fn actual_reinspection_is_later_and_distinguishes_incomplete_stale_and_current()
     }
     let latest = inspect_candidate(&r.path, &c, id(6)).unwrap();
     assert_eq!(
-        inspect_validity(&set, Some(&latest)).unwrap().validity(),
+        inspect_validity(&set, Some(&latest))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Current)
     );
     let incomplete = CandidateObservation::new(
@@ -693,20 +707,24 @@ fn actual_reinspection_is_later_and_distinguishes_incomplete_stale_and_current()
         latest.basis().cloned(),
     );
     let view = inspect_validity(&set, Some(&incomplete)).unwrap();
-    assert_eq!(view.validity(), None);
+    assert_eq!(view.resolved_projection_validity(), None);
     assert_eq!(
         view.correspondence(),
         &BindingDecision::Insufficient(BindingInsufficiency::IncompleteCoverage)
     );
     fs::write(r.path.join("b.json"), "0").unwrap();
     assert_eq!(
-        reinspect(&r.path, &set, id(8)).unwrap().validity(),
+        reinspect(&r.path, &set, id(8))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Stale)
     );
     r.git(&["add", "b.json"]);
     r.git(&["commit", "-m", "new candidate"]);
     assert_eq!(
-        reinspect(&r.path, &set, id(9)).unwrap().validity(),
+        reinspect(&r.path, &set, id(9))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Stale)
     );
     assert_eq!(set, original);
@@ -761,7 +779,7 @@ fn changed_collection_or_source_profiles_are_stale_and_provenance_is_retained() 
         .unwrap();
         let view = reinspect(&r.path, &changed, id(6)).unwrap();
         assert!(!view.profile_matches());
-        assert_eq!(view.validity(), Some(Validity::Stale));
+        assert_eq!(view.resolved_projection_validity(), Some(Validity::Stale));
         assert_eq!(
             view.set()
                 .incoming(&path(b"b.json"), "/Id")
@@ -786,7 +804,9 @@ fn detached_committed_candidate_is_supported_without_repository_mutation() {
         Head::Detached { .. }
     ));
     assert_eq!(
-        reinspect(&r.path, &set, id(6)).unwrap().validity(),
+        reinspect(&r.path, &set, id(6))
+            .unwrap()
+            .resolved_projection_validity(),
         Some(Validity::Current)
     );
     assert_eq!(snapshot(&r), before);

@@ -120,9 +120,26 @@ pub fn spec(scope: &EffectScope) -> ProcessSpec {
         identity_checkpoint: None,
     }
 }
+pub fn scope_memory_resource() -> Resource {
+    use cortex_core::program::{domain::PoolIdentity, memory::*};
+    Resource::memory(
+        MemoryBasis::CgroupCharged,
+        MemoryScope::AccountingPool(PoolIdentity {
+            physical: "synthetic-scope-pool".into(),
+            incarnation: "allocation-1".into(),
+            host: "synthetic-host".into(),
+            boot: "synthetic-boot".into(),
+        }),
+    )
+    .unwrap()
+}
 /// Explicit synthetic test contract; these paths are not a discovered host grant.
 pub fn owned_scope() -> OwnedScopeSpec {
     OwnedScopeSpec {
+        memory_resource: match scope_memory_resource() {
+            Resource::MemoryBytes(m) => Some(m),
+            _ => unreachable!(),
+        },
         reference: source("owned-scope-spec"),
         unit: "cortex-qualification-fixture.scope".into(),
         delegated_root: "/owned/cgroup".into(),
@@ -150,7 +167,7 @@ pub fn scope_demand() -> Vec<Demand> {
         (Resource::ElapsedMillis, 7000),
         (Resource::OutputBytes, 81920),
         (Resource::CpuMillicores, 1000),
-        (Resource::RamBytes, 536_870_912),
+        (scope_memory_resource(), 536_870_912),
     ]
     .into_iter()
     .map(|(resource, amount)| Demand {
@@ -167,7 +184,7 @@ pub fn scope_policy() -> Policy {
         (Resource::ElapsedMillis, 21_000, 7000),
         (Resource::OutputBytes, 245_760, 81_920),
         (Resource::CpuMillicores, 3000, 2000),
-        (Resource::RamBytes, 4_831_838_208, 4_294_967_296),
+        (scope_memory_resource(), 4_831_838_208, 4_294_967_296),
     ]
     .into_iter()
     .map(|(resource, available, verification_reserve)| Capacity {

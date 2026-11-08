@@ -19,10 +19,10 @@ fn immutable_holds(record: &DomainRecord) {
                 | Resource::BuildJobs
                 | Resource::TestProcesses
                 | Resource::CpuMillicores
-                | Resource::RamBytes
+                | Resource::MemoryBytes(_)
                 | Resource::DiskBytes
         ) {
-            assert!(record.holds(demand.resource));
+            assert!(record.holds(demand.resource.clone()));
         }
     }
     assert!(record.unresolved_consumption(Consumption::CpuExecutionMillis));

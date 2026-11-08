@@ -445,19 +445,23 @@ impl OperationalProjection {
             let cap = policy
                 .capacities
                 .iter()
-                .find(|c| c.resource == demand.resource)
+                .find(|c| c.resource.clone() == demand.resource.clone())
                 .ok_or(ProgramError::Structure)?;
             if !cap.declared_enforceable {
-                return Err(OperationalError::UnenforceableResource(demand.resource));
+                return Err(OperationalError::UnenforceableResource(
+                    demand.resource.clone(),
+                ));
             }
             let available = cap
                 .available
-                .ok_or(OperationalError::UnknownResource(demand.resource))?
+                .ok_or(OperationalError::UnknownResource(demand.resource.clone()))?
                 .checked_sub(cap.verification_reserve)
-                .ok_or(OperationalError::ResourceLimit(demand.resource))?;
-            let required = quantity(&intent.demand, demand.resource)?;
-            if required > quantity(&grant.ceilings, demand.resource)? || required > available {
-                return Err(OperationalError::ResourceLimit(demand.resource));
+                .ok_or(OperationalError::ResourceLimit(demand.resource.clone()))?;
+            let required = quantity(&intent.demand, demand.resource.clone())?;
+            if required > quantity(&grant.ceilings, demand.resource.clone())?
+                || required > available
+            {
+                return Err(OperationalError::ResourceLimit(demand.resource.clone()));
             }
         }
         if intent.retry_of.is_some() {
@@ -504,7 +508,17 @@ impl OperationalProjection {
     pub fn accounted(&self, resource: Resource) -> Result<u64, OperationalError> {
         self.effects.iter().try_fold(0_u64, |sum, e| {
             let quantity = if e.pending() {
-                let reserved = quantity(&e.intent.demand, resource)?;
+                let reserved = quantity(&e.intent.demand, resource.clone())?;
+                if matches!(resource, Resource::MemoryBytes(_))
+                    && self.mode == EffectMode::SupervisedFixture
+                    && !matches!(e.status, EffectStatus::Reserved)
+                    && e.intent.demand.iter().any(|d| d.resource == resource)
+                {
+                    // The legacy scope capture has no retained host/boot memory
+                    // correspondence. A declared allocation cannot fill that gap.
+                    // Keep the reservation, but refuse a fabricated measured debit.
+                    return Err(OperationalError::UnknownResource(resource.clone()));
+                }
                 let observed = if self.mode == EffectMode::SupervisedFixture {
                     match e.process_observations.last() {
                         Some(o) if resource == Resource::ElapsedMillis => o.elapsed_ms,
@@ -512,11 +526,17 @@ impl OperationalProjection {
                             .stdout_bytes
                             .checked_add(o.stderr_bytes)
                             .ok_or(ProgramError::Capacity)?,
-                        Some(o) if resource == Resource::RamBytes => o
-                            .containment
-                            .as_ref()
-                            .and_then(|c| c.memory_peak_bytes)
-                            .unwrap_or(0),
+                        Some(o)
+                            if e.process_spec
+                                .as_ref()
+                                .and_then(|s| s.containment.as_ref())
+                                .is_some_and(|s| s.memory_dimension() == resource) =>
+                        {
+                            o.containment
+                                .as_ref()
+                                .and_then(|c| c.memory_peak_bytes)
+                                .unwrap_or(0)
+                        }
                         _ => 0,
                     }
                 } else {
@@ -530,7 +550,7 @@ impl OperationalProjection {
                     Some(Reconciliation::Observed { usage, .. })
                         if self.policy(&e.policy)?.cumulative.contains(&resource) =>
                     {
-                        quantity(usage, resource)?
+                        quantity(usage, resource.clone())?
                     }
                     Some(Reconciliation::Absent)
                         if self.mode == EffectMode::SupervisedFixture
@@ -548,7 +568,7 @@ impl OperationalProjection {
                 }
             };
             sum.checked_add(quantity)
-                .ok_or(OperationalError::ResourceLimit(resource))
+                .ok_or(OperationalError::ResourceLimit(resource.clone()))
         })
     }
     /// Preview the existing explainable scheduler against this ledger's remaining
@@ -576,14 +596,14 @@ impl OperationalProjection {
                 || proposal
                     .demand
                     .iter()
-                    .map(|d| d.resource)
+                    .map(|d| d.resource.clone())
                     .collect::<BTreeSet<_>>()
                     != required
             {
                 return Err(ProgramError::Structure.into());
             }
             if let Some(zero) = proposal.demand.iter().find(|d| d.amount == Some(0)) {
-                return Err(OperationalError::ResourceLimit(zero.resource));
+                return Err(OperationalError::ResourceLimit(zero.resource.clone()));
             }
         }
         let capacities = policy
@@ -591,7 +611,7 @@ impl OperationalProjection {
             .iter()
             .map(|capacity| {
                 let mut remaining = capacity.clone();
-                let accounted = self.accounted(capacity.resource)?;
+                let accounted = self.accounted(capacity.resource.clone())?;
                 remaining.available = capacity.available.map(|n| n.saturating_sub(accounted));
                 Ok(remaining)
             })
@@ -692,8 +712,8 @@ impl OperationalProjection {
                 // cannot make prior consumption disappear or turn it reusable.
                 if self.current_policy().is_some_and(|prior| {
                     resource_set(&prior.capacities) != resource_set(&policy.capacities)
-                        || prior.cumulative.iter().copied().collect::<BTreeSet<_>>()
-                            != policy.cumulative.iter().copied().collect::<BTreeSet<_>>()
+                        || prior.cumulative.iter().cloned().collect::<BTreeSet<_>>()
+                            != policy.cumulative.iter().cloned().collect::<BTreeSet<_>>()
                 }) {
                     return Err(ProgramError::Structure.into());
                 }
@@ -778,23 +798,25 @@ impl OperationalProjection {
                 };
                 for cap in &policy.capacities {
                     if !cap.declared_enforceable {
-                        return Err(OperationalError::UnenforceableResource(cap.resource));
+                        return Err(OperationalError::UnenforceableResource(
+                            cap.resource.clone(),
+                        ));
                     }
-                    let required = quantity(&intent.demand, cap.resource)?;
-                    if required > quantity(&grant.ceilings, cap.resource)? {
-                        return Err(OperationalError::ResourceLimit(cap.resource));
+                    let required = quantity(&intent.demand, cap.resource.clone())?;
+                    if required > quantity(&grant.ceilings, cap.resource.clone())? {
+                        return Err(OperationalError::ResourceLimit(cap.resource.clone()));
                     }
                     let free = cap
                         .available
-                        .ok_or(OperationalError::UnknownResource(cap.resource))?
+                        .ok_or(OperationalError::UnknownResource(cap.resource.clone()))?
                         .checked_sub(cap.verification_reserve)
-                        .ok_or(OperationalError::ResourceLimit(cap.resource))?;
+                        .ok_or(OperationalError::ResourceLimit(cap.resource.clone()))?;
                     let total = self
-                        .accounted(cap.resource)?
+                        .accounted(cap.resource.clone())?
                         .checked_add(required)
-                        .ok_or(OperationalError::ResourceLimit(cap.resource))?;
+                        .ok_or(OperationalError::ResourceLimit(cap.resource.clone()))?;
                     if total > free {
-                        return Err(OperationalError::ResourceLimit(cap.resource));
+                        return Err(OperationalError::ResourceLimit(cap.resource.clone()));
                     }
                 }
                 self.effects.push(EffectRecord {
@@ -874,7 +896,14 @@ impl OperationalProjection {
                     Resource::OutputBytes,
                 ]);
                 if spec.containment.is_some() {
-                    supported.extend([Resource::CpuMillicores, Resource::RamBytes]);
+                    supported.extend([
+                        Resource::CpuMillicores,
+                        spec.containment
+                            .as_ref()
+                            .and_then(|s| s.memory_resource.clone())
+                            .map(Resource::MemoryBytes)
+                            .unwrap_or(Resource::UnspecifiedMemoryBytes),
+                    ]);
                 }
                 if resource_set(&policy.capacities) != supported {
                     return Err(ProgramError::EffectUnavailable.into());
@@ -896,7 +925,7 @@ impl OperationalProjection {
                         < scope
                             .cpu_capacity_millicores()
                             .ok_or(ProgramError::Capacity)?
-                        || quantity(&record.intent.demand, Resource::RamBytes)?
+                        || quantity(&record.intent.demand, scope.memory_dimension())?
                             < scope.controls.memory_bytes)
                 {
                     return Err(ProgramError::Capacity.into());
@@ -1019,10 +1048,10 @@ impl OperationalProjection {
                         validate_quantities(usage, &policy.capacities, true)?;
                         for d in usage {
                             if self.mode == EffectMode::ControlledFixture
-                                && quantity(usage, d.resource)?
-                                    > quantity(&record.intent.demand, d.resource)?
+                                && quantity(usage, d.resource.clone())?
+                                    > quantity(&record.intent.demand, d.resource.clone())?
                             {
-                                return Err(OperationalError::ResourceLimit(d.resource));
+                                return Err(OperationalError::ResourceLimit(d.resource.clone()));
                             }
                         }
                         EffectStatus::ReconciledReported
@@ -1226,11 +1255,17 @@ impl OperationalProjection {
                         .containment
                         .as_ref()
                         .ok_or(ProgramError::Missing)?;
+                    if scope.memory_resource.is_some() {
+                        // No supported attribution bridge exists from this legacy
+                        // scope sample to an explicitly scoped allocation. Native
+                        // domain observations have a different, complete identity.
+                        return Err(ProgramError::Missing.into());
+                    }
                     if quantity(usage, Resource::CpuMillicores)?
                         != scope
                             .cpu_capacity_millicores()
                             .ok_or(ProgramError::Capacity)?
-                        || quantity(usage, Resource::RamBytes)?
+                        || quantity(usage, scope.memory_dimension())?
                             != captured.memory_peak_bytes.ok_or(ProgramError::Missing)?
                     {
                         return Err(ProgramError::Structure.into());
@@ -1330,6 +1365,9 @@ impl EffectScope {
 }
 impl Policy {
     fn validate(&self, state: &ProgramState) -> Result<(), OperationalError> {
+        for capacity in &self.capacities {
+            capacity.resource.validate_accounting_scope()?;
+        }
         if self.mode == EffectMode::ExternalExecutor {
             return Err(OperationalError::ExternalUnavailable);
         }
@@ -1351,14 +1389,14 @@ impl Policy {
             || self
                 .cumulative
                 .iter()
-                .copied()
+                .cloned()
                 .collect::<BTreeSet<_>>()
                 .len()
                 != self.cumulative.len()
             || self
                 .cumulative
                 .iter()
-                .any(|r| !self.capacities.iter().any(|c| &c.resource == r))
+                .any(|r| !self.capacities.iter().any(|c| &c.resource.clone() == r))
         {
             return Err(ProgramError::Structure.into());
         }
@@ -1366,14 +1404,14 @@ impl Policy {
     }
 }
 fn resource_set(capacities: &[Capacity]) -> BTreeSet<Resource> {
-    capacities.iter().map(|c| c.resource).collect()
+    capacities.iter().map(|c| c.resource.clone()).collect()
 }
 fn quantity(values: &[Demand], resource: Resource) -> Result<u64, OperationalError> {
     values
         .iter()
-        .find(|d| d.resource == resource)
+        .find(|d| d.resource.clone() == resource)
         .and_then(|d| d.amount)
-        .ok_or(OperationalError::UnknownResource(resource))
+        .ok_or(OperationalError::UnknownResource(resource.clone()))
 }
 fn validate_quantities(
     values: &[Demand],
@@ -1381,16 +1419,21 @@ fn validate_quantities(
     allow_zero: bool,
 ) -> Result<(), OperationalError> {
     if values.len() != capacities.len()
-        || values.iter().map(|d| d.resource).collect::<BTreeSet<_>>() != resource_set(capacities)
+        || values
+            .iter()
+            .map(|d| d.resource.clone())
+            .collect::<BTreeSet<_>>()
+            != resource_set(capacities)
     {
         return Err(ProgramError::Structure.into());
     }
     for value in values {
+        value.resource.validate_accounting_scope()?;
         let n = value
             .amount
-            .ok_or(OperationalError::UnknownResource(value.resource))?;
+            .ok_or(OperationalError::UnknownResource(value.resource.clone()))?;
         if !allow_zero && n == 0 {
-            return Err(OperationalError::ResourceLimit(value.resource));
+            return Err(OperationalError::ResourceLimit(value.resource.clone()));
         }
     }
     Ok(())

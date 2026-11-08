@@ -10,7 +10,7 @@ use cortex_storage::{
     history_store::StoreKey,
     program_store::{ProgramStore, ReadLimits},
 };
-use schema::Schema;
+use schema::{ResourceProjection, Schema};
 use serde_json::{Value, json};
 use std::{
     ffi::OsString,
@@ -22,7 +22,7 @@ use std::{
 };
 use zeroize::Zeroizing;
 
-const HELP: &str = "Usage: cortex program inspect --store <ABSOLUTE-PATH> --program <ID> --key-fd <N> --max-bytes <N> --read-timeout-ms <N> [--json] [--schema-version <1|2>]\n\nSchema 1 is the unchanged default; schema 2 selects canonical terminology.\nRead-only program metadata, pure fixtures and supervised local fixture inspection.\nThe inherited descriptor supplies exactly 32 raw key bytes and EOF.\nNo key argument, default lookup, recovery or execution.\nDeadlines are cooperative on a responsive local Linux filesystem, not hard I/O\npreemption. No live Git recapture or verification is implied.\nExit codes: 0 inspected, 2 invalid arguments, 3 store/key/refusal, 1 output failure.\n";
+const HELP: &str = "Usage: cortex program inspect --store <ABSOLUTE-PATH> --program <ID> --key-fd <N> --max-bytes <N> --read-timeout-ms <N> [--json] [--schema-version <1|2|3>]\n\nSchema 3 is the default with explicit memory semantics. Select 1 or 2 for their retained contracts.\nRead-only program metadata, pure fixtures and supervised local fixture inspection.\nThe inherited descriptor supplies exactly 32 raw key bytes and EOF.\nNo key argument, default lookup, recovery or execution.\nDeadlines are cooperative on a responsive local Linux filesystem, not hard I/O\npreemption. No live Git recapture or verification is implied.\nExit codes: 0 inspected, 2 invalid arguments, 3 store/key/refusal, 1 output failure.\n";
 fn error(
     out: &mut impl Write,
     json_output: bool,
@@ -74,6 +74,7 @@ fn key(fd: u32, deadline: Instant) -> Result<StoreKey, &'static str> {
     StoreKey::new(&bytes[..32]).map_err(|_| "KEY_INVALID")
 }
 fn view(k: &CoordinationKernel, schema: Schema) -> Value {
+    let mut resources = ResourceProjection::default();
     let d = k.state().definition();
     let tasks:Vec<_>=d.graph().tasks().iter().map(|m|{
   let s=k.state().readiness().task(m.id()).expect("validated graph");
@@ -99,15 +100,15 @@ fn view(k: &CoordinationKernel, schema: Schema) -> Value {
     let streams:Vec<_>=d.workstreams().iter().map(|w|json!({"id":w.id.as_str(),"responsibility":w.responsibility,"missions":w.tasks.iter().map(|m|m.as_str()).collect::<Vec<_>>()})).collect();
     let packages:Vec<_>=k.packages().iter().map(|p|json!({"id":p.request().id.as_str(),"revision":p.request().revision.get(),"mission":p.request().task.as_str(),"bytes":p.bytes().len(),"current_structural_correspondence":p.check(k.state(),p.bytes()).is_ok(),"submitted":false})).collect();
     let decisions:Vec<_>=k.decisions().iter().map(|d|json!({"operation":d.operation.as_str(),"edge":d.edge.as_str(),"baseline":d.baseline.get(),"historically_released":d.released,"findings":d.findings.iter().map(|p|json!({"predicate":p.predicate().as_str(),"disposition":format!("{:?}",p.disposition()),"reasons":p.reasons().iter().map(|r|format!("{r:?}")).collect::<Vec<_>>()})).collect::<Vec<_>>()})).collect();
-    let fixtures = fixture_view(k, schema);
+    let fixtures = fixture_view(k, schema, &mut resources);
     let mut result = json!({"schema":"cortex.program.v1","fixture_projection":fixtures,"status":"INSPECTED","program":d.id().as_str(),"objective":d.outcome().objective(),"acceptance":d.outcome().acceptance(),"baseline":d.revision().get(),"retained_baselines":k.state().definitions().len(),"journal_revision":k.revision(),"trust":"CALLER_ASSERTIONS_SINGLE_LOCAL_OPERATOR","execution_authority":"UNAVAILABLE","live_candidate_verification":"NOT_RUN","workstreams":streams,"missions":tasks,"edges":edges,"attempts":attempts,"support_decisions":decisions,"packages":packages,"resource_reservations":[],"integration":"NOT_SUPPORTED","owner_decisions_required":["Stage 2 effect, host, resource, privacy and authority qualification","Protected integration approval"]});
     if k.fixture_effects().mode() == EffectMode::SupervisedFixture {
         result["fixture_projection"] = Value::Null;
-        result["supervised_projection"] = supervised_view(k, schema);
+        result["supervised_projection"] = supervised_view(k, schema, &mut resources);
         result["execution_authority"] = json!("INSPECTION_CONFERS_NONE");
         result["live_executor_authority"] = json!("UNAVAILABLE");
         result["mission_execution_flags_scope"] = json!("LIVE_AI_EXECUTION_NOT_SUPPORTED");
-        result["resource_reservations"] = json!(k.fixture_effects().effects().iter().filter(|e| e.pending()).map(|e| json!({"effect":e.intent.id.as_str(),"scope":"TRUSTED_LOCAL_FIXTURE","quantities_kind":"ORIGINAL_ADMITTED_DEMAND","quantities":e.intent.demand.iter().map(|d|json!({"resource":schema.resource(d.resource),"quantity":d.amount})).collect::<Vec<_>>(),"hard_host_reservation":"NOT_ESTABLISHED"})).collect::<Vec<_>>());
+        result["resource_reservations"] = json!(k.fixture_effects().effects().iter().filter(|e| e.pending()).map(|e| json!({"effect":e.intent.id.as_str(),"scope":"TRUSTED_LOCAL_FIXTURE","quantities_kind":"ORIGINAL_ADMITTED_DEMAND","quantities":e.intent.demand.iter().map(|d|json!({"resource":resources.project(schema, &d.resource),"quantity":d.amount})).collect::<Vec<_>>(),"hard_host_reservation":"NOT_ESTABLISHED"})).collect::<Vec<_>>());
         for package in result["packages"].as_array_mut().expect("packages") {
             let id = package["id"].as_str().expect("package ID").to_owned();
             let related = k
@@ -140,7 +141,7 @@ fn view(k: &CoordinationKernel, schema: Schema) -> Value {
     if let Some(projection) = k.domains() {
         result["fixture_projection"] = Value::Null;
         result["supervised_projection"] = Value::Null;
-        result["domain_projection"] = domains::view(projection, schema);
+        result["domain_projection"] = domains::view(projection, schema, &mut resources);
         result["registered_member_programs"] = json!(
             k.domain_members()
                 .iter()
@@ -158,21 +159,25 @@ fn view(k: &CoordinationKernel, schema: Schema) -> Value {
     schema.project_program(&mut result);
     result
 }
-fn fixture_view(k: &CoordinationKernel, schema: Schema) -> Value {
+fn fixture_view(
+    k: &CoordinationKernel,
+    schema: Schema,
+    resources: &mut ResourceProjection,
+) -> Value {
     let projection = k.fixture_effects();
     let effects: Vec<_> = projection.effects().iter().map(|e| {
         let scope = &e.intent.scope;
         let grant = projection.grants().iter().find(|g| g.id == e.intent.grant).expect("validated effect grant");
         let package_current = k.packages().iter().find(|p| p.request().id == scope.package && p.request().revision == scope.package_revision).is_some_and(|p| p.check(k.state(),p.bytes()).is_ok());
-        json!({"id":e.intent.id.as_str(),"mission":scope.task.as_str(),"attempt":scope.attempt.as_str(),"baseline":scope.baseline.get(),"generation":scope.generation.get(),"candidate":scope.candidate.commit().as_str(),"status":format!("{:?}",e.status),"pending":e.pending(),"cancellation_requested":e.cancellation_requested,"reported_outcome":e.report.map(|r| format!("{r:?}")),"reconciled":e.reconciliation.is_some(),"retry_depth":e.retries,"grant":grant.id.as_str(),"grant_revoked":projection.revoked().contains(&grant.id),"grant_expired_at_observed_tick":projection.last_tick() >= grant.expires_before,"baseline_current":scope.baseline == k.state().definition().revision(),"package_current":package_current,"reservation":e.intent.demand.iter().map(|d|json!({"resource":schema.resource(d.resource),"quantity":d.amount})).collect::<Vec<_>>(),"observation_kind":"CONTROLLED_FIXTURE","authorized":false,"real_dispatched":false})
+        json!({"id":e.intent.id.as_str(),"mission":scope.task.as_str(),"attempt":scope.attempt.as_str(),"baseline":scope.baseline.get(),"generation":scope.generation.get(),"candidate":scope.candidate.commit().as_str(),"status":format!("{:?}",e.status),"pending":e.pending(),"cancellation_requested":e.cancellation_requested,"reported_outcome":e.report.map(|r| format!("{r:?}")),"reconciled":e.reconciliation.is_some(),"retry_depth":e.retries,"grant":grant.id.as_str(),"grant_revoked":projection.revoked().contains(&grant.id),"grant_expired_at_observed_tick":projection.last_tick() >= grant.expires_before,"baseline_current":scope.baseline == k.state().definition().revision(),"package_current":package_current,"reservation":e.intent.demand.iter().map(|d|json!({"resource":resources.project(schema, &d.resource),"quantity":d.amount})).collect::<Vec<_>>(),"observation_kind":"CONTROLLED_FIXTURE","authorized":false,"real_dispatched":false})
     }).collect();
     let mut dimensions = std::collections::BTreeSet::new();
     for policy in projection.policies() {
         for capacity in &policy.capacities {
-            dimensions.insert(capacity.resource);
+            dimensions.insert(capacity.resource.clone());
         }
     }
-    let accounting: Vec<_> = dimensions.into_iter().map(|r|json!({"resource":schema.resource(r),"fixture_accounted":projection.accounted(r).ok()})).collect();
+    let accounting: Vec<_> = dimensions.into_iter().map(|r|json!({"resource":resources.project(schema, &r),"fixture_accounted":projection.accounted(r).ok()})).collect();
     let prepared: Vec<_> = k.prepared_inputs().iter().map(|(id,p)|json!({"operation":id.as_str(),"package":p.package().request().id.as_str(),"package_revision":p.package().request().revision.get(),"executor":p.descriptor().identity().name(),"executor_version":p.descriptor().identity().version(),"bytes":p.bytes().len(),"current_structural_correspondence":p.check(k.state(),p.descriptor(),p.requirements(),p.bytes()).is_ok(),"submitted":false})).collect();
     json!({"schema":"cortex.fixture-effects.v1","mode":"CONTROLLED_FIXTURE_ONLY","real_execution_supported":false,"logical_tick":projection.last_tick(),"clock":"CALLER_ASSERTION","policies":projection.policies().len(),"proposed_grants":projection.grants().len(),"revoked_grants":projection.revoked().iter().map(|id|id.as_str()).collect::<Vec<_>>(),"effects":effects,"accounting":accounting,"prepared_inputs":prepared})
 }
@@ -180,7 +185,11 @@ fn scope_controls_view(c: &ScopeControls) -> Value {
     json!({"cpu_quota_us":c.cpu_quota_us,"cpu_period_us":c.cpu_period_us,
         "charged_memory_bytes":c.memory_bytes,"swap_bytes":c.swap_bytes,"tasks_max":c.tasks_max})
 }
-fn scope_spec_view(s: &OwnedScopeSpec) -> Value {
+fn scope_spec_view(
+    s: &OwnedScopeSpec,
+    schema: Schema,
+    resources: &mut ResourceProjection,
+) -> Value {
     let isolation = match &s.isolation {
         ScopeIsolation::ScopeOnlyInertFixture => {
             json!({"kind":"INERT_SCOPE_FIXTURE","filesystem_network_isolation":false})
@@ -193,24 +202,68 @@ fn scope_spec_view(s: &OwnedScopeSpec) -> Value {
             "kind":"ROOTLESS_SYNTHETIC_CANARY","read_only_file_mounts":mounts.len(),
             "scratch_bytes":scratch_bytes,"independent_file_inode_quotas":"UNESTABLISHED"}),
     };
-    json!({"requested_controls":scope_controls_view(&s.controls),
+    let mut value = json!({"requested_controls":scope_controls_view(&s.controls),
         "cpu_time_ms":s.cpu_time_ms,"cpu_time_enforcement":"COOPERATIVE_SAMPLING_NOT_HARD_CUMULATIVE_QUOTA",
         "cancellation_grace_ms":s.cancellation_grace_ms,"escalation_ms":s.escalation_ms,
-        "isolation":isolation,"qualification":"NOT_INFERRED","private_scope_identity_omitted":true})
+        "isolation":isolation,"qualification":"NOT_INFERRED","private_scope_identity_omitted":true});
+    if schema == Schema::Current {
+        use cortex_core::program::memory::{
+            MemoryBasis, MemoryCorrespondence, MemoryLimit, MemoryLimitKind,
+        };
+        let correspondence = s
+            .memory_resource
+            .as_deref()
+            .cloned()
+            .map(MemoryCorrespondence::Scoped)
+            .unwrap_or(MemoryCorrespondence::ScopeUnestablished(
+                MemoryBasis::CgroupCharged,
+            ));
+        value["memory_limit"] = MemoryLimit::new(
+            correspondence,
+            s.controls.memory_bytes,
+            MemoryLimitKind::Requested,
+        )
+        .ok()
+        .as_ref()
+        .map(|v| resources.limit(v))
+        .unwrap_or(json!({"status":"UNESTABLISHED"}));
+    }
+    value
 }
-fn scope_observation_view(s: &ScopeObservation) -> Value {
-    json!({"incarnation_recorded":true,"membership_verified":s.membership_verified,
+fn scope_observation_view(
+    s: &ScopeObservation,
+    schema: Schema,
+    resources: &mut ResourceProjection,
+) -> Value {
+    let mut value = json!({"incarnation_recorded":true,"membership_verified":s.membership_verified,
         "lifecycle_verified":s.lifecycle_verified,"helper_quiescent":s.helper_quiescent,
         "controls_readback":s.controls.as_ref().map(scope_controls_view),
         "populated":s.populated,"cpu_usage_us":s.cpu_usage_us,
         "charged_memory_peak_bytes":s.memory_peak_bytes,"tasks_peak":s.tasks_peak,
         "measurement_scope":"RETAINED_CAPTURE_NOT_CURRENT_HOST_REINSPECTION",
-        "qualification":"NOT_INFERRED","adoption_supported":false,"private_scope_identity_omitted":true})
+        "qualification":"NOT_INFERRED","adoption_supported":false,"private_scope_identity_omitted":true});
+    if schema == Schema::Current {
+        value
+            .as_object_mut()
+            .expect("object")
+            .remove("charged_memory_peak_bytes");
+        value["memory_peak_observation"] = resources.observation(&s.charged_memory_peak());
+        value["memory_limit"] = s
+            .charged_memory_limit()
+            .as_ref()
+            .map(|v| resources.limit(v))
+            .unwrap_or(Value::Null);
+    }
+    value
 }
-fn supervised_view(k: &CoordinationKernel, schema: Schema) -> Value {
+fn supervised_view(
+    k: &CoordinationKernel,
+    schema: Schema,
+    resources: &mut ResourceProjection,
+) -> Value {
     let projection = k.fixture_effects();
     let accounting: Vec<_> = projection.current_policy().into_iter().flat_map(|p| &p.capacities).map(|capacity| {
-        json!({"resource":schema.resource(capacity.resource),"accounted":projection.accounted(capacity.resource).ok(),"declared_capacity":capacity.available,"verification_reserve":capacity.verification_reserve,"enforcement_scope":"TRUSTED_FIXTURE_LEDGER_NOT_HARD_HOST_QUOTA"})
+        json!({"resource":resources.project(schema, &capacity.resource),"accounted":projection.accounted(capacity.resource.clone()).ok(),"declared_capacity":capacity.available,"verification_reserve":capacity.verification_reserve,"enforcement_scope":"TRUSTED_FIXTURE_LEDGER_NOT_HARD_HOST_QUOTA"})
     }).collect();
     let effects: Vec<_> = projection.effects().iter().map(|effect| {
         let grant = projection.grants().iter().find(|g| g.id == effect.intent.grant).expect("effect grant");
@@ -222,7 +275,10 @@ fn supervised_view(k: &CoordinationKernel, schema: Schema) -> Value {
         });
         let recovery = projection.inspect_process_recovery(&effect.intent.id, &effect.intent.scope)
             .expect("validated supervised projection");
-        let recovery = json!({"reservation_held":recovery.reservation_held,
+        let unestablished_candidate = matches!(&recovery.candidate,
+            Some(cortex_core::program::operational::Reconciliation::Observed {usage, ..})
+                if usage.iter().any(|d| d.resource.memory_basis_unestablished()));
+        let mut recovery = json!({"reservation_held":recovery.reservation_held,
             "specification_recorded":recovery.specification_recorded,"launcher_recorded":recovery.launcher_recorded,
             "scope_recorded":recovery.scope_recorded,"identity_checkpoint_recorded":recovery.identity_checkpoint_recorded,
             "blockers":recovery.blockers.iter().map(|b|format!("{b:?}")).collect::<Vec<_>>(),
@@ -230,6 +286,12 @@ fn supervised_view(k: &CoordinationKernel, schema: Schema) -> Value {
                 cortex_core::program::operational::Reconciliation::Absent=>"ABSENT",
                 cortex_core::program::operational::Reconciliation::Observed{..}=>"OBSERVED"}),
             "authority":"NONE_INSPECTION_ONLY","current_process_liveness":"NOT_OBSERVED","host_reinspection":false,"adoption_supported":false});
+        if schema == Schema::Current {
+            recovery["candidate_scope"] = json!("RETAINED_STRUCTURAL_PROPOSAL_NOT_AUTHORITY");
+            recovery["current_admission"] = json!(if unestablished_candidate {
+                "BLOCKED_UNESTABLISHED_MEMORY_BASIS"
+            } else { "REQUIRES_CURRENT_ADMISSION_CHECKS" });
+        }
         let observations: Vec<_> = effect.process_observations.iter().map(|o| {
             let completion = match o.completion {
                 ProcessCompletion::Spawned => json!({"kind":"SPAWNED"}),
@@ -239,9 +301,9 @@ fn supervised_view(k: &CoordinationKernel, schema: Schema) -> Value {
                 ProcessCompletion::Interrupted { reason } => json!({"kind":"INTERRUPTED","reason":format!("{reason:?}")}),
                 ProcessCompletion::Unknown => json!({"kind":"UNKNOWN"}),
             };
-            json!({"observation_scope":o.id.scope(),"observation_sequence":o.id.sequence(),"completion":completion,"quiescence":format!("{:?}",o.quiescence),"process":o.process.as_ref().map(|p|json!({"pid":p.pid,"start_ticks":p.start_ticks,"adoption_supported":false})),"input_bytes":o.input_bytes,"stdout_bytes":o.stdout_bytes,"stderr_bytes":o.stderr_bytes,"structured_records":o.structured_records,"malformed_output":o.malformed_output,"elapsed_ms":o.elapsed_ms,"containment":o.containment.as_deref().map(scope_observation_view),"unresolved_scope_helpers":o.unresolved_scope_helpers.iter().map(|h|json!({"pid":h.pid,"start_ticks":h.start_ticks,"adoption_supported":false})).collect::<Vec<_>>(),"raw_output_retained":false})
+            json!({"observation_scope":o.id.scope(),"observation_sequence":o.id.sequence(),"completion":completion,"quiescence":format!("{:?}",o.quiescence),"process":o.process.as_ref().map(|p|json!({"pid":p.pid,"start_ticks":p.start_ticks,"adoption_supported":false})),"input_bytes":o.input_bytes,"stdout_bytes":o.stdout_bytes,"stderr_bytes":o.stderr_bytes,"structured_records":o.structured_records,"malformed_output":o.malformed_output,"elapsed_ms":o.elapsed_ms,"containment":o.containment.as_deref().map(|s|scope_observation_view(s, schema, resources)),"unresolved_scope_helpers":o.unresolved_scope_helpers.iter().map(|h|json!({"pid":h.pid,"start_ticks":h.start_ticks,"adoption_supported":false})).collect::<Vec<_>>(),"raw_output_retained":false})
         }).collect();
-        json!({"effect":effect.intent.id.as_str(),"mission":effect.intent.scope.task.as_str(),"attempt":effect.intent.scope.attempt.as_str(),"candidate":effect.intent.scope.candidate.commit().as_str(),"status":format!("{:?}",effect.status),"pending_reconciliation":effect.pending(),"cancellation_requested":effect.cancellation_requested,"grant_revoked":projection.revoked().contains(&grant.id),"grant_expired_at_observed_tick":projection.last_tick() >= grant.expires_before,"dispatch_intent_durable":effect.dispatch_at.is_some(),"dispatch_tick":effect.dispatch_at,"process_spec_retained":effect.process_spec.is_some(),"configured_process_limits":limits,"containment_request":effect.process_spec.as_ref().and_then(|s|s.containment.as_ref()).map(scope_spec_view),"reported_outcome":effect.report.map(|v|format!("{v:?}")),"recovery":recovery,"observations":observations,"mission_acceptance":"NOT_INFERRED"})
+        json!({"effect":effect.intent.id.as_str(),"mission":effect.intent.scope.task.as_str(),"attempt":effect.intent.scope.attempt.as_str(),"candidate":effect.intent.scope.candidate.commit().as_str(),"status":format!("{:?}",effect.status),"pending_reconciliation":effect.pending(),"cancellation_requested":effect.cancellation_requested,"grant_revoked":projection.revoked().contains(&grant.id),"grant_expired_at_observed_tick":projection.last_tick() >= grant.expires_before,"dispatch_intent_durable":effect.dispatch_at.is_some(),"dispatch_tick":effect.dispatch_at,"process_spec_retained":effect.process_spec.is_some(),"configured_process_limits":limits,"containment_request":effect.process_spec.as_ref().and_then(|s|s.containment.as_ref()).map(|s|scope_spec_view(s, schema, resources)),"reported_outcome":effect.report.map(|v|format!("{v:?}")),"recovery":recovery,"observations":observations,"mission_acceptance":"NOT_INFERRED"})
     }).collect();
     let scoped = projection.effects().iter().any(|e| {
         e.process_spec
@@ -292,6 +354,7 @@ pub fn run(args: impl Iterator<Item = OsString>, out: &mut impl Write) -> Result
                 schema = match value.to_str() {
                     Some("1") => Some(Schema::Legacy),
                     Some("2") => Some(Schema::Canonical),
+                    Some("3") => Some(Schema::Current),
                     _ => {
                         invalid = true;
                         None
@@ -347,7 +410,7 @@ pub fn run(args: impl Iterator<Item = OsString>, out: &mut impl Write) -> Result
         out.write_all(HELP.as_bytes())?;
         return Ok(2);
     };
-    let schema = schema.unwrap_or(Schema::Legacy);
+    let schema = schema.unwrap_or(Schema::Current);
     let selected = cortex_core::program::ProgramId::new(&program);
     let limits = ReadLimits::new(max, Duration::from_millis(timeout));
     if invalid || !store.is_absolute() || selected.is_err() || limits.is_err() {
@@ -375,6 +438,9 @@ pub fn run(args: impl Iterator<Item = OsString>, out: &mut impl Write) -> Result
     }
     if k.state().definition().id() != &selected.expect("validated identity") {
         return error(out, machine, schema, "PROGRAM_MISMATCH");
+    }
+    if schema != Schema::Current && k.has_scoped_memory() {
+        return error(out, machine, schema, "SCHEMA_CANNOT_REPRESENT_MEMORY");
     }
     let value = view(&k, schema);
     if machine {
@@ -419,6 +485,17 @@ pub fn run(args: impl Iterator<Item = OsString>, out: &mut impl Write) -> Result
                     domain[schema.guidance_key()]
                 )?;
             }
+        }
+        if schema == Schema::Current {
+            writeln!(
+                out,
+                "Retained resource accounting (not measured enforcement): {}",
+                json!({
+                    "reservations":value["resource_reservations"],
+                    "fixture_accounting":value["fixture_projection"]["accounting"],
+                    "supervised_accounting":value["supervised_projection"]["accounting"]
+                })
+            )?;
         }
         for m in value[schema.tasks_key()].as_array().expect("array") {
             writeln!(
@@ -466,6 +543,29 @@ pub fn run(args: impl Iterator<Item = OsString>, out: &mut impl Write) -> Result
                     .expect("observations")
                     .len()
             )?;
+            if schema == Schema::Current {
+                let samples: Vec<_> = effect["observations"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|o| {
+                        o["containment"].as_object().map(|c| {
+                            json!({
+                                "memory_limit":c.get("memory_limit"),
+                                "memory_peak_observation":c.get("memory_peak_observation")
+                            })
+                        })
+                    })
+                    .collect();
+                writeln!(
+                    out,
+                    "Retained memory facts and recovery limits: {}",
+                    json!({
+                        "requested_limit":effect["containment_request"]["memory_limit"],
+                        "samples":samples, "recovery":effect["recovery"]
+                    })
+                )?;
+            }
         }
         for a in value["attempts"].as_array().expect("array") {
             writeln!(

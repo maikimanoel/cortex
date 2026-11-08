@@ -64,6 +64,11 @@ only in an explicit hypothetical resource vector. The scoped decisions are
 recorded in DEC-004/005/007/012; Stage 2+ remains separately gated. The canonical
 sequence is the [GPE-B roadmap exception](roadmap.md#gpe-b-stage-1-sequencing-exception).
 
+The [memory basis contract](../architecture/semantic-contracts.md#memory-basis-and-scope)
+adds explicit resource accounting/measurement scope and preserves unspecified
+historical values. It changes no worker-slot policy, operational authority,
+closure guarantee or capability status.
+
 ## Owner-approved GPE-B Stage 2A boundary
 
 The [operational foundations](../architecture/operational-foundations.md) extend
@@ -402,8 +407,11 @@ declared profile compatibility, not semantic non-impact or freshness. The bounde
 [Rust](../architecture/knowledge-rust.md), [Markdown](../architecture/knowledge-markdown.md)
 and [Cargo manifest](../architecture/knowledge-cargo-manifest.md) adapters add
 lexical source profiles using the same Core model. They do not add those languages
-to the JSON-only source-set resolver. Broader language analysis and
-dependency-sensitive incremental indexing remain unfinished.
+to the JSON-only source-set resolver. The [inspection dimensions](../architecture/semantic-contracts.md#knowledge-inspection-contract-version-2)
+separate source/profile correspondence, bounded extraction coverage, emitted-reference
+resolution and specific lexical claim support across these adapters. This does not
+provide general semantic validation or complete extraction. Broader language analysis
+and dependency-sensitive incremental indexing remain unfinished.
 **Verification mechanisms:** [Core invariants](../../crates/cortex-core/tests/knowledge.rs),
 [parser fixtures](../../crates/cortex-cli/src/knowledge/json.rs) and
 [real-Git queries](../../crates/cortex-cli/tests/knowledge.rs) cover actual references,

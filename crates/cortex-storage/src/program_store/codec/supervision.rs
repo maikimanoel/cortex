@@ -1,5 +1,7 @@
 //! Complete supervised-fixture inputs, never trusted serialized process projections.
 use super::*;
+use cortex_core::program::memory::{MemoryBasis, MemoryResource, MemoryScope};
+use cortex_core::program::scheduling::Resource;
 use cortex_core::program::supervision::*;
 
 impl Wire for i32 {
@@ -65,7 +67,74 @@ impl Wire for ProcessLimits {
 }
 fields!(ReadOnlyMount;source,destination);
 fields!(ScopeControls;cpu_quota_us,cpu_period_us,memory_bytes,swap_bytes,tasks_max);
-fields!(OwnedScopeSpec;reference,unit,delegated_root,runtime_dir,launcher,launcher_identity,manager,manager_identity,controls,cpu_time_ms,cancellation_grace_ms,escalation_ms,isolation);
+fn scope_memory_valid(resource: &MemoryResource) -> bool {
+    resource.basis() == MemoryBasis::CgroupCharged
+        && matches!(resource.scope(), MemoryScope::AccountingPool(_))
+}
+impl Wire for OwnedScopeSpec {
+    fn write(&self) -> Result<V, ProgramStoreError> {
+        let legacy = list([
+            self.reference.write(),
+            self.unit.write(),
+            self.delegated_root.write(),
+            self.runtime_dir.write(),
+            self.launcher.write(),
+            self.launcher_identity.write(),
+            self.manager.write(),
+            self.manager_identity.write(),
+            self.controls.write(),
+            self.cpu_time_ms.write(),
+            self.cancellation_grace_ms.write(),
+            self.escalation_ms.write(),
+            self.isolation.write(),
+        ])?;
+        match &self.memory_resource {
+            Some(resource) => {
+                if !scope_memory_valid(resource) {
+                    return Err(bad());
+                }
+                Ok(json!([
+                    "owned-scope-memory-v1",
+                    legacy,
+                    Resource::MemoryBytes(resource.clone()).write()?
+                ]))
+            }
+            None => Ok(legacy),
+        }
+    }
+    fn read(v: &V) -> Result<Self, ProgramStoreError> {
+        let (legacy, memory_resource) =
+            if v.get(0).and_then(V::as_str) == Some("owned-scope-memory-v1") {
+                let a = arr(v, 3)?;
+                let Resource::MemoryBytes(resource) = read(&a[2])? else {
+                    return Err(bad());
+                };
+                if !scope_memory_valid(&resource) {
+                    return Err(bad());
+                }
+                (&a[1], Some(resource))
+            } else {
+                (v, None)
+            };
+        let a = arr(legacy, 13)?;
+        Ok(Self {
+            memory_resource,
+            reference: read(&a[0])?,
+            unit: read(&a[1])?,
+            delegated_root: read(&a[2])?,
+            runtime_dir: read(&a[3])?,
+            launcher: read(&a[4])?,
+            launcher_identity: read(&a[5])?,
+            manager: read(&a[6])?,
+            manager_identity: read(&a[7])?,
+            controls: read(&a[8])?,
+            cpu_time_ms: read(&a[9])?,
+            cancellation_grace_ms: read(&a[10])?,
+            escalation_ms: read(&a[11])?,
+            isolation: read(&a[12])?,
+        })
+    }
+}
 fields!(ScopeIdentity;spec,unit,invocation_id,cgroup,device,inode);
 fields!(ScopeObservation;identity,controls,membership_verified,helper_quiescent,lifecycle_verified,populated,cpu_usage_us,memory_peak_bytes,tasks_peak);
 impl Wire for ScopeIsolation {
@@ -348,6 +417,7 @@ mod tests {
         let mut spec = ProcessSpec::read(&old_spec).unwrap();
         assert_eq!(spec.write().unwrap(), old_spec);
         let scope = OwnedScopeSpec {
+            memory_resource: None,
             reference: source.clone(),
             unit: "cortex-qualification-codec.scope".into(),
             delegated_root: "/owned/cgroup".into(),

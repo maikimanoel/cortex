@@ -290,6 +290,7 @@ pub struct RecordInspection {
 /// Rebuildable validated state and immutable input journal.
 #[derive(Clone)]
 pub struct CoordinationKernel {
+    replaying: bool,
     domain_projection: Option<cortex_core::program::domain::DomainProjection>,
     domain_component: bool,
     members: Vec<CoordinationKernel>,
@@ -306,6 +307,7 @@ impl CoordinationKernel {
     /// Create a kernel from a validated accepted initial baseline.
     pub fn new(initial: ProgramDefinition) -> Result<Self, KernelError> {
         Ok(Self {
+            replaying: false,
             domain_projection: None,
             domain_component: false,
             members: vec![],
@@ -335,6 +337,93 @@ impl CoordinationKernel {
         kernel.domain_projection = Some(Default::default());
         kernel.domain_component = true;
         Ok(kernel)
+    }
+    /// Reconstruct a complete retained history through a bounded source reader.
+    /// Only a fresh kernel is accepted. The historical interpretation is scoped
+    /// to this constructor; the returned kernel always uses current admission
+    /// guards. This performs no effect and supplies no operational authority.
+    pub fn reconstruct<E>(
+        mut self,
+        mut next: impl FnMut(&Self) -> Result<Option<Operation>, E>,
+    ) -> Result<Self, E>
+    where
+        E: From<KernelError>,
+    {
+        if !self.operations.is_empty() {
+            return Err(KernelError::Core(ProgramError::Structure).into());
+        }
+        self.replaying = true;
+        while let Some(operation) = next(&self)? {
+            if self.admit(operation)?.duplicate {
+                return Err(KernelError::Core(ProgramError::IdentityConflict).into());
+            }
+        }
+        self.finish_reconstruction();
+        Ok(self)
+    }
+    fn finish_reconstruction(&mut self) {
+        self.replaying = false;
+        for member in &mut self.members {
+            member.finish_reconstruction();
+        }
+    }
+    /// Whether retained input contains explicitly scoped memory representations.
+    /// Useful for rejecting projections that cannot represent those semantics.
+    pub fn has_scoped_memory(&self) -> bool {
+        self.operations.iter().any(|o| {
+            command_memory_resources(&o.command).iter().any(|r| {
+                matches!(
+                    r,
+                    cortex_core::program::scheduling::Resource::MemoryBytes(_)
+                )
+            })
+        })
+    }
+    fn memory_admission_unestablished(&self, command: &Command) -> bool {
+        use cortex_core::program::domain::DomainEvent;
+        if command_memory_resources(command)
+            .iter()
+            .any(|r| r.memory_basis_unestablished())
+        {
+            return true;
+        }
+        match command {
+            Command::FixtureEffect(event) | Command::SupervisedEffect(event) => {
+                match event.as_ref() {
+                    EffectEvent::Dispatch { effect, .. }
+                    | EffectEvent::PrepareProcess { effect, .. } => self
+                        .fixture_effects
+                        .effects()
+                        .iter()
+                        .find(|r| &r.intent.id == effect)
+                        .is_some_and(|r| {
+                            r.intent
+                                .demand
+                                .iter()
+                                .any(|d| d.resource.memory_basis_unestablished())
+                        }),
+                    _ => false,
+                }
+            }
+            Command::Domain(event) => match event.as_ref() {
+                DomainEvent::CreateRequested { domain, .. }
+                | DomainEvent::ReleaseRequested { domain, .. } => self
+                    .domains()
+                    .and_then(|p| p.domain(domain))
+                    .is_some_and(|r| {
+                        r.intent
+                            .effect
+                            .demand
+                            .iter()
+                            .any(|d| d.resource.memory_basis_unestablished())
+                    }),
+                _ => false,
+            },
+            Command::DomainMember { program, operation } => self
+                .domain_member(program)
+                .is_none_or(|member| member.memory_admission_unestablished(&operation.command)),
+            _ => false,
+        }
     }
     /// Read-only global domain state, when the explicit profile was selected.
     pub fn domains(&self) -> Option<&cortex_core::program::domain::DomainProjection> {
@@ -468,6 +557,12 @@ impl CoordinationKernel {
                 Err(ProgramError::IdentityConflict.into())
             };
         }
+        if !self.replaying && self.memory_admission_unestablished(&operation.command) {
+            return Err(OperationalError::UnknownResource(
+                cortex_core::program::scheduling::Resource::UnspecifiedMemoryBytes,
+            )
+            .into());
+        }
         if operation.expected != self.revision() {
             return Err(ProgramError::Stale.into());
         }
@@ -538,6 +633,7 @@ impl CoordinationKernel {
                 )?;
                 let mut member = Self::new_supervised_fixture((**definition).clone())?;
                 member.domain_component = true;
+                member.replaying = self.replaying;
                 self.members.push(member);
             }
             Command::DomainMember { program, operation } => {
@@ -856,16 +952,16 @@ impl CoordinationKernel {
             .ok_or(ProgramError::Missing)?;
         let projection = self.domains().ok_or(ProgramError::Missing)?;
         for capacity in &policy.capacities {
-            let resource = capacity.resource;
+            let resource = capacity.resource.clone();
             let requested = intent
                 .effect
                 .demand
                 .iter()
-                .find(|d| d.resource == resource)
+                .find(|d| d.resource.clone() == resource)
                 .and_then(|d| d.amount)
-                .ok_or(OperationalError::UnknownResource(resource))?;
+                .ok_or(OperationalError::UnknownResource(resource.clone()))?;
             let cumulative = policy.cumulative.contains(&resource);
-            let dimension = match (resource, cumulative) {
+            let dimension = match (resource.clone(), cumulative) {
                 (Resource::ElapsedMillis, true) => Some(Consumption::ElapsedMillis),
                 (Resource::OutputBytes, true) => Some(Consumption::OutputBytes),
                 (
@@ -873,7 +969,8 @@ impl CoordinationKernel {
                     | Resource::BuildJobs
                     | Resource::TestProcesses
                     | Resource::CpuMillicores
-                    | Resource::RamBytes
+                    | Resource::UnspecifiedMemoryBytes
+                    | Resource::MemoryBytes(_)
                     | Resource::DiskBytes,
                     false,
                 ) => None,
@@ -913,29 +1010,29 @@ impl CoordinationKernel {
                             .measured_consumption(dimension)
                             .ok_or(DomainError::Debt(dimension))?,
                     }
-                } else if prior.holds(resource) {
+                } else if prior.holds(resource.clone()) {
                     prior
                         .intent
                         .effect
                         .demand
                         .iter()
-                        .find(|d| d.resource == resource)
+                        .find(|d| d.resource.clone() == resource)
                         .and_then(|d| d.amount)
-                        .ok_or(OperationalError::UnknownResource(resource))?
+                        .ok_or(OperationalError::UnknownResource(resource.clone()))?
                 } else {
                     0
                 };
                 used = used
                     .checked_add(amount)
-                    .ok_or(OperationalError::ResourceLimit(resource))?;
+                    .ok_or(OperationalError::ResourceLimit(resource.clone()))?;
             }
             let free = capacity
                 .available
-                .ok_or(OperationalError::UnknownResource(resource))?
+                .ok_or(OperationalError::UnknownResource(resource.clone()))?
                 .checked_sub(capacity.verification_reserve)
-                .ok_or(OperationalError::ResourceLimit(resource))?;
+                .ok_or(OperationalError::ResourceLimit(resource.clone()))?;
             if used.checked_add(requested).is_none_or(|n| n > free) {
-                return Err(OperationalError::ResourceLimit(resource).into());
+                return Err(OperationalError::ResourceLimit(resource.clone()).into());
             }
         }
         Ok(())
@@ -1152,5 +1249,71 @@ impl CoordinationKernel {
             validity: v.validity(),
             issue: v.validity_issue().cloned(),
         })
+    }
+}
+
+// One traversal owns the new-admission boundary and machine projection detection.
+// Historical reconstruction retains old quantities without assigning them a basis.
+fn command_memory_resources(command: &Command) -> Vec<cortex_core::program::scheduling::Resource> {
+    use cortex_core::program::{domain::DomainEvent, scheduling::Resource};
+    fn effect(event: &EffectEvent) -> Vec<Resource> {
+        match event {
+            EffectEvent::Policy(p) => p
+                .capacities
+                .iter()
+                .map(|c| c.resource.clone())
+                .chain(p.cumulative.iter().cloned())
+                .collect(),
+            EffectEvent::Grant(g) => g.ceilings.iter().map(|d| d.resource.clone()).collect(),
+            EffectEvent::Reserve { intent, .. } => {
+                intent.demand.iter().map(|d| d.resource.clone()).collect()
+            }
+            EffectEvent::Reconcile {
+                resolution:
+                    cortex_core::program::operational::Reconciliation::Observed { usage, .. },
+                ..
+            } => usage.iter().map(|d| d.resource.clone()).collect(),
+            EffectEvent::PrepareProcess { spec, .. } => spec
+                .containment
+                .as_ref()
+                .and_then(|s| s.memory_resource.clone())
+                .map(|m| vec![Resource::MemoryBytes(m)])
+                .unwrap_or_default(),
+            _ => vec![],
+        }
+    }
+    match command {
+        Command::PrepareExecutorInput(request) => {
+            use cortex_core::program::executor::Control;
+            request
+                .descriptor
+                .observations()
+                .iter()
+                .map(|o| &o.control)
+                .chain(request.requirements.required().iter().map(|r| &r.control))
+                .filter_map(|c| match c {
+                    Control::Resource(r) => Some(r.clone()),
+                    _ => None,
+                })
+                .collect()
+        }
+        Command::FixtureEffect(e) | Command::SupervisedEffect(e) => effect(e),
+        Command::DomainMember { operation, .. } => command_memory_resources(&operation.command),
+        Command::Domain(e) => match e.as_ref() {
+            DomainEvent::ConfigurePool(p) => {
+                p.capacities.iter().map(|c| c.resource.clone()).collect()
+            }
+            DomainEvent::Reserve { intent, .. } => intent
+                .effect
+                .demand
+                .iter()
+                .map(|d| d.resource.clone())
+                .collect(),
+            DomainEvent::Closed { receipt, .. }
+            | DomainEvent::RecoveredClosed { receipt, .. }
+            | DomainEvent::Settle { receipt, .. } => receipt.released.clone(),
+            _ => vec![],
+        },
+        _ => vec![],
     }
 }
