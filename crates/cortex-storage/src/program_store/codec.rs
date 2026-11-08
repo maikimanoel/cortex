@@ -901,6 +901,9 @@ fn command_write(c: &Command) -> Result<V, ProgramStoreError> {
                 cortex_core::program::domain::DomainEvent::ClosureObserved { .. } => {
                     "domain-closure-observation-v1"
                 }
+                cortex_core::program::domain::DomainEvent::ClosureTreeObserved { .. } => {
+                    "domain-closure-tree-v1"
+                }
                 _ => "domain-v1",
             };
             json!([tag, event.write()?])
@@ -964,6 +967,7 @@ fn command_read(v: &V, k: &CoordinationKernel) -> Result<Command, ProgramStoreEr
                 "domain-v1"
                     | "domain-observation-v1"
                     | "domain-closure-observation-v1"
+                    | "domain-closure-tree-v1"
                     | "domain-member-v1"
                     | "domain-member-input-v1"
             )
@@ -984,6 +988,7 @@ fn command_read(v: &V, k: &CoordinationKernel) -> Result<Command, ProgramStoreEr
         "domain-v1",
         "domain-observation-v1",
         "domain-closure-observation-v1",
+        "domain-closure-tree-v1",
         "domain-member-v1",
         "notify",
         "observe",
@@ -1001,7 +1006,10 @@ fn command_read(v: &V, k: &CoordinationKernel) -> Result<Command, ProgramStoreEr
     {
         let a = arr(v, 2)?;
         return Ok(match tag {
-            "domain-v1" | "domain-observation-v1" | "domain-closure-observation-v1" => {
+            "domain-v1"
+            | "domain-observation-v1"
+            | "domain-closure-observation-v1"
+            | "domain-closure-tree-v1" => {
                 let event: cortex_core::program::domain::DomainEvent = read(&a[1])?;
                 let expected = match &event {
                     cortex_core::program::domain::DomainEvent::BoundObserved { .. } => {
@@ -1009,6 +1017,9 @@ fn command_read(v: &V, k: &CoordinationKernel) -> Result<Command, ProgramStoreEr
                     }
                     cortex_core::program::domain::DomainEvent::ClosureObserved { .. } => {
                         "domain-closure-observation-v1"
+                    }
+                    cortex_core::program::domain::DomainEvent::ClosureTreeObserved { .. } => {
+                        "domain-closure-tree-v1"
                     }
                     _ => "domain-v1",
                 };

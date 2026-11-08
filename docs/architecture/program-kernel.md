@@ -250,7 +250,7 @@ tasks/blockers and attempts, retaining the existing `Mission` label in version 1
 | Guidance | `next_step_guidance`, scope `RETAINED_STATE_ADVISORY_NOT_EXHAUSTIVE` | Conditional information, not authorization or an exhaustive prerequisite check |
 | Retained binding | `prepared_handle_availability: UNESTABLISHED_BY_JOURNAL` | The journal does not establish a current usable controller channel |
 | Closure receipt | `closure_receipt_recorded`, `closure_receipt_status`, `closure_receipt_source` | Receipt retention and declared source, not authenticated physical closure |
-| Native sample | `native_support_status: INCOMPLETE`, `latest_direct_observation`, `retained_native_observation_count` | Existing bounded direct observation, unchanged selection/counting and proof limits |
+| Native samples | `native_support_status: INCOMPLETE`, `latest_direct_observation`, `latest_recursive_observation`, `retained_native_observation_count` | Separate bounded samples, combined count and retained proof gaps; see the recursive presentation contract below |
 
 Receipt status is `CLOSURE_RECEIPT_RETAINED` or `NO_CLOSURE_RECEIPT_RETAINED`; an
 absent receipt has no asserted receipt source. Native support remains separate
@@ -294,3 +294,30 @@ policy (DEC-004/005/006/007/012). A real-host resource or revocation claim canno
 be inferred from these simulations. Stage 3 requires connected multi-worker and
 protected integration evidence; Stage 4 requires independent operational acceptance
 and a new finite roadmap program. No stage activates automatically on upgrade.
+
+### Recursive observation presentation
+
+Schema 1 remains the default with unchanged bytes for previously supported states.
+For newly retained recursive observations, its existing native inspection fields
+provide a bounded projection: `retained_observations` counts direct plus recursive
+records, `latest` still describes only the last direct sample (or null), and
+`native_observation_missing_proofs` includes the combined Core assessment. The
+legacy direct membership label describes that direct sample, not the scope of all
+retained evidence. No recursive object or canonical field is added to schema 1.
+
+With `--schema-version 2`, `native_closure_inspection` exposes
+`latest_direct_observation` and `latest_recursive_observation` separately. Either
+can be null. `retained_native_observation_count` counts both record kinds;
+`direct_sample_membership_coverage` and `recursive_sample_membership_coverage`
+describe their separate non-atomic coverage. `combined_native_inspection_basis`
+is `LATEST_DIRECT_OR_RECURSIVE_SAMPLE_AND_LATEST_RECURSIVE_POPULATION_AND_MEMBERS`:
+the existing Core algorithm uses the later direct/recursive sample for sample
+conditions, and retains population/member gaps from the last recursive tree even
+when a later direct sample is empty. The displayed direct sample is never replaced
+by the recursive sample. Neither ordering proves closure or final consumption.
+
+The additional recursive proof flags remain false and `native_support_status`
+remains `INCOMPLETE` for this bounded native support. A retained admission receipt
+for an observation is distinct from a closure receipt. Guidance remains advisory,
+and journal bindings do not establish a live prepared handle. All other schemas,
+exit codes, redaction and read-only inspection behavior remain unchanged.

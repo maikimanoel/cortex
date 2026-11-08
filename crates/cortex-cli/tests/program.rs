@@ -1396,7 +1396,7 @@ fn canonical_domain_projection_distinguishes_receipt_presence_from_native_proof_
             native["guidance"],
             "DO_NOT_USE_PARTIAL_NATIVE_SAMPLES_AS_CLOSURE_OR_SETTLEMENT"
         );
-        assert!(native.get("latest_recursive_observation").is_none());
+        assert!(native["latest_recursive_observation"].is_null());
         let old_capacity = original["reusable_capacity"]
             .as_array()
             .unwrap()
@@ -1412,5 +1412,131 @@ fn canonical_domain_projection_distinguishes_receipt_presence_from_native_proof_
         assert_eq!(old_capacity["held"], new_capacity["held"]);
         assert_eq!(new_capacity["held"], !receipt);
         assert_eq!(snapshot(&f), before);
+    }
+}
+
+#[test]
+fn recursive_closure_projection_retains_hidden_descendant_without_physical_proof() {
+    use cortex_core::program::domain::*;
+    for tree_first in [false, true] {
+        let f = Temp::new();
+        let (mut kernel, intent) = domain_fixture::coordinator();
+        domain_fixture::observed_cancelled(&mut kernel, &intent);
+        let tree_at = if tree_first { 5 } else { 6 };
+        let direct_at = if tree_first { 6 } else { 5 };
+        let mut tree = domain_fixture::closure_tree_observation(&intent, tree_at);
+        tree.nodes[1].relative_path = "private-child-node".into();
+        let recursive = DomainEvent::ClosureTreeObserved {
+            domain: intent.id.clone(),
+            observation: tree,
+            at: tree_at,
+        };
+        let direct = DomainEvent::ClosureObserved {
+            domain: intent.id.clone(),
+            observation: domain_fixture::closure_observation(&intent, direct_at),
+            at: direct_at,
+        };
+        let events = if tree_first {
+            [recursive, direct]
+        } else {
+            [direct, recursive]
+        };
+        for (i, event) in events.into_iter().enumerate() {
+            domain_fixture::event(&mut kernel, &format!("sample-{i}"), event);
+        }
+        let store = ProgramStore::create_domain_fixture(
+            &f.store(),
+            &key(),
+            kernel.initial().clone(),
+            limits(),
+        )
+        .unwrap();
+        for operation in kernel.operations() {
+            store.admit(&key(), operation.clone()).unwrap();
+        }
+        let before = snapshot(&f);
+        for schema in ["1", "2"] {
+            let mut c = command(&f);
+            c.args(["--json", "--schema-version", schema]);
+            let output = run(c, &[0x57; 32]);
+            assert!(output.status.success());
+            let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            let d = &value["domain_projection"]["domains"][0];
+            let native = &d["native_closure_inspection"];
+            assert!(d.get("retained_cgroup_tree_observation").is_none());
+            assert_eq!(d["historical_outcome"]["kind"], "UNKNOWN");
+            assert_eq!(d["cumulative_consumption"][0]["unresolved_debt"], true);
+            assert_eq!(d["retry_authorized"], false);
+            assert_eq!(native["settlement_authorized"], false);
+            assert_eq!(native["current_liveness"], "NOT_OBSERVED");
+            for gap in [
+                "RemainingMembers",
+                "PopulatedDomain",
+                "WholeDomainCoverage",
+                "HelperCoverage",
+                "StreamCoverage",
+                "SnapshotExclusion",
+                "FinalConsumption",
+            ] {
+                assert!(
+                    native["native_observation_missing_proofs"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|g| g == gap)
+                );
+            }
+            if schema == "1" {
+                assert_eq!(native["retained_observations"], 2);
+                assert_eq!(native["latest"]["observed_at"], direct_at);
+                assert_eq!(native["latest"]["populated"], false);
+                assert_eq!(d["closure_evidence_recorded"], false);
+                assert!(native.get("latest_recursive_observation").is_none());
+                assert!(native.get("combined_native_inspection_basis").is_none());
+                let mut default = command(&f);
+                default.arg("--json");
+                assert_eq!(output.stdout, run(default, &[0x57; 32]).stdout);
+            } else {
+                assert_eq!(native["retained_native_observation_count"], 2);
+                assert_eq!(
+                    native["latest_direct_observation"]["observed_at"],
+                    direct_at
+                );
+                assert_eq!(native["latest_direct_observation"]["populated"], false);
+                let tree = &native["latest_recursive_observation"];
+                assert_eq!(tree["observed_at"], tree_at);
+                assert_eq!(tree["nodes"], 2);
+                assert_eq!(tree["observed_members"], 1);
+                assert_eq!(tree["any_population"], true);
+                assert_eq!(tree["measurement_is_final"], false);
+                assert_eq!(native["native_support_status"], "INCOMPLETE");
+                assert_eq!(d["closure_receipt_recorded"], false);
+                assert_eq!(
+                    native["combined_native_inspection_basis"],
+                    "LATEST_DIRECT_OR_RECURSIVE_SAMPLE_AND_LATEST_RECURSIVE_POPULATION_AND_MEMBERS"
+                );
+                assert_eq!(
+                    native["direct_sample_membership_coverage"],
+                    "BOUNDED_DIRECT_MEMBERS_NON_ATOMIC"
+                );
+                assert_eq!(
+                    native["recursive_sample_membership_coverage"],
+                    "BOUNDED_RECURSIVE_CGROUP_READBACK_NON_ATOMIC"
+                );
+                for proof in [
+                    "whole_domain_closure_proven",
+                    "helper_and_stream_coverage_proven",
+                    "snapshot_exclusion_proven",
+                    "final_consumption_proven",
+                ] {
+                    assert_eq!(native[proof], false);
+                }
+            }
+            let text = String::from_utf8(output.stdout).unwrap();
+            for private in ["private-child-node", "910001", "910002"] {
+                assert!(!text.contains(private));
+            }
+            assert_eq!(snapshot(&f), before);
+        }
     }
 }

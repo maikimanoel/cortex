@@ -963,3 +963,189 @@ fn readback_requires_cancelled_observed_binding_and_cannot_reopen_closed_domain(
         .is_err()
     );
 }
+
+#[test]
+fn recursive_capture_retains_hidden_descendant_without_closure_or_final_usage() {
+    let (mut k, i) = coordinator();
+    observed_cancelled(&mut k, &i);
+    event(
+        &mut k,
+        "tree",
+        DomainEvent::ClosureTreeObserved {
+            domain: i.id.clone(),
+            observation: closure_tree_observation(&i, 5),
+            at: 5,
+        },
+    );
+    let record = k.domains().unwrap().domain(&i.id).unwrap();
+    assert_eq!(record.closure_tree_observations.len(), 1);
+    assert!(
+        record.closure_tree_observations[0]
+            .sample
+            .direct_members
+            .is_empty()
+    );
+    assert_eq!(
+        record.closure_tree_observations[0].nodes[1].members.len(),
+        1
+    );
+    assert_eq!(record.closure_inspection().retained_observations, 1);
+    for gap in [
+        ClosureProofGap::PopulatedDomain,
+        ClosureProofGap::RemainingMembers,
+        ClosureProofGap::WholeDomainCoverage,
+        ClosureProofGap::HelperCoverage,
+        ClosureProofGap::StreamCoverage,
+        ClosureProofGap::SnapshotExclusion,
+        ClosureProofGap::FinalConsumption,
+    ] {
+        assert!(record.closure_inspection().missing.contains(&gap));
+    }
+    assert_eq!(record.outcome, HistoricalOutcome::Unknown);
+    assert!(record.closure.is_none() && record.holds(Resource::WorkerSlots));
+    assert!(record.unresolved_consumption(Consumption::CpuExecutionMillis));
+    let next = setup(&mut k, "D");
+    let op = domain_operation(
+        &k,
+        "next",
+        Command::Domain(Box::new(DomainEvent::Reserve {
+            intent: next,
+            at: 6,
+        })),
+    );
+    let before = k.revision();
+    let result = k.admit(op);
+    assert!(
+        matches!(
+            &result,
+            Err(KernelError::Operational(OperationalError::ResourceLimit(
+                Resource::WorkerSlots
+            )))
+        ),
+        "unexpected refusal: {result:?}"
+    );
+    assert_eq!(k.revision(), before);
+}
+
+#[test]
+fn recursive_capture_rejects_mixed_incarnations_disconnected_paths_and_reused_births() {
+    let (mut k, i) = coordinator();
+    observed_cancelled(&mut k, &i);
+    let good = closure_tree_observation(&i, 5);
+    let mut inputs = Vec::new();
+    let mut v = good.clone();
+    v.nodes[0].inode += 1;
+    inputs.push(v);
+    let mut v = good.clone();
+    v.nodes[1].relative_path = "../escape".into();
+    inputs.push(v);
+    let mut v = good.clone();
+    v.nodes[1].relative_path = "missing/child".into();
+    inputs.push(v);
+    let mut v = good.clone();
+    v.nodes[1].relative_path = "/absolute".into();
+    inputs.push(v);
+    let mut v = good.clone();
+    v.nodes[1].device += 1;
+    inputs.push(v);
+    let mut v = good.clone();
+    v.nodes[1].inode = v.nodes[0].inode;
+    inputs.push(v);
+    let mut v = good.clone();
+    v.nodes.push(v.nodes[1].clone());
+    inputs.push(v);
+    let mut v = good.clone();
+    let member = v.nodes[1].members[0].clone();
+    v.nodes[1].members.push(member);
+    inputs.push(v);
+    let mut v = good.clone();
+    v.nodes[1].members[0] = DomainProcessObservation {
+        pid: v.sample.binding_main.pid,
+        start_ticks: v.sample.binding_main.start_ticks + 1,
+    };
+    inputs.push(v);
+    let mut v = good.clone();
+    v.sample.identity.boot = "other-boot".into();
+    inputs.push(v);
+    let mut v = good.clone();
+    v.sample.scope.generation = rev(2);
+    inputs.push(v);
+    let mut v = good.clone();
+    v.sample.observed_at = 6;
+    inputs.push(v);
+    let mut v = good.clone();
+    v.nodes[0].populated = false;
+    v.sample.populated = false;
+    inputs.push(v);
+    for (n, observation) in inputs.into_iter().enumerate() {
+        let before = k.clone();
+        let op = domain_operation(
+            &k,
+            &format!("bad-tree-{n}"),
+            Command::Domain(Box::new(DomainEvent::ClosureTreeObserved {
+                domain: i.id.clone(),
+                observation,
+                at: 5,
+            })),
+        );
+        assert!(k.admit(op).is_err());
+        assert!(k.domains() == before.domains());
+        assert_eq!(k.revision(), before.revision());
+    }
+    event(
+        &mut k,
+        "tree",
+        DomainEvent::ClosureTreeObserved {
+            domain: i.id.clone(),
+            observation: good,
+            at: 5,
+        },
+    );
+    let duplicate = domain_operation(
+        &k,
+        "tree-duplicate",
+        Command::Domain(Box::new(DomainEvent::ClosureTreeObserved {
+            domain: i.id.clone(),
+            observation: closure_tree_observation(&i, 5),
+            at: 5,
+        })),
+    );
+    assert!(k.admit(duplicate).is_err());
+    let old_direct = domain_operation(
+        &k,
+        "older-direct",
+        Command::Domain(Box::new(DomainEvent::ClosureObserved {
+            domain: i.id.clone(),
+            observation: closure_observation(&i, 5),
+            at: 5,
+        })),
+    );
+    assert!(k.admit(old_direct).is_err());
+}
+
+#[test]
+fn empty_recursive_capture_still_requires_stream_snapshot_and_final_measurement_proof() {
+    let (mut k, i) = coordinator();
+    observed_cancelled(&mut k, &i);
+    let mut capture = closure_tree_observation(&i, 5);
+    capture.nodes.truncate(1);
+    capture.nodes[0].populated = false;
+    capture.sample.populated = false;
+    capture.sample.cpu_micros = Some(0);
+    event(
+        &mut k,
+        "empty-tree",
+        DomainEvent::ClosureTreeObserved {
+            domain: i.id.clone(),
+            observation: capture,
+            at: 5,
+        },
+    );
+    let record = k.domains().unwrap().domain(&i.id).unwrap();
+    assert_eq!(record.closure_inspection().missing.len(), 5);
+    assert!(
+        record.holds(Resource::WorkerSlots)
+            && record.unresolved_consumption(Consumption::CpuExecutionMillis)
+    );
+    assert!(record.closure.is_none());
+}

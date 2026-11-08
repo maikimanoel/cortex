@@ -130,6 +130,11 @@ impl Schema {
                 rename(inspection, "latest", "latest_direct_observation");
                 rename(
                     inspection,
+                    "membership_coverage",
+                    "direct_sample_membership_coverage",
+                );
+                rename(
+                    inspection,
                     "retained_observations",
                     "retained_native_observation_count",
                 );

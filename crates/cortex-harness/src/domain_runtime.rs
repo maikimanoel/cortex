@@ -100,6 +100,13 @@ trait DomainManager {
         intent: &DomainIntent,
         end: Instant,
     ) -> Result<ManagedObservation, DomainDiagnostic>;
+    fn observe_tree(
+        &mut self,
+        _: &DomainIntent,
+        _: Instant,
+    ) -> Result<(ManagedObservation, Vec<DomainCgroupObservation>), DomainDiagnostic> {
+        Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Contract))
+    }
     fn stop(
         &mut self,
         intent: &DomainIntent,
@@ -120,6 +127,13 @@ impl DomainManager for SystemdNonceDomain {
         end: Instant,
     ) -> Result<ManagedObservation, DomainDiagnostic> {
         self.observe(i, end)
+    }
+    fn observe_tree(
+        &mut self,
+        i: &DomainIntent,
+        end: Instant,
+    ) -> Result<(ManagedObservation, Vec<DomainCgroupObservation>), DomainDiagnostic> {
+        self.observe_tree(i, end)
     }
     fn stop(
         &mut self,
@@ -769,6 +783,106 @@ fn observe_closure<M: DomainManager>(
                 ids,
                 observation_id,
                 DomainEvent::ClosureObserved {
+                    domain: ids.domain.clone(),
+                    observation,
+                    at,
+                },
+            ),
+        )
+        .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))
+}
+
+/// Capture a bounded recursive native tree after durable cancellation. Matched
+/// traversals are non-atomic facts; helpers outside the tree, retained streams,
+/// snapshot exclusion and final consumption remain unproven. This publishes an
+/// observation and returns its journal admission receipt; it performs no host
+/// mutation, closure, settlement, adoption or retry.
+pub fn observe_nonce_domain_closure_tree(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut SystemdNonceDomain,
+    ids: &DomainOperations,
+    observation_id: OperationId,
+) -> Result<AdmissionReceipt, DomainDiagnostic> {
+    observe_closure_tree(store, key, backend, ids, observation_id)
+}
+fn observe_closure_tree<M: DomainManager>(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut M,
+    ids: &DomainOperations,
+    observation_id: OperationId,
+) -> Result<AdmissionReceipt, DomainDiagnostic> {
+    let start = Instant::now();
+    let end = start + Duration::from_secs(1);
+    let kernel = store
+        .load(key, Access::ReadOnly)
+        .map_err(|_| issue(DomainPhaseDiagnostic::Closure, DomainCause::Journal))?;
+    let domain = record(&kernel, &ids.domain)?;
+    let binding = domain
+        .binding_observation
+        .as_ref()
+        .ok_or_else(|| issue(DomainPhaseDiagnostic::Closure, DomainCause::Correspondence))?;
+    if !domain.cancelled || domain.closure.is_some() {
+        return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Contract));
+    }
+    backend.corresponds(&domain.intent)?;
+    let (actual, nodes) = backend.observe_tree(&domain.intent, end)?;
+    if Instant::now() >= end || actual.identity != binding.identity {
+        return Err(issue(
+            DomainPhaseDiagnostic::Closure,
+            DomainCause::Correspondence,
+        ));
+    }
+    let at = kernel
+        .domains()
+        .ok_or_else(|| issue(DomainPhaseDiagnostic::Closure, DomainCause::Contract))?
+        .last_tick()
+        .checked_add(
+            u64::try_from(start.elapsed().as_millis())
+                .map_err(|_| issue(DomainPhaseDiagnostic::Closure, DomainCause::Deadline))?,
+        )
+        .ok_or_else(|| issue(DomainPhaseDiagnostic::Closure, DomainCause::Deadline))?;
+    let observed_main = match (actual.main_pid, actual.start_ticks) {
+        (0, 0) => None,
+        (pid, start_ticks) if pid != 0 && start_ticks != 0 => {
+            Some(DomainProcessObservation { pid, start_ticks })
+        }
+        _ => {
+            return Err(issue(
+                DomainPhaseDiagnostic::Closure,
+                DomainCause::Correspondence,
+            ));
+        }
+    };
+    let observation = DomainClosureTreeObservation {
+        sample: DomainClosureObservation {
+            identity: actual.identity,
+            configuration: domain.intent.configuration.clone(),
+            scope: domain.intent.effect.scope.clone(),
+            binding_main: binding.main.clone(),
+            observed_main,
+            direct_members: actual.direct_members,
+            populated: actual.populated,
+            restart_prevented: actual.restart_prevented,
+            cpu_micros: actual.cpu_micros,
+            memory_peak: actual.memory_peak,
+            observed_at: at,
+            basis: ids.basis.clone(),
+        },
+        nodes,
+    };
+    observation
+        .validate()
+        .map_err(|_| issue(DomainPhaseDiagnostic::Closure, DomainCause::Correspondence))?;
+    store
+        .admit(
+            key,
+            operation(
+                &kernel,
+                ids,
+                observation_id,
+                DomainEvent::ClosureTreeObserved {
                     domain: ids.domain.clone(),
                     observation,
                     at,

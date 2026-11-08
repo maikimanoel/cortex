@@ -304,6 +304,102 @@ impl DomainClosureObservation {
         Ok(())
     }
 }
+/// One bounded cgroup-node capture. Paths are relative to the exact retained
+/// root incarnation; this is a non-atomic observation, not a process fence.
+#[derive(Clone, PartialEq, Eq)]
+pub struct DomainCgroupObservation {
+    /// Empty for the root; otherwise a bounded relative child path.
+    pub relative_path: String,
+    /// Observed filesystem device, equal to the root device.
+    pub device: u64,
+    /// Observed nonzero inode, distinct within the captured tree.
+    pub inode: u64,
+    /// Population readback for this node and its descendants.
+    pub populated: bool,
+    /// Observed direct members of this node, including birth identity.
+    pub members: Vec<DomainProcessObservation>,
+}
+/// Matched bounded tree traversals around a native post-cancellation sample.
+/// No field asserts whole-domain, handle, snapshot or final-usage proof.
+#[derive(Clone, PartialEq, Eq)]
+pub struct DomainClosureTreeObservation {
+    /// Original bounded identity/scope/configuration/time capture.
+    pub sample: DomainClosureObservation,
+    /// Root and connected descendants, at most 32 nodes and 64 total members.
+    pub nodes: Vec<DomainCgroupObservation>,
+}
+impl DomainClosureTreeObservation {
+    /// Validate correspondence and bounds, without authenticating OS facts or
+    /// turning two non-atomic traversals into closure evidence.
+    pub fn validate(&self) -> Result<(), DomainError> {
+        self.sample.validate()?;
+        if self.nodes.is_empty() || self.nodes.len() > 32 {
+            return Err(DomainError::Structure);
+        }
+        let root = &self.nodes[0];
+        if !root.relative_path.is_empty()
+            || root.device != self.sample.identity.cgroup_device
+            || root.inode != self.sample.identity.cgroup_inode
+            || root.populated != self.sample.populated
+            || root.members != self.sample.direct_members
+        {
+            return Err(DomainError::Correspondence);
+        }
+        let mut paths = BTreeSet::new();
+        let mut inodes = BTreeSet::new();
+        let mut members = BTreeSet::new();
+        for node in &self.nodes {
+            if node.device != root.device
+                || node.inode == 0
+                || !inodes.insert(node.inode)
+                || !paths.insert(node.relative_path.clone())
+                || node.relative_path.len() > 1024
+                || (!node.populated && !node.members.is_empty())
+            {
+                return Err(DomainError::Structure);
+            }
+            if !node.relative_path.is_empty() {
+                let parts: Vec<_> = node.relative_path.split('/').collect();
+                if parts.len() > 8
+                    || parts.iter().any(|part| {
+                        part.is_empty()
+                            || *part == "."
+                            || *part == ".."
+                            || !part
+                                .bytes()
+                                .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+                    })
+                {
+                    return Err(DomainError::Structure);
+                }
+                let parent = node
+                    .relative_path
+                    .rsplit_once('/')
+                    .map_or("", |(parent, _)| parent);
+                let parent_node = self
+                    .nodes
+                    .iter()
+                    .find(|candidate| candidate.relative_path == parent)
+                    .ok_or(DomainError::Correspondence)?;
+                if !paths.contains(parent) || !parent_node.populated && node.populated {
+                    return Err(DomainError::Correspondence);
+                }
+            }
+            for member in &node.members {
+                if member.pid == 0
+                    || member.start_ticks == 0
+                    || !members.insert(member.pid)
+                    || members.len() > 64
+                    || member.pid == self.sample.binding_main.pid
+                        && member != &self.sample.binding_main
+                {
+                    return Err(DomainError::Correspondence);
+                }
+            }
+        }
+        Ok(())
+    }
+}
 /// Missing proof within the native direct-member observation boundary. These
 /// reasons do not reinterpret a separately retained legacy closure receipt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -335,7 +431,7 @@ pub enum ClosureProofGap {
 /// retry or authority; a retained receipt remains separately caller-asserted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DomainClosureInspection {
-    /// Number of immutable partial readbacks retained (at most 32).
+    /// Number of partial readbacks retained (at most 32 of each encoding).
     pub retained_observations: usize,
     /// A separate legacy closure decision already exists in the journal.
     pub receipt_recorded: bool,
@@ -500,6 +596,15 @@ pub enum DomainEvent {
         /// Must equal the unchanged observation tick.
         at: u64,
     },
+    /// Retain a bounded recursive capture without asserting closure or refund.
+    ClosureTreeObserved {
+        /// Exact previously bound domain.
+        domain: DomainId,
+        /// Matched non-atomic tree capture and corresponding sample.
+        observation: DomainClosureTreeObservation,
+        /// Must equal the unchanged sample tick.
+        at: u64,
+    },
     /// Settle covered present capacity without changing historical Unknown.
     Closed {
         /// Exact proof and resource coverage.
@@ -547,6 +652,7 @@ impl DomainEvent {
             | Self::Bound { domain, .. }
             | Self::BoundObserved { domain, .. }
             | Self::ClosureObserved { domain, .. }
+            | Self::ClosureTreeObserved { domain, .. }
             | Self::ReleaseRequested { domain, .. }
             | Self::Unknown { domain, .. }
             | Self::Report { domain, .. }
@@ -563,6 +669,7 @@ impl DomainEvent {
             | Self::Bound { at, .. }
             | Self::BoundObserved { at, .. }
             | Self::ClosureObserved { at, .. }
+            | Self::ClosureTreeObserved { at, .. }
             | Self::ReleaseRequested { at, .. }
             | Self::Unknown { at, .. }
             | Self::Report { at, .. }
@@ -604,6 +711,8 @@ pub struct DomainRecord {
     pub cancelled_at: Option<u64>,
     /// Immutable bounded partial readbacks, separate from accepted closure.
     pub closure_observations: Vec<DomainClosureObservation>,
+    /// Immutable recursive native captures; no closure or final usage implied.
+    pub closure_tree_observations: Vec<DomainClosureTreeObservation>,
     /// Explicit administrative decision only.
     pub disposition: AdministrativeDisposition,
     /// Applicable final closure and dimension-specific disposition, if present.
@@ -622,7 +731,17 @@ impl DomainRecord {
         if !self.cancelled {
             missing.push(ClosureProofGap::DurableCancellation);
         }
-        match self.closure_observations.last() {
+        let latest = self
+            .closure_observations
+            .last()
+            .into_iter()
+            .chain(
+                self.closure_tree_observations
+                    .last()
+                    .map(|tree| &tree.sample),
+            )
+            .max_by_key(|sample| sample.observed_at);
+        match latest {
             None => missing.push(ClosureProofGap::ClosureObservation),
             Some(o) => {
                 if o.populated {
@@ -636,6 +755,18 @@ impl DomainRecord {
                 }
             }
         }
+        if self.closure_tree_observations.last().is_some_and(|tree| {
+            tree.nodes
+                .iter()
+                .any(|node| node.populated || !node.members.is_empty())
+        }) {
+            if !missing.contains(&ClosureProofGap::PopulatedDomain) {
+                missing.push(ClosureProofGap::PopulatedDomain);
+            }
+            if !missing.contains(&ClosureProofGap::RemainingMembers) {
+                missing.push(ClosureProofGap::RemainingMembers);
+            }
+        }
         missing.extend([
             ClosureProofGap::WholeDomainCoverage,
             ClosureProofGap::HelperCoverage,
@@ -644,7 +775,8 @@ impl DomainRecord {
             ClosureProofGap::FinalConsumption,
         ]);
         DomainClosureInspection {
-            retained_observations: self.closure_observations.len(),
+            retained_observations: self.closure_observations.len()
+                + self.closure_tree_observations.len(),
             receipt_recorded: self.closure.is_some(),
             missing,
         }
@@ -911,6 +1043,7 @@ impl DomainProjection {
                     cancelled: false,
                     cancelled_at: None,
                     closure_observations: vec![],
+                    closure_tree_observations: vec![],
                     disposition: AdministrativeDisposition::Active,
                     closure: None,
                     settlements: vec![],
@@ -1023,6 +1156,10 @@ impl DomainProjection {
                                 .closure_observations
                                 .last()
                                 .is_some_and(|old| old.observed_at >= *at)
+                            || record
+                                .closure_tree_observations
+                                .last()
+                                .is_some_and(|old| old.sample.observed_at >= *at)
                         {
                             return Err(DomainError::Correspondence);
                         }
@@ -1039,6 +1176,48 @@ impl DomainProjection {
                             }
                         }
                         record.closure_observations.push(observation.clone());
+                    }
+                    DomainEvent::ClosureTreeObserved {
+                        observation, at, ..
+                    } => {
+                        observation.validate()?;
+                        let sample = &observation.sample;
+                        let binding = record
+                            .binding_observation
+                            .as_ref()
+                            .ok_or(DomainError::Correspondence)?;
+                        if !record.cancelled
+                            || record.closure.is_some()
+                            || sample.observed_at != *at
+                            || record.cancelled_at.is_none_or(|cancel| *at < cancel)
+                            || record.identity.as_ref() != Some(&sample.identity)
+                            || sample.configuration != record.intent.configuration
+                            || sample.scope != record.intent.effect.scope
+                            || sample.binding_main != binding.main
+                            || record
+                                .closure_observations
+                                .last()
+                                .is_some_and(|old| old.observed_at >= *at)
+                            || record
+                                .closure_tree_observations
+                                .last()
+                                .is_some_and(|old| old.sample.observed_at >= *at)
+                        {
+                            return Err(DomainError::Correspondence);
+                        }
+                        if record.closure_tree_observations.len() >= 32 {
+                            return Err(DomainError::Full);
+                        }
+                        for member in observation.nodes.iter().flat_map(|node| &node.members) {
+                            if binding
+                                .direct_members
+                                .iter()
+                                .any(|old| old.pid == member.pid && old != member)
+                            {
+                                return Err(DomainError::Correspondence);
+                            }
+                        }
+                        record.closure_tree_observations.push(observation.clone());
                     }
                     DomainEvent::Closed { receipt, .. }
                     | DomainEvent::RecoveredClosed { receipt, .. }

@@ -14,6 +14,8 @@ fields!(DomainProcessObservation;pid,start_ticks);
 fields!(DomainControlReadback;cpu_quota_us,cpu_period_us,memory_bytes,swap_bytes,tasks,runtime_max_micros,timeout_stop_micros,restart_prevented,kill_control_group,no_new_privileges,send_sigkill,remain_after_exit);
 fields!(DomainBindingObservation;identity,configuration,main,direct_members,controls,populated,basis);
 fields!(DomainClosureObservation;identity,configuration,scope,binding_main,observed_main,direct_members,populated,restart_prevented,cpu_micros,memory_peak,observed_at,basis);
+fields!(DomainCgroupObservation;relative_path,device,inode,populated,members);
+fields!(DomainClosureTreeObservation;sample,nodes);
 fields!(ConsumptionObservation;dimension,measured);
 fields!(ClosureReceipt;domain,identity,configuration,scope,whole_domain,restart_prevented,snapshot_safe,quiescent,released,consumption,evidence);
 impl Wire for DomainEvent {
@@ -51,6 +53,22 @@ impl Wire for DomainEvent {
                 }
                 json!([
                     "closure-observed-v1",
+                    domain.write()?,
+                    observation.write()?,
+                    at
+                ])
+            }
+            Self::ClosureTreeObserved {
+                domain,
+                observation,
+                at,
+            } => {
+                observation.validate().map_err(|_| bad())?;
+                if observation.sample.observed_at != *at {
+                    return Err(bad());
+                }
+                json!([
+                    "closure-tree-observed-v1",
                     domain.write()?,
                     observation.write()?,
                     at
@@ -158,6 +176,20 @@ impl Wire for DomainEvent {
                     return Err(bad());
                 }
                 Self::ClosureObserved {
+                    domain: read(&a[1])?,
+                    observation,
+                    at,
+                }
+            }
+            "closure-tree-observed-v1" => {
+                let a = arr(v, 4)?;
+                let observation: DomainClosureTreeObservation = read(&a[2])?;
+                observation.validate().map_err(|_| bad())?;
+                let at = read(&a[3])?;
+                if observation.sample.observed_at != at {
+                    return Err(bad());
+                }
+                Self::ClosureTreeObserved {
                     domain: read(&a[1])?,
                     observation,
                     at,

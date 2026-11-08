@@ -1511,3 +1511,7 @@ CAP-WFL-001/004, CAP-EVD-003, CAP-HRN-001/002, CAP-MEM-001, CAP-SEC-002 and
 CAP-CLI-004 owners. Sampled direct membership and usage remain partial observations,
 not authenticated whole-domain closure, final accounting or resource settlement.
 Full capability statuses and operational prerequisites remain unchanged.
+
+The bounded recursive native closure readback reuses these existing owners.
+Subtree observations remain non-atomic and cannot supply helper, retained-stream,
+snapshot or final-use proof, settle capacity, or change capability status.

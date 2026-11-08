@@ -367,3 +367,30 @@ pub fn observed_cancelled(k: &mut CoordinationKernel, i: &DomainIntent) {
         },
     );
 }
+
+/// Synthetic connected hierarchy. This supplies no stream or snapshot witness.
+pub fn closure_tree_observation(i: &DomainIntent, at: u64) -> DomainClosureTreeObservation {
+    let mut sample = closure_observation(i, at);
+    sample.populated = true;
+    let root = DomainCgroupObservation {
+        relative_path: String::new(),
+        device: sample.identity.cgroup_device,
+        inode: sample.identity.cgroup_inode,
+        populated: true,
+        members: vec![],
+    };
+    let child = DomainCgroupObservation {
+        relative_path: "child".into(),
+        device: root.device,
+        inode: root.inode + 1,
+        populated: true,
+        members: vec![DomainProcessObservation {
+            pid: 910001,
+            start_ticks: 910002,
+        }],
+    };
+    DomainClosureTreeObservation {
+        sample,
+        nodes: vec![root, child],
+    }
+}

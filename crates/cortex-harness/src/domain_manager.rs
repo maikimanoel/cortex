@@ -389,6 +389,14 @@ impl SystemdNonceDomain {
         intent: &DomainIntent,
         end: Instant,
     ) -> Result<ManagedObservation, DomainDiagnostic> {
+        self.read_observation(intent, end, false)
+    }
+    fn read_observation(
+        &mut self,
+        intent: &DomainIntent,
+        end: Instant,
+        cleanup: bool,
+    ) -> Result<ManagedObservation, DomainDiagnostic> {
         self.corresponds(intent)?;
         let reply = bounded(
             self.connection.call_method(
@@ -538,7 +546,8 @@ impl SystemdNonceDomain {
             ticks(main)
                 .map_err(|e| issue(DomainPhaseDiagnostic::Identity, DomainCause::Io(e.kind())))?
         };
-        if populated
+        let require_main_membership = if cleanup { main != 0 } else { populated };
+        if require_main_membership
             && (main == 0
                 || bounded_metadata(&PathBuf::from(format!("/proc/{main}/cgroup")))?.trim()
                     != format!("0::{cgroup}"))
@@ -576,7 +585,7 @@ impl SystemdNonceDomain {
             });
         }
         if member_ids(&bounded_metadata(&path.join("cgroup.procs"))?)? != observed_members
-            || (populated
+            || (require_main_membership
                 && !direct_members.contains(&DomainProcessObservation {
                     pid: main,
                     start_ticks: start,
@@ -645,35 +654,116 @@ impl SystemdNonceDomain {
             restart_prevented: true,
         })
     }
+    pub(crate) fn observe_tree(
+        &mut self,
+        intent: &DomainIntent,
+        end: Instant,
+    ) -> Result<(ManagedObservation, Vec<DomainCgroupObservation>), DomainDiagnostic> {
+        let before = self.read_observation(intent, end, true)?;
+        let path =
+            Path::new("/sys/fs/cgroup").join(before.identity.control_group.trim_start_matches('/'));
+        let nodes = crate::domain_tree::capture(
+            &path,
+            before.identity.cgroup_device,
+            before.identity.cgroup_inode,
+            &before.identity.control_group,
+            end,
+            |pid, group| {
+                let (start_ticks, before_bytes) = bounded_ticks(pid)?;
+                let membership = bounded_metadata(&PathBuf::from(format!("/proc/{pid}/cgroup")))?;
+                let (after_ticks, after_bytes) = bounded_ticks(pid)?;
+                if membership.trim() != format!("0::{group}") || after_ticks != start_ticks {
+                    return Err(issue(
+                        DomainPhaseDiagnostic::Closure,
+                        DomainCause::Correspondence,
+                    ));
+                }
+                Ok((
+                    DomainProcessObservation { pid, start_ticks },
+                    before_bytes + membership.len() + after_bytes,
+                ))
+            },
+        )?;
+        let after = self.read_observation(intent, end, true)?;
+        let root = nodes
+            .first()
+            .ok_or_else(|| issue(DomainPhaseDiagnostic::Closure, DomainCause::Correspondence))?;
+        if before.identity != after.identity
+            || root.populated != after.populated
+            || root.members != after.direct_members
+        {
+            return Err(issue(
+                DomainPhaseDiagnostic::Closure,
+                DomainCause::Correspondence,
+            ));
+        }
+        Ok((after, nodes))
+    }
     pub(crate) fn stop(
         &mut self,
         intent: &DomainIntent,
         identity: &DomainIdentity,
         end: Instant,
     ) -> Result<(), DomainDiagnostic> {
-        if self.observe(intent, end)?.identity != *identity {
-            return Err(issue(
+        // Cleanup can target the exact still-retained incarnation even after
+        // its main exits. This reads the same manager/configuration/cgroup
+        // correspondence; preparation and release keep the strict live-main path.
+        let observed = self.read_observation(intent, end, true)?;
+        checked_stop_request(&observed, identity, || {
+            let reply = bounded(
+                self.connection.call_method(
+                    Some(self.manager.as_str()),
+                    MANAGER_PATH,
+                    Some(MANAGER_INTERFACE),
+                    "StopUnit",
+                    &(unit(intent), "fail"),
+                ),
                 DomainPhaseDiagnostic::Closure,
-                DomainCause::Correspondence,
-            ));
-        }
-        let reply = bounded(
-            self.connection.call_method(
-                Some(self.manager.as_str()),
-                MANAGER_PATH,
-                Some(MANAGER_INTERFACE),
-                "StopUnit",
-                &(unit(intent), "fail"),
-            ),
-            DomainPhaseDiagnostic::Closure,
-            end,
-        )?;
-        let _: OwnedObjectPath = reply
-            .body()
-            .deserialize()
-            .map_err(|_| issue(DomainPhaseDiagnostic::Closure, DomainCause::Protocol))?;
-        Ok(())
+                end,
+            )?;
+            let _: OwnedObjectPath = reply
+                .body()
+                .deserialize()
+                .map_err(|_| issue(DomainPhaseDiagnostic::Closure, DomainCause::Protocol))?;
+            Ok(())
+        })
     }
+}
+/// Gate a single stop request, not a claim of stop success or quiescence. The
+/// manager's name-based call still assumes the documented cooperating operator
+/// and trusted manager; it is not an atomic conditional StopUnit operation.
+fn checked_stop_request<T>(
+    observed: &ManagedObservation,
+    expected: &DomainIdentity,
+    request: impl FnOnce() -> Result<T, DomainDiagnostic>,
+) -> Result<T, DomainDiagnostic> {
+    observed
+        .identity
+        .validate()
+        .map_err(|_| issue(DomainPhaseDiagnostic::Closure, DomainCause::Correspondence))?;
+    expected
+        .validate()
+        .map_err(|_| issue(DomainPhaseDiagnostic::Closure, DomainCause::Correspondence))?;
+    if observed.identity != *expected {
+        return Err(issue(
+            DomainPhaseDiagnostic::Closure,
+            DomainCause::Correspondence,
+        ));
+    }
+    request()
+}
+fn bounded_ticks(pid: u32) -> Result<(u64, usize), DomainDiagnostic> {
+    let text = bounded_metadata(&PathBuf::from(format!("/proc/{pid}/stat")))?;
+    let tail = text
+        .rsplit_once(')')
+        .ok_or_else(|| issue(DomainPhaseDiagnostic::Closure, DomainCause::Protocol))?
+        .1;
+    let ticks = tail
+        .split_whitespace()
+        .nth(19)
+        .and_then(|value| value.parse().ok())
+        .ok_or_else(|| issue(DomainPhaseDiagnostic::Closure, DomainCause::Protocol))?;
+    Ok((ticks, text.len()))
 }
 fn member_ids(value: &str) -> Result<Vec<u32>, DomainDiagnostic> {
     let mut members = std::collections::BTreeSet::new();
@@ -1082,5 +1172,59 @@ mod tests {
         assert_eq!(result.unwrap_err().cause, DomainCause::Deadline);
         assert_eq!(key_number("populated 0\npopulated 1\n", "populated"), None);
         assert_eq!(key_number("populated 0\nfrozen 0\n", "populated"), Some(0));
+    }
+    #[test]
+    fn exact_cleanup_stop_allows_absent_parent_but_not_reused_incarnation() {
+        use crate::domain_runtime::tests::fixture;
+        let (_, intent) = fixture::coordinator();
+        let identity = fixture::identity(&intent);
+        let observed = ManagedObservation {
+            identity: identity.clone(),
+            main_pid: 0,
+            start_ticks: 0,
+            populated: true,
+            direct_members: vec![DomainProcessObservation {
+                pid: 42,
+                start_ticks: 7,
+            }],
+            controls: fixture::binding(&intent).controls,
+            cpu_micros: None,
+            memory_peak: None,
+            restart_prevented: true,
+        };
+        let mut requests = 0;
+        checked_stop_request(&observed, &identity, || {
+            requests += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(requests, 1);
+        for case in 0..5 {
+            let mut wrong = identity.clone();
+            match case {
+                0 => wrong.invocation = "different-invocation".into(),
+                1 => wrong.manager = "different-manager".into(),
+                2 => wrong.cgroup_inode += 1,
+                3 => wrong.boot = "different-boot".into(),
+                _ => wrong.request = OperationId::new("different-request").unwrap(),
+            }
+            assert!(
+                checked_stop_request(&observed, &wrong, || {
+                    requests += 1;
+                    Ok(())
+                })
+                .is_err()
+            );
+            assert_eq!(requests, 1);
+        }
+        let lost: Result<(), DomainDiagnostic> = checked_stop_request(&observed, &identity, || {
+            requests += 1;
+            Err(issue(
+                DomainPhaseDiagnostic::Closure,
+                DomainCause::ManagerRefusal,
+            ))
+        });
+        assert_eq!(lost.unwrap_err().cause, DomainCause::ManagerRefusal);
+        assert_eq!(requests, 2); // No retry, absence inference or cleanup claim.
     }
 }
