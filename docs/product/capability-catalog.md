@@ -125,6 +125,14 @@ remain unchanged.
 
 ## A. Core, task contracts, and operational authority
 
+The owner-authorized [trusted two-task functional integration](../architecture/functional-two-task-fixtures.md)
+connects the existing bounded Core, Workflow, Evidence, Storage, Harness and CLI
+contracts with actual producer/consumer artifact bytes and controlled development
+reconstruction. It adds bounded artifact capture and schema-3 retained Evidence
+correspondence. Full capability statuses remain unchanged; source acceptance
+mechanisms and candidate-scoped executed evidence remain distinct. It supplies no
+qualified containment, provider operation or operational multi-executor readiness.
+
 ### CAP-CORE-001
 
 **Name:** Foundation task contracts and source-revision syntax.

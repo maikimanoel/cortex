@@ -9,6 +9,9 @@
 pub mod host_preflight;
 
 #[cfg(target_os = "linux")]
+pub mod artifact;
+
+#[cfg(target_os = "linux")]
 pub mod domain_bootstrap;
 
 #[cfg(target_os = "linux")]
