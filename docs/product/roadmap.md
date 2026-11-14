@@ -407,6 +407,14 @@ authority follows. The retained 27-increment topology and milestone states are u
 
 ## 005: governed evolution and evaluation
 
+The separately authorized [bounded evaluation foundation](../architecture/evaluation-foundation.md)
+provides non-effectful measurement contracts, complete in-memory attempt accounting
+and deterministic provider-free instrumentation before full 005-A prerequisites.
+It implements no live comparison arm, durable evaluation schema or protected
+assessment runtime, selects no DEC-008 numerical/publication policy, and changes no
+milestone or complete capability status. Connected measurement of an unmerged
+functional GPE candidate requires its own exact integration gate and later authority.
+
 CAP-EVL-002 evaluates defect-learning and rule changes against missed defects,
 false positives, regressions, maintainability, resource use and reviewer burden;
 test-count growth alone is not an improvement result. CAP-EVL-001 owns the protected

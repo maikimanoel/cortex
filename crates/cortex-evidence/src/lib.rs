@@ -6,6 +6,9 @@
 /// Advisory exact method qualification; no adoption, execution or authority.
 pub mod methods;
 
+/// Bounded engineering evaluation observations and advisory comparison inspection.
+pub mod evaluation;
+
 /// Evidence-backed, replayable non-effectful program coordination.
 pub mod program;
 
