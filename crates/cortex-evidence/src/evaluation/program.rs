@@ -11,8 +11,9 @@ use cortex_core::{
         AttemptId as ProgramAttemptId, AttemptStatus, OperationId, ProgramDefinition,
         operational::{
             EffectEvent, EffectId, EffectOutcome, EffectRecord, EffectScope, EffectStatus,
+            Reconciliation,
         },
-        supervision::ProcessCompletion,
+        supervision::{InterruptionReason, ProcessCompletion},
     },
 };
 use std::collections::BTreeSet;
@@ -96,6 +97,14 @@ pub enum ProgramCoverageIssue {
     StaleGeneration(ProgramAttemptId),
     /// The supplied kernel no longer retains the exact original operation witnesses.
     WitnessChanged(ProgramAttemptId),
+    /// A known canonical result has no faithful execution representation here.
+    /// The registered attempt remains incomplete; this never settles uncertainty.
+    UnrepresentedOutcome {
+        /// Exact retained canonical attempt.
+        attempt: ProgramAttemptId,
+        /// Actual retained mechanism outcome, not an engineering assessment.
+        outcome: EffectOutcome,
+    },
 }
 /// Inspection is advisory; only the existing ledger may retain in-memory invalidation.
 #[derive(Debug, Clone)]
@@ -296,11 +305,29 @@ impl ProgramEvaluation {
         if !outcome_matches(effect, &observation.execution) {
             return Err(ProgramEvaluationError::Outcome);
         }
-        // Actual exit-code detail cannot be manufactured from a synthetic report.
-        if observation.origin == ObservationOrigin::DevelopmentFixture
-            && let AttemptExecution::Observed(ExecutionObservation::Exited { code }) = observation.execution
-            && (effect.process_spec.is_none() || !effect.process_observations.iter().any(|observation| matches!(observation.completion, ProcessCompletion::Exited { code: Some(actual), signal: None } if actual >= 0 && actual as u32 == code)))
-        { return Err(ProgramEvaluationError::Correspondence); }
+        // Available capture detail constrains even a synthetic evaluation report.
+        // A mechanism failure after exit zero cannot become a successful execution
+        // population entry: it remains explicit UnrepresentedOutcome in inspection.
+        if has_terminal_capture(effect) {
+            if captured_execution(effect)
+                .map(AttemptExecution::Observed)
+                .as_ref()
+                != Some(&observation.execution)
+            {
+                return Err(ProgramEvaluationError::Correspondence);
+            }
+        } else if observation.origin == ObservationOrigin::DevelopmentFixture
+            && matches!(
+                observation.execution,
+                AttemptExecution::Observed(
+                    ExecutionObservation::Exited { .. }
+                        | ExecutionObservation::TimedOut
+                        | ExecutionObservation::Cancelled
+                )
+            )
+        {
+            return Err(ProgramEvaluationError::Correspondence);
+        }
         self.ledger.record(observation)?;
         Ok(())
     }
@@ -336,6 +363,22 @@ impl ProgramEvaluation {
             }
         }
         for retained in &self.attempts {
+            if let Ok(effect) = self.effect(kernel, &retained.mapping)
+                && matches!(
+                    effect.status,
+                    EffectStatus::Reported | EffectStatus::ReconciledReported
+                )
+                && has_terminal_capture(effect)
+                && let Some(outcome) = canonical_outcome(effect)
+                && captured_execution(effect).is_none_or(|execution| {
+                    !outcome_matches(effect, &AttemptExecution::Observed(execution))
+                })
+            {
+                coverage.push(ProgramCoverageIssue::UnrepresentedOutcome {
+                    attempt: retained.mapping.scope.attempt.clone(),
+                    outcome,
+                });
+            }
             if self.check_retained(kernel, retained).is_err() {
                 coverage.push(ProgramCoverageIssue::WitnessChanged(
                     retained.mapping.scope.attempt.clone(),
@@ -534,24 +577,25 @@ fn outcome_matches(effect: &EffectRecord, outcome: &AttemptExecution) -> bool {
         | EffectStatus::DispatchUncertain
         | EffectStatus::Running
         | EffectStatus::CancellationRequested => matches!(outcome, AttemptExecution::Unknown),
-        EffectStatus::Reported | EffectStatus::ReconciledReported => match (effect.report, outcome)
-        {
-            (
-                Some(EffectOutcome::Succeeded),
-                AttemptExecution::Observed(ExecutionObservation::Exited { code: 0 }),
-            ) => true,
-            (
-                Some(EffectOutcome::Failed),
-                AttemptExecution::Observed(ExecutionObservation::Exited { code }),
-            ) => *code != 0,
-            (
-                Some(EffectOutcome::Interrupted),
-                AttemptExecution::Observed(
-                    ExecutionObservation::TimedOut | ExecutionObservation::Cancelled,
-                ),
-            ) => true,
-            _ => false,
-        },
+        EffectStatus::Reported | EffectStatus::ReconciledReported => {
+            match (canonical_outcome(effect), outcome) {
+                (
+                    Some(EffectOutcome::Succeeded),
+                    AttemptExecution::Observed(ExecutionObservation::Exited { code: 0 }),
+                ) => true,
+                (
+                    Some(EffectOutcome::Failed),
+                    AttemptExecution::Observed(ExecutionObservation::Exited { code }),
+                ) => *code != 0,
+                (
+                    Some(EffectOutcome::Interrupted),
+                    AttemptExecution::Observed(
+                        ExecutionObservation::TimedOut | ExecutionObservation::Cancelled,
+                    ),
+                ) => true,
+                _ => false,
+            }
+        }
         EffectStatus::CancelledBeforeDispatch | EffectStatus::ReconciledAbsent => matches!(
             outcome,
             AttemptExecution::Observed(
@@ -560,4 +604,40 @@ fn outcome_matches(effect: &EffectRecord, outcome: &AttemptExecution) -> bool {
         ),
         EffectStatus::Reserved => false,
     }
+}
+
+fn canonical_outcome(effect: &EffectRecord) -> Option<EffectOutcome> {
+    effect.report.or_else(|| match &effect.reconciliation {
+        Some(Reconciliation::Observed { outcome, .. }) => Some(*outcome),
+        _ => None,
+    })
+}
+fn has_terminal_capture(effect: &EffectRecord) -> bool {
+    effect.process_observations.iter().any(|observation| {
+        matches!(
+            observation.completion,
+            ProcessCompletion::Exited { .. } | ProcessCompletion::Interrupted { .. }
+        )
+    })
+}
+fn captured_execution(effect: &EffectRecord) -> Option<ExecutionObservation> {
+    effect
+        .process_observations
+        .iter()
+        .find_map(|observation| match observation.completion {
+            ProcessCompletion::Exited {
+                code: Some(code),
+                signal: None,
+            } if code >= 0 => Some(ExecutionObservation::Exited { code: code as u32 }),
+            ProcessCompletion::Interrupted {
+                reason:
+                    InterruptionReason::Timeout
+                    | InterruptionReason::StartupTimeout
+                    | InterruptionReason::IdleTimeout,
+            } => Some(ExecutionObservation::TimedOut),
+            ProcessCompletion::Interrupted {
+                reason: InterruptionReason::Cancelled,
+            } => Some(ExecutionObservation::Cancelled),
+            _ => None,
+        })
 }

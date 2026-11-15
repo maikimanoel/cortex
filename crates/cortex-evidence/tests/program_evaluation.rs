@@ -8,7 +8,7 @@ mod supervised;
 use cortex_core::{
     binding::*,
     evaluation::*,
-    program::{operational::*, *},
+    program::{operational::*, supervision::*, *},
 };
 use cortex_evidence::{
     ExecutionObservation,
@@ -671,4 +671,242 @@ fn declaration_profile_must_match_canonical_prepared_process() {
             assert!(e.ledger().attempts().is_empty());
         }
     }
+}
+
+// Pure canonical models of captured process facts; these never spawn a process.
+fn captured_attempt() -> (
+    CoordinationKernel,
+    ProgramEvaluation,
+    ProgramAttempt,
+    ProcessSpec,
+) {
+    let (configured, scope, process) = supervised::configured_kernel(None);
+    let mut kernel =
+        CoordinationKernel::new_supervised_fixture(configured.initial().clone()).unwrap();
+    let spec = specification(&kernel);
+    let mut arms = spec.arms().to_vec();
+    for arm in &mut arms {
+        arm.configuration.envelope = supervised::demand();
+        arm.configuration.harness = source("captured-fixture-observation");
+    }
+    let spec = replace_arms(&spec, arms);
+    let mut map = mappings(&spec);
+    for item in &mut map {
+        item.process_profile = Some(process.profile.clone());
+    }
+    let mut evaluation = ProgramEvaluation::new(
+        &kernel,
+        EvaluationLedger::new(spec.clone(), oracles(&spec)).unwrap(),
+        map,
+    )
+    .unwrap();
+    for operation in configured.operations() {
+        kernel.admit(operation.clone()).unwrap();
+    }
+    supervised::prepare(&mut kernel, &scope, &process);
+    let attempt = ProgramAttempt {
+        definition: AttemptDefinition {
+            id: cortex_core::evaluation::AttemptId::new("captured").unwrap(),
+            trial: TrialId::new("trial-A").unwrap(),
+            predecessor: None,
+            executor: source("synthetic-executor"),
+            start_ns: None,
+        },
+        scope: scope.clone(),
+        claim: OperationId::new("claim-A").unwrap(),
+        package: OperationId::new("package-A").unwrap(),
+        reservation: OperationId::new("reserve").unwrap(),
+        effect: supervised::intent(&scope).id,
+    };
+    evaluation
+        .register_attempt(&kernel, attempt.clone())
+        .unwrap();
+    let dispatch = supervised::dispatch_operation(&kernel, &scope);
+    kernel.admit(dispatch).unwrap();
+    (kernel, evaluation, attempt, process)
+}
+fn capture_terminal(
+    kernel: &mut CoordinationKernel,
+    attempt: &ProgramAttempt,
+    process: &ProcessSpec,
+    completion: ProcessCompletion,
+    malformed: bool,
+) {
+    let mut captured = supervised::observation(
+        process,
+        4,
+        completion,
+        Quiescence::DirectChildReapedStreamsClosed,
+    );
+    captured.malformed_output = malformed;
+    supervised::effect(
+        kernel,
+        "terminal-capture",
+        EffectEvent::ProcessObserved {
+            effect: attempt.effect.clone(),
+            scope: attempt.scope.clone(),
+            at: 4,
+            observation: captured,
+        },
+    );
+}
+#[test]
+fn captured_cancellation_cannot_be_relabelled_as_timeout() {
+    let (mut k, mut e, a, process) = captured_attempt();
+    capture_terminal(
+        &mut k,
+        &a,
+        &process,
+        ProcessCompletion::Interrupted {
+            reason: InterruptionReason::Cancelled,
+        },
+        false,
+    );
+    assert!(matches!(
+        e.record(
+            &k,
+            observation(
+                &e,
+                &a,
+                AttemptExecution::Observed(ExecutionObservation::TimedOut)
+            )
+        ),
+        Err(ProgramEvaluationError::Correspondence)
+    ));
+    e.record(
+        &k,
+        observation(
+            &e,
+            &a,
+            AttemptExecution::Observed(ExecutionObservation::Cancelled),
+        ),
+    )
+    .unwrap();
+    assert_eq!(gpe(&inspect(&mut e, &k)).population.interrupted, 1);
+}
+#[test]
+fn captured_timeout_cannot_be_relabelled_as_cancellation() {
+    let (mut k, mut e, a, process) = captured_attempt();
+    capture_terminal(
+        &mut k,
+        &a,
+        &process,
+        ProcessCompletion::Interrupted {
+            reason: InterruptionReason::Timeout,
+        },
+        false,
+    );
+    assert!(matches!(
+        e.record(
+            &k,
+            observation(
+                &e,
+                &a,
+                AttemptExecution::Observed(ExecutionObservation::Cancelled)
+            )
+        ),
+        Err(ProgramEvaluationError::Correspondence)
+    ));
+    e.record(
+        &k,
+        observation(
+            &e,
+            &a,
+            AttemptExecution::Observed(ExecutionObservation::TimedOut),
+        ),
+    )
+    .unwrap();
+}
+#[test]
+fn zero_exit_with_known_mechanism_failure_remains_explicitly_unrepresented() {
+    let (mut k, mut e, a, process) = captured_attempt();
+    capture_terminal(
+        &mut k,
+        &a,
+        &process,
+        ProcessCompletion::Exited {
+            code: Some(0),
+            signal: None,
+        },
+        true,
+    );
+    assert_eq!(
+        k.fixture_effects().effects()[0].report,
+        Some(EffectOutcome::Failed)
+    );
+    assert!(matches!(
+        e.record(&k, observation(&e, &a, exited(0))),
+        Err(ProgramEvaluationError::Outcome)
+    ));
+    let r = inspect(&mut e, &k);
+    assert!(
+        r.coverage
+            .contains(&ProgramCoverageIssue::UnrepresentedOutcome {
+                attempt: a.scope.attempt,
+                outcome: EffectOutcome::Failed
+            })
+    );
+    assert_eq!(gpe(&r).population.incomplete, 1);
+    assert_eq!(gpe(&r).population.completed, 0);
+    assert_eq!(
+        r.evaluation.eligibility,
+        ComparisonEligibility::NotComparable
+    );
+}
+#[test]
+fn unsupported_captured_interruption_remains_visible_without_invented_cause() {
+    let (mut k, mut e, a, process) = captured_attempt();
+    capture_terminal(
+        &mut k,
+        &a,
+        &process,
+        ProcessCompletion::Interrupted {
+            reason: InterruptionReason::Io,
+        },
+        false,
+    );
+    assert!(matches!(
+        e.record(
+            &k,
+            observation(
+                &e,
+                &a,
+                AttemptExecution::Observed(ExecutionObservation::Cancelled)
+            )
+        ),
+        Err(ProgramEvaluationError::Correspondence)
+    ));
+    let r = inspect(&mut e, &k);
+    assert!(
+        r.coverage
+            .contains(&ProgramCoverageIssue::UnrepresentedOutcome {
+                attempt: a.scope.attempt,
+                outcome: EffectOutcome::Interrupted
+            })
+    );
+    assert_eq!(gpe(&r).population.incomplete, 1);
+    assert!(!r.evaluation.primary_outcome_available);
+}
+#[test]
+fn explicit_model_reconciliation_can_supply_previously_unreported_outcome() {
+    let (mut k, mut e, a) = registered("reconciled", "A");
+    unknown(&mut k, &a);
+    settle_for_retry(&mut k, &a, EffectOutcome::Failed);
+    let effect = &k.fixture_effects().effects()[0];
+    assert_eq!(effect.status, EffectStatus::ReconciledReported);
+    assert!(effect.report.is_none());
+    e.record(&k, observation(&e, &a, exited(7))).unwrap();
+    assert_eq!(gpe(&inspect(&mut e, &k)).population.failed, 1);
+}
+#[test]
+fn later_model_reconciliation_cannot_rewrite_original_unknown_observation() {
+    let (mut k, mut e, a) = registered("retained", "A");
+    unknown(&mut k, &a);
+    e.record(&k, observation(&e, &a, AttemptExecution::Unknown))
+        .unwrap();
+    let original = e.ledger().attempts()[0].observation().cloned().unwrap();
+    settle_for_retry(&mut k, &a, EffectOutcome::Failed);
+    assert!(e.record(&k, observation(&e, &a, exited(7))).is_err());
+    assert!(e.ledger().attempts()[0].observation() == Some(&original));
+    assert_eq!(gpe(&inspect(&mut e, &k)).population.unknown, 1);
 }
