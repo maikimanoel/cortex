@@ -1,0 +1,327 @@
+//! Deterministic admission faults; no physical worker or historical store.
+use super::supervised::supervised_fixture as supervised;
+use super::*;
+use crate::program_store::diagnostics::{ADMISSION_OBSERVATION_CAPACITY, Recorder};
+use crate::program_store::diagnostics::{AdmissionErrorKind, AdmissionOutcome};
+use cortex_core::program::operational::EffectStatus;
+use cortex_core::program::scheduling::Resource;
+
+fn prepared(f: &Temp) -> (ProgramStore, CoordinationKernel, Operation) {
+    let (k, scope, _) = supervised::prepared_kernel(None);
+    let store =
+        ProgramStore::create_supervised_fixture(&f.store(), &key(), k.initial().clone(), limits())
+            .unwrap();
+    for operation in k.operations() {
+        store.admit(&key(), operation.clone()).unwrap();
+    }
+    let input = supervised::dispatch_operation(&k, &scope);
+    (store, k, input)
+}
+fn stages(report: &AdmissionDiagnostics) -> Vec<AdmissionStage> {
+    report.events().map(|e| e.stage).collect()
+}
+fn assert_complete(report: &AdmissionDiagnostics, input: &Operation, store: &ProgramStore) {
+    assert_eq!(report.operation(), Some(&input.id));
+    assert_eq!(report.expected(), Some(input.expected));
+    assert_eq!(report.store(), Some(store.id()));
+    assert!(report.complete());
+    assert!(!report.overflowed());
+    assert_eq!(report.dropped_events(), 0);
+    let times: Vec<_> = report.events().map(|e| e.elapsed).collect();
+    assert!(times.windows(2).all(|w| w[0] <= w[1]));
+    assert!(times.len() <= ADMISSION_OBSERVATION_CAPACITY);
+}
+
+#[test]
+fn diagnostic_stale_predecessor_rejects_without_mutation() {
+    let f = Temp::new();
+    let store = create(&f);
+    let mut input = claim();
+    input.expected = 99;
+    let before = snapshot(&f);
+    let mut report = AdmissionDiagnostics::default();
+    let error = store
+        .admit_with_diagnostics(&key(), input.clone(), &mut report)
+        .unwrap_err();
+    assert_eq!(error.completion, Completion::Rejected);
+    assert!(matches!(error.error, ProgramStoreError::Domain(_)));
+    assert_complete(&report, &input, &store);
+    let events = stages(&report);
+    assert!(events.contains(&AdmissionStage::RollbackAcknowledged));
+    assert!(!events.contains(&AdmissionStage::Insert));
+    assert!(!events.contains(&AdmissionStage::CommitAcknowledged));
+    assert_eq!(snapshot(&f), before);
+    assert_eq!(store.load(&key(), Access::ReadOnly).unwrap().revision(), 0);
+    eprintln!("CASE A: stale predecessor rejected; no write; real rollback acknowledged");
+}
+
+#[test]
+fn diagnostic_postcommit_deadline_retains_dispatch_and_prevents_relaunch() {
+    let f = Temp::new();
+    let (store, kernel, input) = prepared(&f);
+    let mut report = AdmissionDiagnostics::default();
+    let result = store.admit_diagnostic_observed(
+        &key(),
+        input.clone(),
+        |_, _| {},
+        |_| panic!("uncertain admission must not launch"),
+        &mut report,
+        Some(AdmissionFault::Deadline(Stage::AfterCommit)),
+    );
+    let error = result.unwrap_err();
+    assert_eq!(error.completion, Completion::Indeterminate);
+    assert!(matches!(error.error, ProgramStoreError::Deadline));
+    assert_complete(&report, &input, &store);
+    let events = stages(&report);
+    assert!(events.contains(&AdmissionStage::CommitAcknowledged));
+    assert!(!events.contains(&AdmissionStage::RollbackRequested));
+    assert_eq!(
+        events.last(),
+        Some(&AdmissionStage::Finished(AdmissionOutcome::Failed(
+            Completion::Indeterminate
+        )))
+    );
+    let reopened = ProgramStore::open(&f.store(), &key(), Access::ReadOnly, limits()).unwrap();
+    let loaded = reopened.load(&key(), Access::ReadOnly).unwrap();
+    assert_eq!(loaded.revision(), kernel.revision() + 1);
+    assert!(loaded.operations().last() == Some(&input));
+    assert_eq!(
+        loaded.fixture_effects().effects()[0].status,
+        EffectStatus::DispatchUncertain
+    );
+    for resource in [
+        Resource::WorkerSlots,
+        Resource::ElapsedMillis,
+        Resource::OutputBytes,
+    ] {
+        assert_eq!(
+            loaded.fixture_effects().accounted(resource.clone()),
+            kernel.fixture_effects().accounted(resource)
+        );
+    }
+    assert!(matches!(
+        reopened
+            .reconcile(&key(), kernel.initial(), &input, Access::ReadOnly)
+            .unwrap(),
+        Reconciliation::Present(_)
+    ));
+    let (receipt, launch) = store
+        .dispatch_fixture(&key(), input.clone(), |_| panic!("duplicate relaunched"))
+        .unwrap();
+    assert!(receipt.duplicate && launch.is_none());
+    let mut changed = input;
+    changed.id = OperationId::new("changed-uncertain-dispatch").unwrap();
+    changed.expected = loaded.revision();
+    assert!(
+        store
+            .dispatch_fixture(&key(), changed, |_| panic!("changed identity relaunched"))
+            .is_err()
+    );
+    eprintln!(
+        "CASE B: commit acknowledged, caller Indeterminate, persisted dispatch uncertain, reservation retained, no launch"
+    );
+}
+
+#[test]
+fn diagnostic_precommit_deadline_rolls_back_and_retains_reservation() {
+    let f = Temp::new();
+    let (store, kernel, input) = prepared(&f);
+    let before = snapshot(&f);
+    let mut report = AdmissionDiagnostics::default();
+    let error = store
+        .admit_diagnostic_observed(
+            &key(),
+            input.clone(),
+            |_, _| {},
+            |_| panic!("rolled-back operation launched"),
+            &mut report,
+            Some(AdmissionFault::Deadline(Stage::BeforeCommit)),
+        )
+        .unwrap_err();
+    assert_eq!(error.completion, Completion::RolledBack);
+    assert!(matches!(error.error, ProgramStoreError::Deadline));
+    assert_complete(&report, &input, &store);
+    let events = stages(&report);
+    assert!(events.contains(&AdmissionStage::InsertAcknowledged));
+    assert!(events.contains(&AdmissionStage::RollbackAcknowledged));
+    assert!(!events.contains(&AdmissionStage::Commit));
+    let loaded = store.load(&key(), Access::ReadOnly).unwrap();
+    assert!(loaded.operations() == kernel.operations());
+    assert!(loaded.fixture_effects() == kernel.fixture_effects());
+    assert!(matches!(
+        store
+            .reconcile(&key(), kernel.initial(), &input, Access::ReadOnly)
+            .unwrap(),
+        Reconciliation::Absent
+    ));
+    // SQLite can update file metadata during a proven rollback; compare payload bytes.
+    let after = snapshot(&f);
+    assert_eq!(
+        before.iter().map(|v| (&v.0, &v.1)).collect::<Vec<_>>(),
+        after.iter().map(|v| (&v.0, &v.1)).collect::<Vec<_>>()
+    );
+    eprintln!("CASE C: inserted then rollback acknowledged; predecessor and reservation retained");
+}
+
+#[test]
+fn diagnostic_denied_rollback_reports_uncertainty_without_absence_claim() {
+    let f = Temp::new();
+    let (store, kernel, input) = prepared(&f);
+    let mut report = AdmissionDiagnostics::default();
+    let error = store
+        .admit_diagnostic_observed(
+            &key(),
+            input.clone(),
+            |_, _| {},
+            |_| panic!("unacknowledged rollback launched"),
+            &mut report,
+            Some(AdmissionFault::RollbackDenied),
+        )
+        .unwrap_err();
+    assert_eq!(error.completion, Completion::Indeterminate);
+    assert!(matches!(error.error, ProgramStoreError::Deadline));
+    assert_complete(&report, &input, &store);
+    let events = stages(&report);
+    assert!(events.contains(&AdmissionStage::InsertAcknowledged));
+    assert!(events.contains(&AdmissionStage::RollbackRequested));
+    assert!(events.contains(&AdmissionStage::RollbackFailed));
+    assert!(!events.contains(&AdmissionStage::RollbackAcknowledged));
+    assert!(!events.contains(&AdmissionStage::CommitAcknowledged));
+    assert_eq!(
+        events.last(),
+        Some(&AdmissionStage::Finished(AdmissionOutcome::Failed(
+            Completion::Indeterminate
+        )))
+    );
+    // A fresh observation after connection teardown is distinct from the failed
+    // rollback acknowledgement. It must not relabel the retained failure.
+    let loaded = store.load(&key(), Access::ReadOnly).unwrap();
+    assert!(loaded.fixture_effects() == kernel.fixture_effects());
+    assert_eq!(error.completion, Completion::Indeterminate);
+    eprintln!(
+        "CASE D: SQLite denied actual ROLLBACK; Indeterminate retained; connection-close cleanup is not an acknowledgement"
+    );
+}
+
+#[test]
+fn diagnostic_postlock_deadline_has_no_transaction_or_rollback() {
+    let f = Temp::new();
+    let store = create(&f);
+    let input = claim();
+    let before = snapshot(&f);
+    let mut report = AdmissionDiagnostics::default();
+    let error = store
+        .admit_diagnostic_observed(
+            &key(),
+            input.clone(),
+            |_, _| {},
+            |_| (),
+            &mut report,
+            Some(AdmissionFault::Deadline(Stage::AfterLock)),
+        )
+        .unwrap_err();
+    assert_eq!(error.completion, Completion::Rejected);
+    assert!(matches!(error.error, ProgramStoreError::Deadline));
+    assert_complete(&report, &input, &store);
+    assert_eq!(
+        stages(&report),
+        vec![
+            AdmissionStage::Entered,
+            AdmissionStage::LockRequested,
+            AdmissionStage::LockAcquired,
+            AdmissionStage::LocationCheck,
+            AdmissionStage::PostLockDeadlineCheck,
+            AdmissionStage::Failure(AdmissionErrorKind::Deadline),
+            AdmissionStage::Finished(AdmissionOutcome::Failed(Completion::Rejected)),
+        ]
+    );
+    assert_eq!(snapshot(&f), before);
+    eprintln!("CASE E: deterministic post-lock deadline; no connection, transaction or write");
+}
+
+#[test]
+fn diagnostic_duplicate_and_disabled_paths_keep_identical_receipts_and_journal() {
+    let f = Temp::new();
+    let store = create(&f);
+    let input = claim();
+    let normal = store.admit(&key(), input.clone()).unwrap();
+    let before = snapshot(&f);
+    let mut report = AdmissionDiagnostics::default();
+    let duplicate = store
+        .admit_with_diagnostics(&key(), input.clone(), &mut report)
+        .unwrap();
+    assert_eq!(duplicate.ordinal, normal.ordinal);
+    assert!(duplicate.duplicate);
+    assert_complete(&report, &input, &store);
+    assert!(!stages(&report).contains(&AdmissionStage::CommitAcknowledged));
+    assert_eq!(
+        stages(&report).last(),
+        Some(&AdmissionStage::Finished(AdmissionOutcome::Duplicate {
+            ordinal: 1
+        }))
+    );
+    assert_eq!(snapshot(&f), before);
+    assert_eq!(
+        std::mem::size_of::<crate::program_store::diagnostics::Disabled>(),
+        0
+    );
+}
+
+#[test]
+fn diagnostic_overflow_is_explicit_and_cannot_be_complete() {
+    let mut report = AdmissionDiagnostics::default();
+    let input = claim();
+    report.begin(StoreId::from_bytes([7; 16]), &input);
+    for _ in 0..ADMISSION_OBSERVATION_CAPACITY {
+        report.record(AdmissionStage::Connect);
+    }
+    report.finish(&Ok((
+        AdmissionReceipt {
+            store: StoreId::from_bytes([7; 16]),
+            ordinal: 1,
+            duplicate: false,
+        },
+        Some(()),
+    )));
+    assert_eq!(report.events().count(), ADMISSION_OBSERVATION_CAPACITY);
+    assert_eq!(report.dropped_events(), 2);
+    assert!(report.overflowed());
+    assert!(!report.complete());
+}
+
+#[test]
+fn diagnostic_unwind_retains_incomplete_prefix_and_redacts_sensitive_identity() {
+    let f = Temp::new();
+    let store = create(&f);
+    let mut input = claim();
+    input.id = OperationId::new("sensitive-operation-sentinel").unwrap();
+    let mut report = AdmissionDiagnostics::default();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        store.admit_diagnostic_observed(
+            &key(),
+            input.clone(),
+            |stage, _| {
+                if stage == Stage::BeforeCommit {
+                    panic!("controlled interruption");
+                }
+            },
+            |_| (),
+            &mut report,
+            None,
+        )
+    }));
+    assert!(result.is_err());
+    assert!(!report.complete());
+    assert!(!report.overflowed());
+    assert_eq!(report.operation(), Some(&input.id));
+    let text = format!("{report:?}");
+    assert!(!text.contains("sensitive-operation-sentinel"));
+    assert!(!text.contains(f.0.to_str().unwrap()));
+    assert!(!stages(&report).contains(&AdmissionStage::RollbackAcknowledged));
+    assert!(
+        !stages(&report)
+            .iter()
+            .any(|s| matches!(s, AdmissionStage::Finished(_)))
+    );
+    assert_eq!(store.load(&key(), Access::ReadOnly).unwrap().revision(), 0);
+}

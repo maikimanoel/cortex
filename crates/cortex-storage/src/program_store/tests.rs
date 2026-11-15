@@ -1,4 +1,5 @@
 //! GPE-B S1/O1/F1: exact reconstruction, real competing processes and crash cuts.
+mod admission_diagnostics;
 use super::*;
 #[path = "../../../cortex-evidence/tests/support/program.rs"]
 pub(super) mod fixture;
