@@ -1,5 +1,6 @@
 //! Explicit read-only encrypted program inspection; no hidden recovery or dispatch.
 mod domains;
+mod evidence;
 mod schema;
 use cortex_core::{
     parallel::*,
@@ -157,6 +158,9 @@ fn view(k: &CoordinationKernel, schema: Schema) -> Value {
         ]);
     }
     schema.project_program(&mut result);
+    if schema == Schema::Current {
+        evidence::project(k, &mut result);
+    }
     result
 }
 fn fixture_view(
@@ -487,6 +491,11 @@ pub fn run(args: impl Iterator<Item = OsString>, out: &mut impl Write) -> Result
             }
         }
         if schema == Schema::Current {
+            writeln!(
+                out,
+                "Retained Evidence (no live revalidation): {}",
+                value["evidence"]
+            )?;
             writeln!(
                 out,
                 "Retained resource accounting (not measured enforcement): {}",

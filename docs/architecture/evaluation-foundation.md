@@ -27,11 +27,11 @@ Existing Core, Evidence, Storage, Harness and CLI dependency directions remain.
 There is no new crate, dependency, workflow journal, storage codec, allocation
 authority, permission mechanism, executor adapter or public command.
 
-The earlier functional two-task candidate is a separate, unintegrated PR. This
-foundation builds from main without its implementation. Future instrumentation of
-that connected process/journal scenario requires its exact separately accepted
-integration and a new measurement contract; it must not duplicate its coordination
-machinery or treat an unmerged branch as main.
+The integrated [functional two-task path](functional-two-task-fixtures.md) retains
+its existing coordination, Evidence and effect owners. The composition regression
+below observes only B's verification criterion. Whole-program measurement still
+requires its own measurement contract and applicable acceptance/policy decisions;
+it must not duplicate coordination machinery or treat an unmerged branch as main.
 
 ## Input contracts and populations
 
@@ -188,3 +188,15 @@ statistical significance, general safety, real provider operation or full
 CAP-EVL-001/002 status follows from these mechanisms. Durable records, protected
 evaluation execution and any actual controlled strategy comparison require their
 remaining decisions and separately authorized integration.
+
+The combined [two-task fixture](../../crates/cortex-cli/tests/gpe_functional.rs)
+also registers one consumer-verification evaluation attempt before B starts,
+using its actual binding, oracle profile, process specification and reserved demand.
+It imports the same canonical B Evidence into the advisory consumer after the
+workflow, while the journal retains dependency invalidation and a synthetic Unknown.
+Rejected oracle/origin changes leave the registered observation absent; a valid
+functional PASS supplies no engineering acceptance, timing or missing metrics.
+Byte/metadata comparisons ensure evaluation leaves the operational journal intact.
+This case covers only B's verification criterion; the workflow retains its separate
+complete effect population. It is a composition regression, not a controlled
+strategy comparison or whole-program productivity measurement.
