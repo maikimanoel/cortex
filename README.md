@@ -142,6 +142,14 @@ selector or new CLI command, and broader Skills/Workflow capabilities remain pla
 
 ## Run locally
 
+The bounded [two-task functional fixture path](docs/architecture/functional-two-task-fixtures.md)
+connects real trusted producer/consumer artifact bytes, independent Evidence,
+dependency release and controlled journal reconstruction. Harness supplies bounded
+artifact capture; schema 3 inspection exposes retained Evidence and release-witness
+identities. This provider-free development mechanism qualifies no containment
+backend and establishes no operational multi-executor readiness. Run its connected
+test with `cargo test --locked --offline -p cortex-cli --test gpe_functional`.
+
 Use Linux with Rustup, Git supporting `--no-lazy-fetch`, and util-linux
 `/usr/bin/prlimit`. Tests should run as a non-root user for permission fixtures.
 Rust 1.99.1 with rustfmt and Clippy is pinned in `rust-toolchain.toml`; Rust 2024

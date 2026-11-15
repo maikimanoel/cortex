@@ -385,6 +385,16 @@ Stage 3/4 retain their remaining gates. No canonical milestone state advances.
 
 ### Bounded provider-free host qualification follow-up
 
+The separately owner-authorized GPE-FUNC-2T
+[functional fixture increment](../architecture/functional-two-task-fixtures.md)
+connects actual artifact production, independent assessment, per-consumer release,
+no-child reconstruction and separately admitted consumption through the existing
+kernel/journal/Harness. It also exercises scoped invalidation, retained synthetic
+Unknown and read-only compatibility. This trusted provider-free development path
+does not satisfy operational host, provider, multi-executor or protected integration
+gates and advances no complete capability or milestone status. Actual reviewed
+candidate results belong to its private handoff.
+
 After accepted Stage 2B fixture integration, the owner authorizes the
 [host qualification and hardening extension](../architecture/host-qualification.md)
 under the retained Host-plan, E1/AUTH1, T1-contract, H1 and F1-host responsibilities.
