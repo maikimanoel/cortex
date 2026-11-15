@@ -397,6 +397,14 @@ reviewer governance or publication permission. Separate model and harness effect
 where the study can identify them; otherwise report the confounding. Dependencies: CAP-EVL-001/002
 and CAP-EVO-002. No benchmark score or superiority claim is approved here.
 
+The owner separately authorizes a bounded provider-free
+[evaluation foundation](../architecture/evaluation-foundation.md): frozen typed
+specifications, in-memory complete populations, exact canonical Evidence support,
+missingness/invalidation and advisory reporting. This is a development sequencing
+exception, not a resolution of DEC-008. Durable evaluation privacy/schema,
+held-out protection/access, reviewer governance, actual comparison design,
+numerical/practical thresholds and publication authority remain unselected.
+
 ## DEC-009
 
 **Public source scope and controlled transition — owner approved.** Following

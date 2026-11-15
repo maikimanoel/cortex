@@ -17,6 +17,9 @@ pub mod parallel;
 /// Immutable method definitions and bounded exact inspection; no execution or authority.
 pub mod methods;
 
+/// Bounded engineering evaluation contracts; no execution or comparison authority.
+pub mod evaluation;
+
 /// Bounded metadata-only program coordination contracts.
 pub mod program;
 

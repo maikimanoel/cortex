@@ -1,5 +1,7 @@
 #![cfg(target_os = "linux")]
 //! GPE-FUNC-2T Q0-Q7: real trusted artifacts through the existing production owners.
+#[path = "support/gpe_evaluation.rs"]
+mod gpe_evaluation;
 use cortex_cli::inspect_candidate;
 use cortex_core::{
     CandidateId, TaskContract, TaskId,
@@ -770,15 +772,11 @@ struct Verification {
     examination: Examination,
     assessment: AssessmentId,
 }
-fn observe(
-    c: &Campaign,
-    store: &ProgramStore,
+fn verification_context(
+    k: &CoordinationKernel,
     name: &str,
-    bytes: &[u8],
-    expected: &[u8],
     captured: Option<&CapturedArtifact>,
-) -> Verification {
-    let k = load(c, store);
+) -> (CandidateBindingContract, VerificationProfile) {
     let task_contract = k
         .state()
         .definition()
@@ -800,6 +798,17 @@ fn observe(
         task_contract.candidate().clone(),
     );
     let profile = VerificationProfile::new(Provenance::new("parent literal byte oracle, separately defined from producer and consumer algorithms", &format!("artifact=prime-list revision=1 source={} task={name}; {}", contract.candidate().commit().as_str(), captured.map(|a| format!("sha256={} effect={} observation={}:{}", a.sha256(), a.effect().as_str(), a.observation().scope(), a.observation().sequence())).unwrap_or_else(|| "consumer file and consumed-byte receipt".into())), "offline finite trusted fixture; exact-byte criterion; no authentication or containment claim").unwrap(), "gpe-func-2t-oracle-v1", "trusted-local-linux", &[("cortex-harness", "supervised-fixture-v1"), ("oracle", "literal-v1")]).unwrap();
+    (contract, profile)
+}
+fn observe(
+    c: &Campaign,
+    store: &ProgramStore,
+    name: &str,
+    bytes: &[u8],
+    expected: &[u8],
+    captured: Option<&CapturedArtifact>,
+) -> Verification {
+    let (contract, profile) = verification_context(&load(c, store), name, captured);
     let observation = ObservationId::new(&format!("oracle-{name}"), 1).unwrap();
     let before = inspect_candidate(
         &c.fixture,
@@ -1385,6 +1394,8 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
     c.mark("Q3");
     let (b, bid, bspec, bpin) = prepare(&c, &store, "B", "B", Some(&captured));
     process(&c, &store, &b, &bid, &bspec, "B");
+    let consumer_evaluation =
+        gpe_evaluation::ConsumerEvaluation::new(&c, &load(&c, &store), &b, &bid);
     let dispatch_b = run(&c, &store, &b, &bid, &bspec, &bpin, "B");
     assert_eq!(
         fs::read(c.output.join("B.consumed")).unwrap(),
@@ -1733,4 +1744,5 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
     );
     c.record("final.txt", &format!("program=gpe-func-2t baseline=1 journal_revision={} operations={} fixture_children=2 terminated=true synthetic_unknown=1 elapsed_accounted={} output_accounted={}\n", final_state.revision(), final_state.operations().len(), held, output + 4096));
     c.mark("Q7-main");
+    consumer_evaluation.finish(&c, &reopened, &bv);
 }

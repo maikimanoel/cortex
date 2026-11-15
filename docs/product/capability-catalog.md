@@ -1226,6 +1226,16 @@ unmeasured dimensions explicitly.
 controlled comparisons.
 **Decisions:** DEC-008/012; no superiority or publication claim exists.
 
+The separately owner-authorized [evaluation foundation](../architecture/evaluation-foundation.md)
+adds bounded immutable Core specifications and an Evidence-owned in-memory attempt
+registry, canonical endpoint inspection and advisory reporting. Its mechanisms
+retain failed/incomplete populations, missing metrics and invalidated comparison
+contexts; they do not execute strategy runtimes or establish productivity gains.
+The [proposed controlled protocol](../evaluation/controlled-comparison-protocol.md)
+retains DEC-008/005/012 selections. Full CAP-EVL-001/002 statuses remain PLANNED;
+test source and candidate-scoped execution evidence are distinct. Persistence,
+protected-oracle execution and actual controlled effectiveness studies remain gated.
+
 ## K. Context, prompting, and interoperability
 
 ### CAP-CTX-001

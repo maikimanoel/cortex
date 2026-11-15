@@ -150,6 +150,14 @@ identities. This provider-free development mechanism qualifies no containment
 backend and establishes no operational multi-executor readiness. Run its connected
 test with `cargo test --locked --offline -p cortex-cli --test gpe_functional`.
 
+The bounded [evaluation foundation](docs/architecture/evaluation-foundation.md)
+provides Core contracts and Evidence-owned in-memory attempt accounting/reporting
+under CAP-EVL-001/002. Its actual finite Git/clock development fixture exercises
+the public libraries without a provider or qualified strategy runtime:
+`cargo test --locked --offline -p cortex-cli --test evaluation`.
+The [controlled comparison protocol](docs/evaluation/controlled-comparison-protocol.md)
+retains DEC-008 decisions; this foundation demonstrates no productivity improvement.
+
 Use Linux with Rustup, Git supporting `--no-lazy-fetch`, and util-linux
 `/usr/bin/prlimit`. Tests should run as a non-root user for permission fixtures.
 Rust 1.99.1 with rustfmt and Clippy is pinned in `rust-toolchain.toml`; Rust 2024
