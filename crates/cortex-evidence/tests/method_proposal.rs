@@ -791,7 +791,18 @@ fn terminal_assessments_remain_unchanged_after_stale_case_examination() {
             .collect::<Vec<_>>(),
         terminal
     );
-    assert!(r.inspection().records()[0].invalidation_reason().is_some());
+    let stale = &r.inspection().claims()[0].cases()[0].witnesses()[0];
+    assert_eq!(stale.validity(), Some(Validity::Stale));
+    let first_capture = stale.compared_to().unwrap().clone();
+    assert_eq!(first_capture.sequence(), 3);
+    assert_eq!(r.inspection().records()[0].invalidation_reason(), None);
+    drop(r);
+    f.cases[0].current = capture(&f.cases[0].binding, 4, false);
+    let observed_again = compose(&mut f, &t, Mode::Normal).unwrap();
+    assert_eq!(selected(&observed_again).qualification, None);
+    let retained = &observed_again.inspection().claims()[0].cases()[0].witnesses()[0];
+    assert_eq!(retained.validity(), Some(Validity::Stale));
+    assert_eq!(retained.compared_to(), Some(&first_capture));
 }
 #[test]
 fn composition_neither_adopts_method_nor_mutates_program() {
