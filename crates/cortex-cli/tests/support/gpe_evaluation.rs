@@ -136,7 +136,18 @@ impl ConsumerEvaluation {
                 candidate: inspect_candidate(
                     &c.fixture,
                     &v.contract,
-                    ObservationId::new("consumer-evaluation-source", 1).unwrap(),
+                    ObservationId::new(
+                        v.examination.candidate.as_ref().unwrap().id().scope(),
+                        v.examination
+                            .candidate
+                            .as_ref()
+                            .unwrap()
+                            .id()
+                            .sequence()
+                            .checked_add(1)
+                            .unwrap(),
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 acceptance: None,
