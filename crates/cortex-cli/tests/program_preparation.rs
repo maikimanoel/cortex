@@ -184,11 +184,20 @@ fn exact_two_task_sequence_requires_existing_evidence_backed_release() {
         &[proposal("A"), proposal("B")],
         &[
             mapping(&kernel, "A", revision),
-            mapping(&kernel, "B", revision),
+            mapping(&kernel, "B", revision + 2),
         ],
     )
     .unwrap();
-    // Canonical fanout places held B before A; no dependency release is invented.
+    // A reaches B/C/F; B reaches C/F. Canonical transitive fanout places A first.
+    assert_eq!(
+        result
+            .decisions()
+            .iter()
+            .map(|decision| decision.scheduling.task.as_str())
+            .collect::<Vec<_>>(),
+        ["A", "B"]
+    );
+    // Held B still supplies the exact predecessor after the prepared A pair.
     assert_eq!(ids(&result), ["prepared-claim-A", "prepared-package-A"]);
     for operation in result.into_operations() {
         kernel.admit(operation).unwrap();
