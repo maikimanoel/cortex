@@ -126,3 +126,20 @@ qualifies a host or establishes operational multi-executor readiness.
 Provider execution, arbitrary/untrusted workers, physical host qualification,
 historical resource disposition, protected integration and broader GPE completion
 remain separately gated.
+
+## Fresh development identity and composed consumers
+
+The optional `CORTEX_GPE_FIXTURE_NAMESPACE` accepts a bounded explicit ASCII
+namespace before fixture effects. Test-only identity support qualifies program,
+task, attempt, operation, package and release correspondence consistently. An
+exclusive private marker refuses reuse; the namespaced scenario permits at most
+two designated fixture children. The unparameterized fixture retains its original
+identity behavior. This is not a production identity registry or retry policy.
+
+The connected development path composes explicit advisory method selection,
+non-effectful scheduling preparation and the complete declared evaluation
+population. It retains launch manifests and exact executable bytes privately
+before dispatch. Controller build/inspection helpers are distinct from the two
+audited fixture executors, which invoke no tools or descendants. All actual
+checks require candidate-scoped execution evidence; this source is not a test-run
+record, live evaluation, host qualification or protected integration.

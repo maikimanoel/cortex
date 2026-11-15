@@ -1,119 +1,213 @@
-//! Cross-candidate guard for one consumer-verification criterion, not a study of
-//! whole-program throughput. Operational history retains its separate population.
+//! Complete development population; no manufactured task endpoint assessment.
 use super::*;
 use cortex_core::evaluation as contract;
-use cortex_evidence::evaluation;
-
-pub(super) struct ConsumerEvaluation {
-    ledger: evaluation::EvaluationLedger,
+use cortex_evidence::evaluation::{
+    self,
+    program::{ProgramAttempt, ProgramEvaluation, ProgramTrial},
+};
+use std::time::Instant;
+pub(super) struct WorkflowEvaluation {
+    evaluation: ProgramEvaluation,
     spec: contract::EvaluationSpecification,
     oracles: Vec<evaluation::OracleContract>,
-    attempt: contract::AttemptId,
+    clock: Instant,
+    releases: Vec<(String, evaluation::TrialRelease)>,
+    starts: Vec<(String, u64)>,
 }
-
-impl ConsumerEvaluation {
-    /// Register the real consumer's verification attempt before its child starts.
-    pub(super) fn new(
-        c: &Campaign,
-        kernel: &CoordinationKernel,
-        scope: &EffectScope,
-        effect: &EffectId,
-    ) -> Self {
-        let (binding, profile) = verification_context(kernel, "B", None);
-        let source_identity = contract::SourceIdentity::new(
-            binding.candidate().clone(),
-            contract::SourceTreeId::new(&git(&c.fixture, &["rev-parse", "HEAD^{tree}"])).unwrap(),
-        )
-        .unwrap();
-        let retained = kernel
-            .fixture_effects()
-            .effects()
-            .iter()
-            .find(|record| &record.intent.id == effect)
-            .unwrap();
-        assert!(&retained.intent.scope == scope);
-        assert!(retained.process_observations.is_empty());
-        let case = contract::EvaluationCase {
-            id: contract::CaseId::new("consumer-verification").unwrap(),
-            revision: binding.revision(),
-            contract: binding,
-            source: source_identity,
-            oracle: source("independent-consumer-literal-v1"),
-            family: contract::WorkloadFamily::DependencyHeavy,
-            access: contract::CaseAccess::Development,
-        };
-        let arm = contract::ComparisonArm {
-            strategy: contract::ExecutionStrategy::GovernedParallelEngineering,
-            configuration: contract::RunConfiguration {
-                reference: source("connected-consumer-verification"),
-                profile: contract::ExecutionProfile::ProviderFreeFixture,
-                model: contract::ModelConfiguration::NotApplicable,
-                tools: vec![source("pinned-rust-1.99.1")],
-                harness: retained.process_spec.as_ref().unwrap().reference.clone(),
-                environment: source("trusted-local-linux"),
-                information: source("exact-consumer-package-and-retained-release"),
-                envelope: retained.intent.demand.clone(),
-            },
-        };
-        let trial = contract::TrialDefinition {
-            id: contract::TrialId::new("consumer-verification").unwrap(),
-            case: case.id.clone(),
-            strategy: arm.strategy,
-            repetition: 1,
-        };
-        let oracles = vec![evaluation::OracleContract {
-            case: case.id.clone(),
-            revision: case.revision,
-            oracle: case.oracle.clone(),
-            profile,
-        }];
-        let spec = contract::EvaluationSpecification::new(
-            source("connected-consumer-verification-specification"),
-            vec![case],
-            vec![arm],
-            vec![trial.clone()],
-            contract::EvaluationLimits::new(1, 1, 1).unwrap(),
-        )
-        .unwrap();
-        let mut ledger = evaluation::EvaluationLedger::new(spec.clone(), oracles.clone()).unwrap();
-        let attempt = contract::AttemptId::new(scope.attempt.as_str()).unwrap();
-        ledger
-            .register_attempt(evaluation::AttemptDefinition {
-                id: attempt.clone(),
-                trial: trial.id,
-                predecessor: None,
-                executor: source("audited-consumer-and-parent-verification"),
-                start_ns: None,
+fn trial(label: &str) -> contract::TrialId {
+    contract::TrialId::new(&fixture_id(&format!("trial-{label}"))).unwrap()
+}
+impl WorkflowEvaluation {
+    pub(super) fn new(c: &Campaign, kernel: &CoordinationKernel) -> Self {
+        let clock = Instant::now();
+        let at = SystemTime::now();
+        let tree =
+            contract::SourceTreeId::new(&git(&c.fixture, &["rev-parse", "HEAD^{tree}"])).unwrap();
+        let cases: Vec<_> = ["A", "B"]
+            .into_iter()
+            .map(|name| {
+                let binding = kernel
+                    .state()
+                    .readiness()
+                    .scope(&task(name))
+                    .unwrap()
+                    .context()
+                    .contract()
+                    .clone();
+                contract::EvaluationCase {
+                    id: contract::CaseId::new(&fixture_id(&format!("case-{name}"))).unwrap(),
+                    revision: binding.revision(),
+                    source: contract::SourceIdentity::new(
+                        binding.candidate().clone(),
+                        tree.clone(),
+                    )
+                    .unwrap(),
+                    contract: binding,
+                    oracle: source(&format!("independent-literal-{name}-v1")),
+                    family: contract::WorkloadFamily::DependencyHeavy,
+                    access: contract::CaseAccess::Development,
+                }
             })
-            .unwrap();
-        let pending = ledger.inspect(&spec, &oracles).unwrap();
-        assert_eq!(pending.arms[0].population.incomplete, 1);
-        assert!(!pending.primary_outcome_available);
+            .collect();
+        let oracles = cases
+            .iter()
+            .zip(["A", "B"])
+            .map(|(case, name)| evaluation::OracleContract {
+                case: case.id.clone(),
+                revision: case.revision,
+                oracle: case.oracle.clone(),
+                profile: verification_context(kernel, name, None).1,
+            })
+            .collect::<Vec<_>>();
+        let configuration = contract::RunConfiguration {
+            reference: source("complete-development-workflow-configuration-v1"),
+            profile: contract::ExecutionProfile::ProviderFreeFixture,
+            model: contract::ModelConfiguration::NotApplicable,
+            tools: vec![source("pinned-rust-1-99-1")],
+            harness: source("native-harness-v1"),
+            environment: source("trusted-local-linux"),
+            information: source("declared-two-task-artifact-workflow"),
+            envelope: demand(),
+        };
+        let mut arms = vec![contract::ComparisonArm {
+            strategy: contract::ExecutionStrategy::GovernedParallelEngineering,
+            configuration: configuration.clone(),
+        }];
+        for (strategy, label) in [
+            (
+                contract::ExecutionStrategy::SequentialExecution,
+                "sequential",
+            ),
+            (
+                contract::ExecutionStrategy::DirectParallelExecution,
+                "direct-parallel",
+            ),
+        ] {
+            let mut future = configuration.clone();
+            future.reference = source(&format!("planned-{label}-unqualified"));
+            future.profile = contract::ExecutionProfile::LiveProvider;
+            future.model = contract::ModelConfiguration::Unestablished;
+            arms.push(contract::ComparisonArm {
+                strategy,
+                configuration: future,
+            });
+        }
+        let mut trials = Vec::new();
+        let mut mappings = Vec::new();
+        for (label, name, repetition) in
+            [("A", "A", 1), ("B", "B", 1), ("synthetic-unknown", "A", 2)]
+        {
+            let t = contract::TrialDefinition {
+                id: trial(label),
+                case: cases[usize::from(name == "B")].id.clone(),
+                strategy: arms[0].strategy,
+                repetition,
+            };
+            mappings.push(ProgramTrial {
+                trial: t.id.clone(),
+                task: task(name),
+                process_profile: Some(source("trusted-direct-child-profile")),
+            });
+            trials.push(t);
+        }
+        for (i, arm) in arms.iter().enumerate().skip(1) {
+            for (case, name) in cases.iter().zip(["A", "B"]) {
+                let t = contract::TrialDefinition {
+                    id: trial(&format!("planned-{i}-{name}")),
+                    case: case.id.clone(),
+                    strategy: arm.strategy,
+                    repetition: 1,
+                };
+                mappings.push(ProgramTrial {
+                    trial: t.id.clone(),
+                    task: task(name),
+                    process_profile: None,
+                });
+                trials.push(t);
+            }
+        }
+        let spec = contract::EvaluationSpecification::new(
+            source("complete-development-workflow-v1"),
+            cases,
+            arms,
+            trials,
+            contract::EvaluationLimits::new(2, 7, 8).unwrap(),
+        )
+        .unwrap();
+        let ledger = evaluation::EvaluationLedger::new(spec.clone(), oracles.clone()).unwrap();
+        let mut evaluation = ProgramEvaluation::new(kernel, ledger, mappings).unwrap();
+        let mut releases = Vec::new();
+        for label in ["A", "B", "synthetic-unknown"] {
+            let release = evaluation::TrialRelease {
+                reference: source(&format!("task-release-{label}")),
+                clock: source("controller-monotonic-clock-lifetime"),
+                at,
+                authorization: source("owner-authorized-bounded-development-scenario"),
+            };
+            evaluation
+                .release_trial(&trial(label), release.clone())
+                .unwrap();
+            releases.push((label.into(), release));
+        }
+        c.record("evaluation-population.txt","declared_cases=2 declared_trials=7 intended_actual_attempts=3 future_arms_not_run=2; third trial is an explicit synthetic Unknown control, not independent work or automatic retry; no accepted endpoint\n");
         Self {
-            ledger,
+            evaluation,
             spec,
             oracles,
-            attempt,
+            clock,
+            releases,
+            starts: Vec::new(),
         }
     }
-
-    /// Actual semantic Evidence cannot accept engineering throughput or change
-    /// the operational journal, including its later invalidation and Unknown.
-    pub(super) fn finish(mut self, c: &Campaign, store: &ProgramStore, v: &Verification) {
+    pub(super) fn register(
+        &mut self,
+        c: &Campaign,
+        store: &ProgramStore,
+        scope: &EffectScope,
+        effect: &EffectId,
+        label: &str,
+    ) {
         let before = snapshot(&c.state);
         let kernel = load(c, store);
-        let case = &self.spec.cases()[0];
-        assert_eq!(&case.contract, &v.contract);
-        assert_eq!(&self.oracles[0].profile, &v.profile);
-        let record = kernel
-            .records()
-            .iter()
-            .find(|record| record.observation().id() == &v.observation)
-            .unwrap()
-            .clone();
+        let start = u64::try_from(self.clock.elapsed().as_nanos()).unwrap();
+        self.evaluation
+            .register_attempt(
+                &kernel,
+                ProgramAttempt {
+                    definition: evaluation::AttemptDefinition {
+                        id: contract::AttemptId::new(scope.attempt.as_str()).unwrap(),
+                        trial: trial(label),
+                        predecessor: None,
+                        executor: source("audited-trusted-fixture-controller"),
+                        start_ns: Some(start),
+                    },
+                    scope: scope.clone(),
+                    claim: op(&format!("claim-{label}")),
+                    package: op(&format!("package-{label}")),
+                    reservation: op(&format!("reserve-{label}")),
+                    effect: effect.clone(),
+                },
+            )
+            .unwrap();
+        self.starts.push((label.into(), start));
+        assert_eq!(snapshot(&c.state), before);
+        assert_eq!(load(c, store).revision(), kernel.revision());
+    }
+    pub(super) fn record(
+        &mut self,
+        c: &Campaign,
+        store: &ProgramStore,
+        scope: &EffectScope,
+        label: &str,
+        execution: evaluation::AttemptExecution,
+    ) {
+        let before = snapshot(&c.state);
+        let kernel = load(c, store);
+        let case = &self.spec.cases()[usize::from(scope.task == task("B"))];
+        let start = self.starts.iter().find(|(id, _)| id == label).unwrap().1;
         let observed = evaluation::AttemptObservation {
-            id: ObservationId::new("consumer-evaluation", 1).unwrap(),
-            attempt: self.attempt.clone(),
+            id: ObservationId::new(&fixture_id(&format!("evaluation-{label}")), 1).unwrap(),
+            attempt: contract::AttemptId::new(scope.attempt.as_str()).unwrap(),
             context: evaluation::ObservationContext {
                 specification: self.spec.reference().clone(),
                 case: case.id.clone(),
@@ -123,92 +217,89 @@ impl ConsumerEvaluation {
                 configuration: self.spec.arms()[0].configuration.clone(),
             },
             origin: evaluation::ObservationOrigin::DevelopmentFixture,
-            execution: evaluation::AttemptExecution::Observed(ExecutionObservation::Exited {
-                code: 0,
-            }),
-            release: None,
-            interval: None,
-            phases: vec![],
-            metrics: evaluation::MetricObservations::default(),
-            endpoint: Some(evaluation::EndpointEvidence {
-                source: case.source.clone(),
-                record,
-                candidate: inspect_candidate(
-                    &c.fixture,
-                    &v.contract,
-                    ObservationId::new(
-                        v.examination.candidate.as_ref().unwrap().id().scope(),
-                        v.examination
-                            .candidate
-                            .as_ref()
-                            .unwrap()
-                            .id()
-                            .sequence()
-                            .checked_add(1)
-                            .unwrap(),
-                    )
-                    .unwrap(),
+            execution,
+            release: Some(
+                self.releases
+                    .iter()
+                    .find(|(id, _)| id == label)
+                    .unwrap()
+                    .1
+                    .clone(),
+            ),
+            interval: Some(
+                evaluation::ElapsedInterval::new(
+                    start,
+                    u64::try_from(self.clock.elapsed().as_nanos()).unwrap(),
+                    evaluation::TimingBasis::MonotonicObservation,
                 )
                 .unwrap(),
-                acceptance: None,
+            ),
+            phases: vec![],
+            metrics: evaluation::MetricObservations::default(),
+            endpoint: None,
+            basis: source(if label == "synthetic-unknown" {
+                "observed-synthetic-unknown-journal-no-child"
+            } else {
+                "actual-terminal-fixture-process-and-byte-oracle"
             }),
-            basis: source("actual-consumer-evidence-no-engineering-acceptance-or-clock"),
             recorded_at: SystemTime::now(),
         };
-        let mut wrong = observed.clone();
-        wrong.context.oracle = source("changed-consumer-oracle");
-        assert!(matches!(
-            self.ledger.record(wrong),
-            Err(evaluation::EvaluationInputError::Correspondence)
-        ));
-        let mut wrong = observed.clone();
-        wrong.origin = evaluation::ObservationOrigin::Synthetic;
-        assert!(matches!(
-            self.ledger.record(wrong),
-            Err(evaluation::EvaluationInputError::ExecutionProfile)
-        ));
-        assert!(self.ledger.attempts()[0].observation().is_none());
-        self.ledger.record(observed).unwrap();
-        let report = self.ledger.inspect(&self.spec, &self.oracles).unwrap();
-        assert_eq!(
-            report.scope,
-            evaluation::MeasurementScope::DevelopmentFixture
+        self.evaluation.record(&kernel, observed).unwrap();
+        assert_eq!(snapshot(&c.state), before);
+        assert_eq!(load(c, store).revision(), kernel.revision());
+    }
+    pub(super) fn finish(mut self, c: &Campaign, store: &ProgramStore) {
+        let before = snapshot(&c.state);
+        let kernel = load(c, store);
+        let result = self
+            .evaluation
+            .inspect(&kernel, &self.spec, &self.oracles)
+            .unwrap();
+        c.record(
+            "evaluation-coverage.txt",
+            &format!("{:?}\n", result.coverage),
         );
-        assert_eq!(report.arms[0].population.completed, 1);
+        let report = &result.evaluation;
+        assert_eq!(report.arms.len(), 3);
+        assert_eq!(report.arms.iter().map(|a| a.trials.len()).sum::<usize>(), 7);
+        assert_eq!(report.arms[0].population.registered, 3);
+        assert_eq!(report.arms[0].population.completed, 2);
+        assert_eq!(report.arms[0].population.unknown, 1);
+        assert_eq!(report.arms[0].population.incomplete, 0);
+        assert_eq!(report.arms[1].population.registered, 0);
+        assert_eq!(report.arms[2].population.registered, 0);
+        assert_eq!(report.arms[0].reported_accepted_trials, 0);
+        assert!(!report.primary_outcome_available);
         assert_eq!(
             report.eligibility,
             evaluation::ComparisonEligibility::NotComparable
         );
         assert_eq!(
-            report.arms[0].trials[0].functional_result,
-            Some(AssessmentResult::Pass)
+            report.scope,
+            evaluation::MeasurementScope::DevelopmentFixture
         );
-        assert_eq!(report.arms[0].reported_accepted_trials, 0);
-        assert_eq!(
-            report.arms[0].trials[0].functional_applicability,
-            Some(Applicability::Applicable)
-        );
-        assert_eq!(
-            report.arms[0].trials[0].functional_validity,
-            Some(Validity::Current)
-        );
-        assert_eq!(report.arms[0].trials[0].reported_primary_elapsed_ns, None);
-        assert!(!report.primary_outcome_available);
-        assert_eq!(
-            self.ledger.attempts()[0]
-                .observation()
-                .unwrap()
-                .metrics
-                .value(evaluation::Metric::CpuTimeNanos),
-            None
-        );
-        let mut output = vec![];
-        report.write_redacted(&mut output).unwrap();
-        let text = String::from_utf8(output).unwrap();
         assert!(
-            text.contains("authority: NONE") && text.contains("improvement claim: NOT_ESTABLISHED")
+            !result.coverage.is_empty(),
+            "material invalidation remains visible"
         );
-        c.record("evaluation.txt", &text);
+        for attempt in self.evaluation.ledger().attempts() {
+            assert_eq!(
+                attempt
+                    .observation()
+                    .unwrap()
+                    .metrics
+                    .value(evaluation::Metric::CpuTimeNanos),
+                None
+            );
+        }
+        let mut bytes = Vec::new();
+        report.write_redacted(&mut bytes).unwrap();
+        c.record("evaluation.txt", &String::from_utf8(bytes).unwrap());
+        self.evaluation
+            .inspect(&kernel, &self.spec, &self.oracles)
+            .unwrap();
+        assert_eq!(snapshot(&c.state), before);
+        assert_eq!(load(c, store).revision(), kernel.revision());
         assert_eq!(
             kernel.fixture_effects().effects().last().unwrap().status,
             EffectStatus::Unknown
@@ -223,17 +314,5 @@ impl ConsumerEvaluation {
                 .demand,
             demand()
         );
-        assert!(
-            kernel
-                .state()
-                .readiness()
-                .scope(&task("B"))
-                .unwrap()
-                .generation()
-                .get()
-                > 1
-        );
-        assert_eq!(snapshot(&c.state), before);
-        assert_eq!(load(c, store).revision(), kernel.revision());
     }
 }

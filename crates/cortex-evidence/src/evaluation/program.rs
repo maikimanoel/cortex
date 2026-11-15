@@ -308,7 +308,7 @@ impl ProgramEvaluation {
         // Available capture detail constrains even a synthetic evaluation report.
         // A mechanism failure after exit zero cannot become a successful execution
         // population entry: it remains explicit UnrepresentedOutcome in inspection.
-        if has_terminal_capture(effect) {
+        if observation.execution != AttemptExecution::Unknown && has_terminal_capture(effect) {
             if captured_execution(effect)
                 .map(AttemptExecution::Observed)
                 .as_ref()
@@ -607,7 +607,7 @@ fn outcome_matches(effect: &EffectRecord, outcome: &AttemptExecution) -> bool {
 }
 
 fn canonical_outcome(effect: &EffectRecord) -> Option<EffectOutcome> {
-    effect.report.or_else(|| match &effect.reconciliation {
+    effect.report.or(match &effect.reconciliation {
         Some(Reconciliation::Observed { outcome, .. }) => Some(*outcome),
         _ => None,
     })

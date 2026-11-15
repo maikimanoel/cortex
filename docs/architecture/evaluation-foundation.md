@@ -28,10 +28,9 @@ There is no new crate, dependency, workflow journal, storage codec, allocation
 authority, permission mechanism, executor adapter or public command.
 
 The integrated [functional two-task path](functional-two-task-fixtures.md) retains
-its existing coordination, Evidence and effect owners. The composition regression
-below observes only B's verification criterion. Whole-program measurement still
-requires its own measurement contract and applicable acceptance/policy decisions;
-it must not duplicate coordination machinery or treat an unmerged branch as main.
+its existing coordination, Evidence and effect owners. Its declared development
+population covers both tasks and a separate synthetic Unknown control. This is
+not a controlled strategy comparison or independently accepted throughput.
 
 ## Input contracts and populations
 
@@ -190,13 +189,29 @@ evaluation execution and any actual controlled strategy comparison require their
 remaining decisions and separately authorized integration.
 
 The combined [two-task fixture](../../crates/cortex-cli/tests/gpe_functional.rs)
-also registers one consumer-verification evaluation attempt before B starts,
-using its actual binding, oracle profile, process specification and reserved demand.
-It imports the same canonical B Evidence into the advisory consumer after the
-workflow, while the journal retains dependency invalidation and a synthetic Unknown.
-Rejected oracle/origin changes leave the registered observation absent; a valid
-functional PASS supplies no engineering acceptance, timing or missing metrics.
-Byte/metadata comparisons ensure evaluation leaves the operational journal intact.
-This case covers only B's verification criterion; the workflow retains its separate
-complete effect population. It is a composition regression, not a controlled
-strategy comparison or whole-program productivity measurement.
+declares seven trials across two cases before canonical attempts: producer,
+consumer, a separate synthetic Unknown control, and four planned strategy trials.
+Each actual attempt is registered after its explicit reservation and before its
+effect. Actual controller monotonic intervals are retained with clock provenance;
+unavailable resource metrics remain absent. Canonical artifact Evidence remains
+separate: no task endpoint acceptance is invented from a byte-verification criterion.
+Evaluation retains both completions, Unknown, not-run trials and stale coverage.
+Repeated inspection compares canonical journal bytes and revision for immutability.
+This mechanism does not establish integrated engineering acceptance or productivity.
+
+## Complete declared program population
+
+Evidence's `evaluation::program::ProgramEvaluation` joins the existing ledger to
+an exact initial program and predeclared task/trial population. Each actual
+attempt binds admitted Claim, Package and reservation witnesses before dispatch;
+registration supplies no authority. Exact retained witnesses distinguish a
+foreign or changed history from the registered one. Later generation invalidation
+does not erase historical observations; inspection discloses stale or missing
+coverage and withholds comparability. Declared process-profile correspondence is
+separate from configuration and per-launch identities.
+
+This development consumer retains the entire existing report, missing metrics,
+failed/interrupted/Unknown attempts and explicit retry chains. It refuses an
+integrated acceptance claim. Its in-memory invalidation cannot mutate canonical
+journal bytes, reservations or Evidence. CAP-EVL-001/002 remain bounded foundations;
+DEC-008 comparison, protection and acceptance selections remain open.

@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 //! Reusable pure program/evaluation fixtures. No subprocess or filesystem effects.
 #[path = "program.rs"]
-mod fixture;
+pub mod fixture;
 #[path = "operational.rs"]
 mod op;
 use cortex_core::{
@@ -15,6 +15,8 @@ use cortex_evidence::{
     program::{Command, CoordinationKernel},
     unified::*,
 };
+// Shared by Evidence and CLI integration targets with different fixture subsets.
+#[allow(unused_imports)]
 pub use fixture::{
     admit, binding, candidate, capture, definition, initialized, operation, prepare_release,
     release, rev, source, task,

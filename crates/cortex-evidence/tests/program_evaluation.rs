@@ -1,6 +1,5 @@
 //! Independent whole-population oracles over canonical model fixtures; no child launches.
-#[path = "support/program.rs"]
-mod fixture;
+use model::fixture;
 #[path = "support/program_evaluation.rs"]
 mod model;
 #[path = "support/supervision.rs"]
@@ -178,12 +177,13 @@ fn planned_arm_is_not_run_and_never_fabricated_as_zero_attempt_cost() {
     );
 }
 #[test]
-fn omitted_producer_is_visible_despite_successful_neighbor() {
+fn omitted_producer_is_visible_despite_successful_consumer() {
     let mut k = initial_kernel();
     let mut e = declared(&k);
     let omitted = reserve_attempt(&mut k, "omitted-producer", "A", None);
-    report(&mut k, &omitted, EffectOutcome::Failed);
-    let consumer = reserve_attempt(&mut k, "successful-neighbor", "D", None);
+    report(&mut k, &omitted, EffectOutcome::Succeeded);
+    release(&mut k, "AB");
+    let consumer = reserve_attempt(&mut k, "successful-consumer", "B", None);
     e.register_attempt(&k, consumer.clone()).unwrap();
     complete(
         &mut k,
@@ -909,4 +909,41 @@ fn later_model_reconciliation_cannot_rewrite_original_unknown_observation() {
     assert!(e.record(&k, observation(&e, &a, exited(7))).is_err());
     assert!(e.ledger().attempts()[0].observation() == Some(&original));
     assert_eq!(gpe(&inspect(&mut e, &k)).population.unknown, 1);
+}
+
+#[test]
+fn captured_exit_with_unknown_cleanup_remains_unknown() {
+    let (mut k, mut e, a, process) = captured_attempt();
+    let captured = supervised::observation(
+        &process,
+        4,
+        ProcessCompletion::Exited {
+            code: Some(0),
+            signal: None,
+        },
+        Quiescence::Unknown,
+    );
+    supervised::effect(
+        &mut k,
+        "uncertain-cleanup",
+        EffectEvent::ProcessObserved {
+            effect: a.effect.clone(),
+            scope: a.scope.clone(),
+            at: 4,
+            observation: captured,
+        },
+    );
+    assert_eq!(
+        k.fixture_effects().effects()[0].status,
+        EffectStatus::Unknown
+    );
+    e.record(&k, observation(&e, &a, AttemptExecution::Unknown))
+        .unwrap();
+    let r = inspect(&mut e, &k);
+    assert_eq!(gpe(&r).population.unknown, 1);
+    assert!(
+        !r.coverage
+            .iter()
+            .any(|i| matches!(i, ProgramCoverageIssue::UnrepresentedOutcome { .. }))
+    );
 }

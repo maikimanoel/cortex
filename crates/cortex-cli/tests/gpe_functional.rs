@@ -2,6 +2,28 @@
 //! GPE-FUNC-2T Q0-Q7: real trusted artifacts through the existing production owners.
 #[path = "support/gpe_evaluation.rs"]
 mod gpe_evaluation;
+#[path = "support/gpe_identity.rs"]
+mod gpe_identity;
+#[path = "support/program_composition.rs"]
+mod program_composition;
+fn fixture_namespace() -> Option<&'static gpe_identity::FixtureNamespace> {
+    static NAMESPACE: std::sync::OnceLock<Option<gpe_identity::FixtureNamespace>> =
+        std::sync::OnceLock::new();
+    NAMESPACE
+        .get_or_init(|| {
+            std::env::var_os("CORTEX_GPE_FIXTURE_NAMESPACE").map(|value| {
+                gpe_identity::FixtureNamespace::from_os(&value)
+                    .expect("invalid fixture namespace before effects")
+            })
+        })
+        .as_ref()
+}
+fn fixture_id(label: &str) -> String {
+    fixture_namespace().map_or_else(
+        || label.to_owned(),
+        |namespace| namespace.qualify(label).expect("bounded fixture identity"),
+    )
+}
 use cortex_cli::inspect_candidate;
 use cortex_core::{
     CandidateId, TaskContract, TaskId,
@@ -44,13 +66,13 @@ fn rev(n: u64) -> ContractRevision {
     ContractRevision::new(n).unwrap()
 }
 fn task(id: &str) -> TaskId {
-    TaskId::new(id).unwrap()
+    TaskId::new(&fixture_id(id)).unwrap()
 }
 fn op(id: &str) -> OperationId {
-    OperationId::new(id).unwrap()
+    OperationId::new(&fixture_id(id)).unwrap()
 }
 fn source(id: &str) -> SourceReference {
-    SourceReference::operator_reported("gpe-fixture-controller", id, "1").unwrap()
+    SourceReference::operator_reported("gpe-fixture-controller", &fixture_id(id), "1").unwrap()
 }
 fn read_limits() -> ReadLimits {
     ReadLimits::new(MAX_BYTES, Duration::from_millis(500)).unwrap()
@@ -107,6 +129,7 @@ struct Campaign {
 }
 impl Campaign {
     fn new() -> Self {
+        let namespace = fixture_namespace();
         let retained = std::env::var_os("CORTEX_GPE_CAMPAIGN_ROOT").is_some();
         let root = std::env::var_os("CORTEX_GPE_CAMPAIGN_ROOT")
             .map(PathBuf::from)
@@ -117,6 +140,11 @@ impl Campaign {
             private_dir(&root);
         }
         let root = root.canonicalize().unwrap();
+        if let Some(namespace) = namespace {
+            namespace
+                .claim(&root)
+                .expect("fresh namespace required; no retry");
+        }
         for name in [
             "fixture-source",
             "fixture-output",
@@ -230,7 +258,7 @@ impl Campaign {
             .unwrap();
     }
     fn launch_slot(&self) {
-        (1..=32)
+        (1..=if fixture_namespace().is_some() { 2 } else { 32 })
             .find(|number| {
                 OpenOptions::new()
                     .write(true)
@@ -250,7 +278,7 @@ impl Campaign {
             .arg(&self.state)
             .args([
                 "--program",
-                "gpe-func-2t",
+                &fixture_id("gpe-func-2t"),
                 "--key-fd",
                 "0",
                 "--max-bytes",
@@ -297,39 +325,42 @@ fn definition(c: &Campaign) -> ProgramDefinition {
             if name == "A" { "Produce the version-one prime artifact increment" } else { "Consume the exact released artifact in a separately admitted trusted fixture" },
             if name == "A" { "Exact artifact bytes cortex-artifact-v1 followed by 2, 3, 5, 7 lines" } else { "Exact count 4, sum 17 and squared sum 87 from the released version-one artifact" }).unwrap(),
             rev(1), CandidateRequirement::new(repository.clone(), candidate.clone(), WorktreeRequirement::Clean));
-        let capture = inspect_candidate(&c.fixture, &contract, ObservationId::new(name, 1).unwrap()).unwrap();
+        let capture = inspect_candidate(&c.fixture, &contract, ObservationId::new(&fixture_id(name), 1).unwrap()).unwrap();
         Task::new(TaskContext::new(contract, Some(capture)).unwrap(), ConsumerKind::Preview, DependencyCoverage::DeclaredComplete)
     }).collect();
-    let artifact =
-        ArtifactReference::new(ArtifactId::new("prime-list").unwrap(), rev(1), candidate);
+    let artifact = ArtifactReference::new(
+        ArtifactId::new(&fixture_id("prime-list")).unwrap(),
+        rev(1),
+        candidate,
+    );
     let edge = DependencyEdge::new(
-        EdgeId::new("AB").unwrap(),
+        EdgeId::new(&fixture_id("AB")).unwrap(),
         task("A"),
         task("B"),
         ArtifactRequirement::new(
             artifact.clone(),
             DependencyKind::Artifact,
             ReadinessLevel::ContractStable,
-            vec![PredicateId::new("exact-prime-bytes-v1").unwrap()],
+            vec![PredicateId::new(&fixture_id("exact-prime-bytes-v1")).unwrap()],
         )
         .unwrap(),
     );
-    ProgramDefinition::new(ProgramId::new("gpe-func-2t").unwrap(),
+    ProgramDefinition::new(ProgramId::new(&fixture_id("gpe-func-2t")).unwrap(),
         ProgramOutcome::new("Demonstrate trusted two-task functional integration", "Produce, independently assess, release, reconstruct and consume one exact artifact; preserve invalidation and uncertainty").unwrap(),
         rev(1), None, source("owner-approved-fixture-baseline"),
-        DependencyGraph::new(GraphReference::new(GraphId::new("gpe-func-2t-graph").unwrap(), rev(1)), tasks, vec![edge],
+        DependencyGraph::new(GraphReference::new(GraphId::new(&fixture_id("gpe-func-2t-graph")).unwrap(), rev(1)), tasks, vec![edge],
             GraphLimits::new(2, 1, 256, 1024, MAX_BYTES).unwrap()).unwrap(),
-        vec![Workstream { id: WorkstreamId::new("functional-integration").unwrap(), responsibility: "Trusted fixture production and consumption".into(), tasks: vec![task("A"), task("B")] }],
-        ["A", "B"].into_iter().map(|name| Increment { id: IncrementId::new(name).unwrap(), task: task(name),
-            artifacts: if name == "A" { vec![artifact.clone()] } else { vec![] }, claim_scopes: vec![ClaimScopeId::new(name).unwrap()] }).collect(),
+        vec![Workstream { id: WorkstreamId::new(&fixture_id("functional-integration")).unwrap(), responsibility: "Trusted fixture production and consumption".into(), tasks: vec![task("A"), task("B")] }],
+        ["A", "B"].into_iter().map(|name| Increment { id: IncrementId::new(&fixture_id(name)).unwrap(), task: task(name),
+            artifacts: if name == "A" { vec![artifact.clone()] } else { vec![] }, claim_scopes: vec![ClaimScopeId::new(&fixture_id(name)).unwrap()] }).collect(),
         ProgramLimits::new(3, 256, MAX_BYTES).unwrap()).unwrap()
 }
 fn grant(k: &CoordinationKernel) -> CoordinationGrant {
     CoordinationGrant {
-        id: GrantId::new("local-coordinator-v1").unwrap(),
+        id: GrantId::new(&fixture_id("local-coordinator-v1")).unwrap(),
         program: k.state().definition().id().clone(),
         baseline: rev(1),
-        actor: ActorId::new("operator").unwrap(),
+        actor: ActorId::new(&fixture_id("operator")).unwrap(),
         tasks: vec![task("A"), task("B")],
         permissions: vec![
             CoordinationPermission::Plan,
@@ -352,6 +383,10 @@ fn load(c: &Campaign, store: &ProgramStore) -> CoordinationKernel {
 }
 fn admit(c: &Campaign, store: &ProgramStore, id: &str, command: Input) -> AdmissionReceipt {
     let input = operation(&load(c, store), id, command);
+    admit_exact(c, store, input)
+}
+fn admit_exact(c: &Campaign, store: &ProgramStore, input: Operation) -> AdmissionReceipt {
+    let id = input.id.as_str().to_owned();
     let expected = input.expected;
     let mut diagnostics =
         cortex_storage::program_store::diagnostics::AdmissionDiagnostics::default();
@@ -400,7 +435,7 @@ fn effect(c: &Campaign, store: &ProgramStore, id: &str, event: EffectEvent) {
 fn notify(c: &Campaign, store: &ProgramStore, id: &str, event: Event) {
     let k = load(c, store);
     let notification = Notification::new(
-        NotificationId::new(id).unwrap(),
+        NotificationId::new(&fixture_id(id)).unwrap(),
         k.state().definition().graph().reference().clone(),
         event,
     )
@@ -410,7 +445,7 @@ fn notify(c: &Campaign, store: &ProgramStore, id: &str, event: Event) {
 fn policy() -> Policy {
     Policy {
         reference: source("direct-child-policy"),
-        program: ProgramId::new("gpe-func-2t").unwrap(),
+        program: ProgramId::new(&fixture_id("gpe-func-2t")).unwrap(),
         baseline: rev(1),
         mode: EffectMode::SupervisedFixture,
         host: source("trusted-local-host"),
@@ -456,20 +491,15 @@ fn prepare(
     let k = load(c, store);
     let scope = k.state().readiness().scope(&task(name)).unwrap();
     let attempt = Attempt {
-        id: AttemptId::new(&format!("attempt-{label}")).unwrap(),
-        increment: IncrementId::new(name).unwrap(),
-        owner: ActorId::new("operator").unwrap(),
+        id: AttemptId::new(&fixture_id(&format!("attempt-{label}"))).unwrap(),
+        increment: IncrementId::new(&fixture_id(name)).unwrap(),
+        owner: ActorId::new(&fixture_id("operator")).unwrap(),
         baseline: rev(1),
         generation: scope.generation(),
         status: AttemptStatus::Claimed,
         basis: source("separate-explicit-claim"),
     };
-    admit(
-        c,
-        store,
-        &format!("claim-{label}"),
-        Input::Claim(attempt.clone()),
-    );
+
     let sources = if name == "B" {
         let retained = consumed.expect("consumer requires an actual retained producer capture");
         let current = capture_artifact(
@@ -497,15 +527,63 @@ fn prepare(
     } else {
         vec![]
     };
-    let package = PackageRequest { id: PackageId::new(&format!("package-{label}")).unwrap(), revision: rev(1), task: task(name), baseline: rev(1), generation: scope.generation(),
+    let package = PackageRequest { id: PackageId::new(&fixture_id(&format!("package-{label}"))).unwrap(), revision: rev(1), task: task(name), baseline: rev(1), generation: scope.generation(),
         sources,
         methods: vec![], omissions: "Only audited local synthetic fixture source and explicit artifact; no provider or containment qualification".into(), deliverable: "Bounded versioned artifact bytes in an explicit private output directory".into(), stop_rules: "Stop on changed correspondence, cancellation, timeout or unknown outcome; no automatic retry".into() };
-    admit(
-        c,
-        store,
+    let current = inspect_candidate(
+        &c.fixture,
+        scope.context().contract(),
+        ObservationId::new(
+            scope.context().capture().unwrap().id().scope(),
+            scope.context().capture().unwrap().id().sequence() + 1,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let profile = verification_context(&k, name, None).1;
+    let package = program_composition::advisory_package(k.state(), package, &current, &profile);
+    let claim = operation(&k, &format!("claim-{label}"), Input::Claim(attempt.clone()));
+    let mut package_operation = operation(
+        &k,
         &format!("package-{label}"),
         Input::Package(package.clone()),
     );
+    package_operation.expected = claim.expected.checked_add(1).unwrap();
+    let before = snapshot(&c.state);
+    let operations = if label == "synthetic-unknown" {
+        // This explicit synthetic control attempt is not a scheduling selection.
+        vec![claim, package_operation]
+    } else {
+        use cortex_cli::program_preparation::{TaskOperations, prepare};
+        let proposal = Proposal {
+            task: task(name),
+            band: 0,
+            waiting_rounds: 0,
+            risk_rank: 0,
+            cost_rank: 0,
+            demand: demand(),
+        };
+        let prepared = prepare(
+            &k,
+            k.revision(),
+            &[proposal],
+            &[TaskOperations {
+                task: task(name),
+                candidate: scope.context().contract().candidate().clone(),
+                operations: Some([claim, package_operation]),
+            }],
+        )
+        .unwrap();
+        assert_eq!(prepared.operations().len(), 2);
+        assert!(prepared.decisions()[0].scheduling.proposed);
+        assert!(prepared.decisions()[0].coordination_hold.is_none());
+        prepared.into_operations()
+    };
+    assert_eq!(snapshot(&c.state), before);
+    assert_eq!(load(c, store).revision(), k.revision());
+    for input in operations {
+        admit_exact(c, store, input);
+    }
     let descriptor = ExecutorDescriptor::new(
         source("finite-rust-descriptor"),
         ExecutorIdentity::new(
@@ -562,10 +640,20 @@ fn prepare(
         package: package.id,
         package_revision: rev(1),
     };
+    if let Some(namespace) = fixture_namespace() {
+        namespace
+            .check_attempt(
+                scope.program.as_str(),
+                scope.task.as_str(),
+                scope.attempt.as_str(),
+                scope.package.as_str(),
+            )
+            .unwrap();
+    }
     let k = load(c, store);
     let operational = OperationalGrant {
-        id: GrantId::new(&format!("operational-{label}")).unwrap(),
-        principal: ActorId::new("operator").unwrap(),
+        id: GrantId::new(&fixture_id(&format!("operational-{label}"))).unwrap(),
+        principal: ActorId::new(&fixture_id("operator")).unwrap(),
         policy: policy().reference,
         scope: scope.clone(),
         not_before: k.fixture_effects().last_tick(),
@@ -579,7 +667,7 @@ fn prepare(
         &format!("grant-{label}"),
         EffectEvent::Grant(operational.clone()),
     );
-    let id = EffectId::new(&format!("effect-{label}")).unwrap();
+    let id = EffectId::new(&fixture_id(&format!("effect-{label}"))).unwrap();
     effect(
         c,
         store,
@@ -689,8 +777,10 @@ fn capture_ids(label: &str) -> CaptureIds {
     CaptureIds {
         started_operation: op(&format!("started-{label}")),
         finished_operation: op(&format!("finished-{label}")),
-        started_observation: ObservationId::new(&format!("process-{label}"), 1).unwrap(),
-        finished_observation: ObservationId::new(&format!("process-{label}"), 2).unwrap(),
+        started_observation: ObservationId::new(&fixture_id(&format!("process-{label}")), 1)
+            .unwrap(),
+        finished_observation: ObservationId::new(&fixture_id(&format!("process-{label}")), 2)
+            .unwrap(),
         basis: source("native-harness-v1"),
         admission_attempts: 2,
     }
@@ -704,7 +794,39 @@ fn run(
     pin: &PinnedFixture,
     label: &str,
 ) -> Operation {
-    let dispatch = dispatch(&load(c, store), scope, id, label);
+    let kernel = load(c, store);
+    let dispatch = dispatch(&kernel, scope, id, label);
+    let accepted = c.evidence.join("accepted-fixture-executable");
+    let executable = fs::read(&spec.executable).unwrap();
+    assert!(executable.len() <= spec.limits.executable_bytes as usize);
+    if accepted.exists() {
+        assert_eq!(fs::read(&accepted).unwrap(), executable);
+    } else {
+        private_file(&accepted, &executable);
+    }
+    let manifest = serde_json::json!({
+        "namespace": fixture_namespace().map(|n| n.as_str()), "campaign_root": c.root,
+        "store_id": store.id().bytes().iter().map(|b| format!("{b:02x}")).collect::<String>(),
+        "program": scope.program.as_str(), "baseline": scope.baseline.get(), "task": scope.task.as_str(),
+        "attempt": scope.attempt.as_str(), "generation": scope.generation.get(), "effect": id.as_str(),
+        "package": scope.package.as_str(), "package_revision": scope.package_revision.get(),
+        "dispatch_operation": dispatch.id.as_str(), "expected_predecessor": dispatch.expected,
+        "started_operation": capture_ids(label).started_operation.as_str(), "started_expected": dispatch.expected + 1,
+        "finished_operation": capture_ids(label).finished_operation.as_str(), "finished_expected": dispatch.expected + 2,
+        "retained_operations": kernel.operations().iter().map(|o| serde_json::json!({"id":o.id.as_str(),"expected":o.expected})).collect::<Vec<_>>(),
+        "planned_attempts": [fixture_id("attempt-A"),fixture_id("attempt-B"),fixture_id("attempt-synthetic-unknown")],
+        "release": fixture_id("release-AB"), "executable": spec.executable, "accepted_executable_bytes": executable.len(),
+        "executable_content_evidence": accepted, "working_directory": spec.cwd, "arguments": spec.args,
+        "input_bytes": spec.input_len, "wall_ms": spec.limits.wall_ms, "cleanup_ms": spec.limits.cleanup_ms,
+        "output_bytes": spec.limits.output_bytes, "max_designated_fixture_children": 2,
+        "cleanup": "native direct-child reaped and streams closed observation plus current PID absence",
+        "retry": "NONE for uncertain effects", "containment": "NOT_QUALIFIED",
+        "controller_helpers": "bounded fixture Git/rustc preparation, production Git inspection, mkfifo negative path and CLI inspection; separate from fixture children"
+    });
+    c.record(
+        &format!("launch-manifest-{label}.json"),
+        &serde_json::to_string_pretty(&manifest).unwrap(),
+    );
     c.launch_slot();
     let result = execute_fixture(
         store,
@@ -848,11 +970,11 @@ fn observe(
     captured: Option<&CapturedArtifact>,
 ) -> Verification {
     let (contract, profile) = verification_context(&load(c, store), name, captured);
-    let observation = ObservationId::new(&format!("oracle-{name}"), 1).unwrap();
+    let observation = ObservationId::new(&fixture_id(&format!("oracle-{name}")), 1).unwrap();
     let before = inspect_candidate(
         &c.fixture,
         &contract,
-        ObservationId::new(&format!("candidate-{name}"), 1).unwrap(),
+        ObservationId::new(&fixture_id(&format!("candidate-{name}")), 1).unwrap(),
     )
     .unwrap();
     let report = ReportedObservation::new(
@@ -889,7 +1011,7 @@ fn observe(
             inspect_candidate(
                 &c.fixture,
                 &contract,
-                ObservationId::new(&format!("candidate-{name}"), 2).unwrap(),
+                ObservationId::new(&fixture_id(&format!("candidate-{name}")), 2).unwrap(),
             )
             .unwrap(),
         ),
@@ -900,7 +1022,7 @@ fn observe(
         profile,
         observation,
         examination,
-        assessment: AssessmentId::new(&format!("assessment-{name}")).unwrap(),
+        assessment: AssessmentId::new(&fixture_id(&format!("assessment-{name}"))).unwrap(),
     }
 }
 fn assess(c: &Campaign, store: &ProgramStore, v: &Verification, name: &str) {
@@ -919,10 +1041,13 @@ fn assess(c: &Campaign, store: &ProgramStore, v: &Verification, name: &str) {
     );
 }
 fn release(k: &CoordinationKernel, v: &Verification, report: &NotificationId) -> ReleaseInput {
-    let scope =
-        EdgeScopeSnapshot::capture(k.state().readiness(), &EdgeId::new("AB").unwrap()).unwrap();
+    let scope = EdgeScopeSnapshot::capture(
+        k.state().readiness(),
+        &EdgeId::new(&fixture_id("AB")).unwrap(),
+    )
+    .unwrap();
     let limits = SupportLimits::new(8, 8, 8, MAX_BYTES).unwrap();
-    let predicate = PredicateId::new("exact-prime-bytes-v1").unwrap();
+    let predicate = PredicateId::new(&fixture_id("exact-prime-bytes-v1")).unwrap();
     let contract = EdgeEvidenceContract::new(
         scope.clone(),
         rev(1),
@@ -938,10 +1063,10 @@ fn release(k: &CoordinationKernel, v: &Verification, report: &NotificationId) ->
     )
     .unwrap();
     let review = Notification::new(
-        NotificationId::new("coordinator-review-AB").unwrap(),
+        NotificationId::new(&fixture_id("coordinator-review-AB")).unwrap(),
         k.state().definition().graph().reference().clone(),
         Event::Review(Box::new(EdgeReview::new(
-            EdgeId::new("AB").unwrap(),
+            EdgeId::new(&fixture_id("AB")).unwrap(),
             report.clone(),
             scope.producer().clone(),
             scope.consumer().clone(),
@@ -972,7 +1097,7 @@ fn release(k: &CoordinationKernel, v: &Verification, report: &NotificationId) ->
                     .repository()
                     .root(),
                 scope.producer().context().contract(),
-                ObservationId::new("A", 2).unwrap(),
+                ObservationId::new(&fixture_id("A"), 2).unwrap(),
             )
             .unwrap(),
         ),
@@ -986,7 +1111,7 @@ fn release(k: &CoordinationKernel, v: &Verification, report: &NotificationId) ->
                     .repository()
                     .root(),
                 scope.consumer().context().contract(),
-                ObservationId::new("B", 2).unwrap(),
+                ObservationId::new(&fixture_id("B"), 2).unwrap(),
             )
             .unwrap(),
         ),
@@ -1017,6 +1142,7 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
     let store =
         ProgramStore::create_supervised_fixture(&c.state, &c.key, initial.clone(), read_limits())
             .unwrap();
+    let mut workflow_evaluation = gpe_evaluation::WorkflowEvaluation::new(&c, &load(&c, &store));
     for name in ["A", "B"] {
         let scope = load(&c, &store)
             .state()
@@ -1093,6 +1219,7 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
         .is_err()
     );
     c.mark("Q0");
+    workflow_evaluation.register(&c, &store, &a, &aid, "A");
     let dispatch_a = run(&c, &store, &a, &aid, &spec, &pin, "A");
     let k = load(&c, &store);
     assert!(k.records().is_empty() && k.decisions().is_empty());
@@ -1226,7 +1353,7 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
     let v = observe(&c, &store, "A", captured.bytes(), ARTIFACT, Some(&captured));
     let k = load(&c, &store);
     assert!(k.records()[0].assessment().is_none());
-    let report_id = NotificationId::new("artifact-A-v1").unwrap();
+    let report_id = NotificationId::new(&fixture_id("artifact-A-v1")).unwrap();
     notify(
         &c,
         &store,
@@ -1248,6 +1375,15 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
     );
     assert!(!load(&c, &store).decisions().last().unwrap().released);
     assess(&c, &store, &v, "A");
+    workflow_evaluation.record(
+        &c,
+        &store,
+        &a,
+        "A",
+        cortex_evidence::evaluation::AttemptExecution::Observed(ExecutionObservation::Exited {
+            code: 0,
+        }),
+    );
     let mut missing = r.clone();
     missing.bindings.clear();
     admit(
@@ -1259,10 +1395,10 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
     assert!(!load(&c, &store).decisions().last().unwrap().released);
     let mut forged = r.clone();
     forged.bindings = vec![WitnessBinding::new(
-        PredicateId::new("exact-prime-bytes-v1").unwrap(),
+        PredicateId::new(&fixture_id("exact-prime-bytes-v1")).unwrap(),
         EvidenceReference::new(
             v.observation.clone(),
-            Some(AssessmentId::new("forged-assessment").unwrap()),
+            Some(AssessmentId::new(&fixture_id("forged-assessment")).unwrap()),
         ),
         artifact.clone(),
     )];
@@ -1286,6 +1422,15 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
         "release-AB",
         Input::Release(Box::new(r.clone())),
     );
+    if let Some(namespace) = fixture_namespace() {
+        namespace
+            .check_release(
+                release_operation.id.as_str(),
+                initial.graph().edges()[0].id().as_str(),
+                artifact.id().as_str(),
+            )
+            .unwrap();
+    }
     let release_receipt = store.admit(&c.key, release_operation.clone()).unwrap();
     let released = load(&c, &store);
     assert!(released.decisions().last().unwrap().released);
@@ -1356,7 +1501,7 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
     let mut contradictory = r.clone();
     contradictory.examinations.push(wrong_v.examination.clone());
     contradictory.bindings.push(WitnessBinding::new(
-        PredicateId::new("exact-prime-bytes-v1").unwrap(),
+        PredicateId::new(&fixture_id("exact-prime-bytes-v1")).unwrap(),
         EvidenceReference::new(
             wrong_v.observation.clone(),
             Some(wrong_v.assessment.clone()),
@@ -1390,7 +1535,7 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
             reopened
                 .state()
                 .readiness()
-                .edge(&EdgeId::new("AB").unwrap())
+                .edge(&EdgeId::new(&fixture_id("AB")).unwrap())
                 .unwrap()
                 .releases()
                 .len(),
@@ -1433,8 +1578,7 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
     c.mark("Q3");
     let (b, bid, bspec, bpin) = prepare(&c, &store, "B", "B", Some(&captured));
     process(&c, &store, &b, &bid, &bspec, "B");
-    let consumer_evaluation =
-        gpe_evaluation::ConsumerEvaluation::new(&c, &load(&c, &store), &b, &bid);
+    workflow_evaluation.register(&c, &store, &b, &bid, "B");
     let dispatch_b = run(&c, &store, &b, &bid, &bspec, &bpin, "B");
     assert_eq!(
         fs::read(c.output.join("B.consumed")).unwrap(),
@@ -1454,6 +1598,15 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
     settle(&c, &store, &b, &bid, "B");
     let bv = observe(&c, &store, "B", &actual, CONSUMED, None);
     assess(&c, &store, &bv, "B");
+    workflow_evaluation.record(
+        &c,
+        &store,
+        &b,
+        "B",
+        cortex_evidence::evaluation::AttemptExecution::Observed(ExecutionObservation::Exited {
+            code: 0,
+        }),
+    );
     let k = load(&c, &store);
     assert_eq!(k.fixture_effects().effects().len(), 2);
     assert!(
@@ -1522,6 +1675,7 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
     ));
     let (unknown, uid, uspec, _) = prepare(&c, &store, "A", "synthetic-unknown", None);
     process(&c, &store, &unknown, &uid, &uspec, "synthetic-unknown");
+    workflow_evaluation.register(&c, &store, &unknown, &uid, "synthetic-unknown");
     let synthetic_dispatch = dispatch(&load(&c, &store), &unknown, &uid, "synthetic-unknown");
     let (_, callback) = store
         .dispatch_fixture(
@@ -1580,8 +1734,8 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
         "unknown-retry",
         Input::SupervisedEffect(Box::new(EffectEvent::Reserve {
             intent: EffectIntent {
-                id: EffectId::new("forbidden-retry").unwrap(),
-                grant: GrantId::new("operational-synthetic-unknown").unwrap(),
+                id: EffectId::new(&fixture_id("forbidden-retry")).unwrap(),
+                grant: GrantId::new(&fixture_id("operational-synthetic-unknown")).unwrap(),
                 scope: unknown.clone(),
                 demand: demand(),
                 retry_of: Some(uid.clone()),
@@ -1606,6 +1760,13 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
             status: AttemptStatus::Unknown,
             basis: source("synthetic-uncertainty-retains-metadata-claim"),
         },
+    );
+    workflow_evaluation.record(
+        &c,
+        &store,
+        &unknown,
+        "synthetic-unknown",
+        cortex_evidence::evaluation::AttemptExecution::Unknown,
     );
     c.mark("Q6");
     let unaffected = load(&c, &store)
@@ -1709,16 +1870,16 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
     let view: serde_json::Value = serde_json::from_slice(&default.stdout).unwrap();
     assert_eq!(view["schema"], "cortex.program.v3");
     assert_eq!(view["tasks"].as_array().unwrap().len(), 2);
-    assert_eq!(view["edges"][0]["artifact"], "prime-list");
+    assert_eq!(view["edges"][0]["artifact"], fixture_id("prime-list"));
     assert_eq!(view["edges"][0]["prior_releases"], 1);
     let evidence = view["evidence"].as_array().unwrap();
     let stale = evidence
         .iter()
-        .find(|e| e["observation_scope"] == "oracle-A")
+        .find(|e| e["observation_scope"] == fixture_id("oracle-A"))
         .unwrap();
     assert_eq!(stale["historical_result"], "PASS");
     assert_eq!(stale["contextual_validity"], "STALE");
-    assert_eq!(stale["assessment"], "assessment-A");
+    assert_eq!(stale["assessment"], fixture_id("assessment-A"));
     assert_eq!(
         stale["validity_basis"],
         "RETAINED_ASSESSMENT_CONTEXT_NOT_LIVE_VERIFICATION"
@@ -1727,9 +1888,12 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
         .as_array()
         .unwrap()
         .iter()
-        .find(|d| d["operation"] == "release-AB")
+        .find(|d| d["operation"] == fixture_id("release-AB"))
         .unwrap();
-    assert_eq!(released["witnesses"][0]["observation_scope"], "oracle-A");
+    assert_eq!(
+        released["witnesses"][0]["observation_scope"],
+        fixture_id("oracle-A")
+    );
     assert_eq!(released["witnesses"][0]["artifact_revision"], 1);
     let text = String::from_utf8(default.stdout.clone()).unwrap();
     for required in [
@@ -1781,7 +1945,7 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
         "cli-schema3.json",
         &String::from_utf8(default.stdout).unwrap(),
     );
-    c.record("final.txt", &format!("program=gpe-func-2t baseline=1 journal_revision={} operations={} fixture_children=2 terminated=true synthetic_unknown=1 elapsed_accounted={} output_accounted={}\n", final_state.revision(), final_state.operations().len(), held, output + 4096));
+    c.record("final.txt", &format!("program={} baseline=1 journal_revision={} operations={} fixture_children=2 terminated=true synthetic_unknown=1 elapsed_accounted={} output_accounted={}\n", final_state.state().definition().id().as_str(), final_state.revision(), final_state.operations().len(), held, output + 4096));
     c.mark("Q7-main");
-    consumer_evaluation.finish(&c, &reopened, &bv);
+    workflow_evaluation.finish(&c, &reopened);
 }
