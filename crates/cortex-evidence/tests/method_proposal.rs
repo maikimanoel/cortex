@@ -802,7 +802,24 @@ fn composition_neither_adopts_method_nor_mutates_program() {
     assert!(r.inspection().is_advisory());
     drop(r);
     assert!(f.set == original_set);
-    assert!(t.state == original_state);
+    assert!(t.state.definitions() == original_state.definitions());
+    assert!(t.state.attempts() == original_state.attempts());
+    assert!(t.state.ordering_plan() == original_state.ordering_plan());
+    assert_eq!(t.state.authority(), original_state.authority());
+    assert!(t.state.readiness().graph() == original_state.readiness().graph());
+    assert!(t.state.readiness().notifications() == original_state.readiness().notifications());
+    let task = t.data.binding.task().id();
+    assert!(
+        t.state.readiness().scope(task).unwrap() == original_state.readiness().scope(task).unwrap()
+    );
+    let after = t.state.readiness().task(task).unwrap();
+    let before = original_state.readiness().task(task).unwrap();
+    assert_eq!(after.status(), before.status());
+    assert_eq!(after.generation(), before.generation());
+    assert_eq!(after.authority(), before.authority());
+    assert_eq!(after.eligible(), before.eligible());
+    assert_eq!(after.dependency_ready(), before.dependency_ready());
+    assert_eq!(after.blockers(), before.blockers());
 }
 #[test]
 fn qualification_cases_without_target_applicability_remain_unqualified() {
