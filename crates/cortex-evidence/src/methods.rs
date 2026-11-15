@@ -35,6 +35,9 @@ use cortex_core::{
 use std::{error::Error, fmt};
 macro_rules! opaque {($($t:ty),+ $(,)?)=>{$(impl fmt::Debug for $t{fn fmt(&self,f:&mut fmt::Formatter<'_>)->fmt::Result{f.write_str(concat!(stringify!($t),"([redacted])"))}})+};}
 
+/// Explicit advisory method composition using current supplied observations.
+pub mod proposal;
+
 /// Logical admission dimension, never a host resource grant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InspectionLimitKind {
