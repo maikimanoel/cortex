@@ -199,6 +199,9 @@ pub fn prepare(
     let mut grants = BTreeMap::new();
     for operation in kernel.operations() {
         grants.insert(operation.grant.id.as_str(), &operation.grant);
+        if let Command::Handoff { recipient, .. } = &operation.command {
+            grants.insert(recipient.id.as_str(), recipient);
+        }
     }
     for mapping in mappings {
         if by_task.insert(mapping.task.as_str(), mapping).is_some() {

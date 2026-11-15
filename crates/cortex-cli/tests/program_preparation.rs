@@ -433,7 +433,9 @@ fn memory_accounting_pool_identity_must_match() {
             &[valid],
             &[mapping(&kernel, "A", kernel.revision())]
         ),
-        Err(PreparationError::Operational(OperationalError::Structure))
+        Err(PreparationError::Operational(OperationalError::Program(
+            ProgramError::Structure
+        )))
     ));
 }
 
@@ -600,7 +602,14 @@ impl StoreFixture {
 }
 impl Drop for StoreFixture {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
+        if std::thread::panicking() {
+            eprintln!(
+                "Preserved synthetic preparation store after interrupted test: {}",
+                self.root.display()
+            );
+        } else if let Err(error) = fs::remove_dir_all(&self.root) {
+            eprintln!("Synthetic preparation store cleanup failed: {error}");
+        }
     }
 }
 
@@ -701,4 +710,72 @@ fn later_failure_preserves_committed_prefix_and_exact_replay() {
     assert_eq!(retained.state().attempts().len(), 2);
     assert!(retained.packages().is_empty());
     assert!(retained.fixture_effects().effects().is_empty());
+}
+
+#[test]
+fn held_pair_cannot_redefine_retained_handoff_recipient_grant() {
+    let mut kernel = kernel();
+    admit(
+        &mut kernel,
+        "original-claim",
+        Command::Claim(attempt("original-attempt", "A", "operator")),
+    );
+    let recipient = grant(1, "recipient");
+    admit(
+        &mut kernel,
+        "explicit-handoff",
+        Command::Handoff {
+            old: AttemptId::new("original-attempt").unwrap(),
+            recipient: recipient.clone(),
+            next: attempt("recipient-attempt", "A", "recipient"),
+        },
+    );
+    let mut input = mapping(&kernel, "B", kernel.revision());
+    input.operations.as_mut().unwrap()[0].grant.id = recipient.id;
+    assert_eq!(
+        prepare(&kernel, kernel.revision(), &[proposal("B")], &[input]).unwrap_err(),
+        PreparationError::Core(ProgramError::IdentityConflict)
+    );
+}
+
+#[test]
+fn missing_authority_preserves_resource_proposed_neighbor_and_snapshot() {
+    let kernel = kernel();
+    let before = kernel.operations().to_vec();
+    let mut absent = mapping(&kernel, "A", kernel.revision());
+    absent.operations = None;
+    let result = prepare(
+        &kernel,
+        kernel.revision(),
+        &[proposal("A"), proposal("D")],
+        &[absent, mapping(&kernel, "D", kernel.revision())],
+    )
+    .unwrap();
+    assert_eq!(ids(&result), ["prepared-claim-D", "prepared-package-D"]);
+    assert!(
+        result
+            .decisions()
+            .iter()
+            .all(|decision| decision.scheduling.proposed)
+    );
+    assert_eq!(
+        result.decisions()[0].coordination_hold,
+        Some(PreparationHold::MissingAuthority)
+    );
+    assert_eq!(result.decisions()[1].coordination_hold, None);
+    assert!(kernel.operations() == before);
+    assert!(kernel.state().attempts().is_empty());
+}
+
+#[test]
+fn interrupted_store_fixture_preserves_new_evidence() {
+    let fixture = StoreFixture::new(&kernel());
+    let root = fixture.root.clone();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let _owned_fixture = fixture;
+        panic!("Controlled test interruption; preserve synthetic evidence");
+    }));
+    assert!(result.is_err());
+    assert!(root.join("store").is_dir());
+    // Retain the newly owned store rather than infer disposition from termination.
 }
