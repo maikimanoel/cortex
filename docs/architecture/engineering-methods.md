@@ -541,3 +541,15 @@ keep rationale, supported versions and exclusions discoverable. Do not scatter
 duplicate rule definitions or conflate runtime tests with evidence that they ran.
 Risk/reviewer policy, publication, privacy defaults and broad API compatibility
 remain open at their existing decision points.
+
+## Explicit advisory package composition
+
+Evidence's `methods::proposal::compose_method_package` connects an explicitly
+selected definition, current supplied target capture/profile and bounded Evidence
+to the existing MethodProposal and instruction-package assembly. This additive
+CAP-WFL-002/CAP-SKL-001/002/CAP-CTX-001 consumer preserves incomplete, unsupported,
+stale and contradictory qualification and protected exceptions. Structural basis
+equality is not live freshness. Source captures remain caller assertions; the
+CLI adapter supplies actual observations where available. No adoption, retirement,
+automatic selection or trusted blocking is introduced. Typed errors preserve the
+Evidence pool; successful inspection may retain existing advisory invalidation.
