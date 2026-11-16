@@ -145,7 +145,8 @@ fn diagnostic_precommit_deadline_rolls_back_and_retains_reservation() {
     assert!(events.contains(&AdmissionStage::InsertAcknowledged));
     assert!(events.contains(&AdmissionStage::RollbackAcknowledged));
     assert!(!events.contains(&AdmissionStage::Commit));
-    let loaded = store.load(&key(), Access::ReadOnly).unwrap();
+    let reopened = ProgramStore::open(&f.store(), &key(), Access::ReadOnly, limits()).unwrap();
+    let loaded = reopened.load(&key(), Access::ReadOnly).unwrap();
     assert!(loaded.operations() == kernel.operations());
     assert!(loaded.fixture_effects() == kernel.fixture_effects());
     assert!(matches!(
@@ -195,7 +196,9 @@ fn diagnostic_denied_rollback_reports_uncertainty_without_absence_claim() {
     );
     // A fresh observation after connection teardown is distinct from the failed
     // rollback acknowledgement. It must not relabel the retained failure.
-    let loaded = store.load(&key(), Access::ReadOnly).unwrap();
+    let reopened = ProgramStore::open(&f.store(), &key(), Access::ReadOnly, limits()).unwrap();
+    let loaded = reopened.load(&key(), Access::ReadOnly).unwrap();
+    assert!(loaded.operations() == kernel.operations());
     assert!(loaded.fixture_effects() == kernel.fixture_effects());
     assert_eq!(error.completion, Completion::Indeterminate);
     eprintln!(
@@ -324,4 +327,125 @@ fn diagnostic_unwind_retains_incomplete_prefix_and_redacts_sensitive_identity() 
             .any(|s| matches!(s, AdmissionStage::Finished(_)))
     );
     assert_eq!(store.load(&key(), Access::ReadOnly).unwrap().revision(), 0);
+}
+
+#[test]
+fn diagnostic_enabled_and_disabled_appends_have_equal_canonical_state() {
+    let first = Temp::new();
+    let second = Temp::new();
+    let ordinary = create(&first);
+    let observed = create(&second);
+    let input = claim();
+    let normal = ordinary.admit(&key(), input.clone()).unwrap();
+    let mut report = AdmissionDiagnostics::default();
+    let instrumented = observed
+        .admit_with_diagnostics(&key(), input.clone(), &mut report)
+        .unwrap();
+    assert_eq!(normal.store, ordinary.id());
+    assert_eq!(instrumented.store, observed.id());
+    assert_eq!((normal.ordinal, normal.duplicate), (1, false));
+    assert_eq!((instrumented.ordinal, instrumented.duplicate), (1, false));
+    assert_complete(&report, &input, &observed);
+    let events = stages(&report);
+    assert!(events.contains(&AdmissionStage::InsertAcknowledged));
+    assert!(events.contains(&AdmissionStage::CommitAcknowledged));
+    assert_eq!(
+        events.last(),
+        Some(&AdmissionStage::Finished(AdmissionOutcome::Appended {
+            ordinal: 1
+        }))
+    );
+    let left = ordinary.load(&key(), Access::ReadOnly).unwrap();
+    let right = observed.load(&key(), Access::ReadOnly).unwrap();
+    assert_eq!(left.revision(), 1);
+    assert_eq!(right.revision(), 1);
+    assert!(left.operations() == std::slice::from_ref(&input));
+    assert!(right.operations() == left.operations());
+    assert!(right.fixture_effects() == left.fixture_effects());
+}
+
+#[test]
+fn diagnostic_held_lifecycle_lock_is_busy_not_deadline() {
+    let f = Temp::new();
+    let mut store = create(&f);
+    let normal_limits = store.limits;
+    let before = snapshot(&f);
+    let held = store.location.lock_for(normal_limits.timeout()).unwrap();
+    store.limits = ReadLimits::new(normal_limits.bytes(), Duration::from_nanos(1)).unwrap();
+    let input = claim();
+    let mut report = AdmissionDiagnostics::default();
+    let error = store
+        .admit_with_diagnostics(&key(), input.clone(), &mut report)
+        .unwrap_err();
+    assert_eq!(error.completion, Completion::Rejected);
+    assert!(
+        matches!(error.error, ProgramStoreError::Storage(ref error) if error.kind() == ErrorKind::Busy)
+    );
+    assert_complete(&report, &input, &store);
+    assert_eq!(
+        stages(&report),
+        vec![
+            AdmissionStage::Entered,
+            AdmissionStage::LockRequested,
+            AdmissionStage::Failure(AdmissionErrorKind::Storage(ErrorKind::Busy)),
+            AdmissionStage::Finished(AdmissionOutcome::Failed(Completion::Rejected))
+        ]
+    );
+    drop(held);
+    store.limits = normal_limits;
+    assert_eq!(snapshot(&f), before);
+    assert_eq!(store.load(&key(), Access::ReadOnly).unwrap().revision(), 0);
+}
+
+#[test]
+fn diagnostic_postcommit_metadata_requires_exact_canonical_confirmation() {
+    let f = Temp::new();
+    let store = create(&f);
+    let input = claim();
+    let mut report = AdmissionDiagnostics::default();
+    let error = store
+        .admit_diagnostic_observed(
+            &key(),
+            input.clone(),
+            |_, _| {},
+            |_| panic!("uncertain metadata invoked launch callback"),
+            &mut report,
+            Some(AdmissionFault::Deadline(Stage::AfterCommit)),
+        )
+        .unwrap_err();
+    assert_eq!(error.completion, Completion::Indeterminate);
+    assert!(matches!(error.error, ProgramStoreError::Deadline));
+    assert_complete(&report, &input, &store);
+    assert!(stages(&report).contains(&AdmissionStage::CommitAcknowledged));
+    let reopened = ProgramStore::open(&f.store(), &key(), Access::ReadOnly, limits()).unwrap();
+    let loaded = reopened.load(&key(), Access::ReadOnly).unwrap();
+    assert_eq!(loaded.revision(), 1);
+    assert!(loaded.operations() == std::slice::from_ref(&input));
+    assert_eq!(
+        reopened
+            .reconcile(&key(), &definition(), &input, Access::ReadOnly)
+            .unwrap(),
+        Reconciliation::Present(AdmissionReceipt {
+            store: store.id(),
+            ordinal: 1,
+            duplicate: true
+        })
+    );
+    let mut changed = input.clone();
+    changed.expected = 1;
+    assert_eq!(
+        reopened
+            .reconcile(&key(), &definition(), &changed, Access::ReadOnly)
+            .unwrap(),
+        Reconciliation::Conflict
+    );
+    changed = input.clone();
+    changed.grant.actor = ActorId::new("changed-actor").unwrap();
+    assert_eq!(
+        reopened
+            .reconcile(&key(), &definition(), &changed, Access::ReadOnly)
+            .unwrap(),
+        Reconciliation::Conflict
+    );
+    assert_eq!(error.completion, Completion::Indeterminate);
 }

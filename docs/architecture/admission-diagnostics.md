@@ -80,6 +80,9 @@ Representative enabled/disabled overhead measurement is NOT_RUN.
 The trusted CLI integration fixture opts into this method for its generic
 admission helper and writes only fixed synthetic operation IDs, predecessor,
 dispatch-slot count and redacted diagnostic events after admission returns.
+The original admission outcome is retained even when the fixture separately
+confirms exact newly owned metadata through canonical read-only reconciliation.
+Dispatch and other effect transitions cannot use that fixture-only confirmation.
 A dispatch slot is an attempted dispatch count, not proof of physical launch.
 Native process observations remain the launch/termination evidence.
 
