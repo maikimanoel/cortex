@@ -341,3 +341,13 @@ remains `INCOMPLETE` for this bounded native support. A retained admission recei
 for an observation is distinct from a closure receipt. Guidance remains advisory,
 and journal bindings do not establish a live prepared handle. All other schemas,
 exit codes, redaction and read-only inspection behavior remain unchanged.
+
+## Explicit coordination preparation
+
+The CLI library's `program_preparation::prepare` composes the existing operational
+scheduling preview with explicit Claim/Package pairs (CAP-WFL-004). It preserves
+all scheduling holds and a separate missing-authority hold, validates exact
+identity/predecessor correspondence, and uses one outer in-memory draft plus the
+existing reducer guards. It cannot dispatch or reserve durable resources. Later
+explicit ProgramStore admissions can commit a prefix; that prefix and any
+Indeterminate result must remain retained without automatic retry.

@@ -18,3 +18,6 @@ pub mod knowledge;
 pub use cortex_storage::history_store;
 
 pub use inspection::{InspectionError, RepositoryObservation, inspect, inspect_candidate};
+
+/// Finite advisory scheduling-to-coordination preparation.
+pub mod program_preparation;

@@ -3,6 +3,8 @@
 //! This is an in-memory measurement consumer, not a durable workflow journal,
 //! runner, permission service, protected-oracle store or statistical claim engine.
 //! Reports and acceptance/separation references are unauthenticated caller data.
+pub mod program;
+
 use crate::{ExecutionObservation, unified::*};
 use cortex_core::{
     binding::{CandidateBindingContract, CandidateObservation, ContractRevision, ObservationId},
