@@ -1,5 +1,7 @@
 #![cfg(target_os = "linux")]
 //! GPE-FUNC-2T Q0-Q7: real trusted artifacts through the existing production owners.
+#[path = "support/gpe_admission.rs"]
+mod gpe_admission;
 #[path = "support/gpe_evaluation.rs"]
 mod gpe_evaluation;
 use cortex_cli::inspect_candidate;
@@ -351,9 +353,71 @@ fn load(c: &Campaign, store: &ProgramStore) -> CoordinationKernel {
     store.load(&c.key, Access::ReadOnly).unwrap()
 }
 fn admit(c: &Campaign, store: &ProgramStore, id: &str, command: Input) -> AdmissionReceipt {
-    store
-        .admit(&c.key, operation(&load(c, store), id, command))
-        .unwrap()
+    let before = load(c, store);
+    let input = operation(&before, id, command);
+    let expected = input.expected;
+    let mut diagnostics =
+        cortex_storage::program_store::diagnostics::AdmissionDiagnostics::default();
+    let result = store.admit_with_diagnostics(&c.key, input.clone(), &mut diagnostics);
+    // Only this owned fixture's fixed synthetic operation labels are emitted.
+    // Formatting and file I/O happen after admission has released its lock.
+    let preceding_launch_slots = fs::read_dir(c.root.join("evidence"))
+        .and_then(|mut entries| {
+            entries.try_fold(0usize, |count, entry| {
+                entry.map(|entry| {
+                    count
+                        + usize::from(
+                            entry
+                                .file_name()
+                                .to_string_lossy()
+                                .starts_with("fixture-dispatch-"),
+                        )
+                })
+            })
+        })
+        .map_err(|error| error.kind());
+    let text = format!(
+        "operation={id} expected={expected} preceding_dispatch_slots={preceding_launch_slots:?} diagnostics={diagnostics:?}\nadmission={result:?}\n"
+    );
+    let path = c.evidence.join(format!("admission-{id}.txt"));
+    let retained = fs::write(&path, &text)
+        .and_then(|()| fs::set_permissions(&path, fs::Permissions::from_mode(0o600)))
+        .map_err(|error| error.kind());
+    // Report emission must not hide an uncertain admission behind an I/O panic.
+    let observed = gpe_admission::confirm_metadata(result, &input, store.id(), || {
+        // This separate read concerns only the newly owned fixture input. It
+        // neither repeats admission nor refreshes authority for a later command.
+        store.reconcile(&c.key, before.initial(), &input, Access::ReadOnly)
+    })
+    .unwrap_or_else(|failure| {
+        panic!("{text}confirmation={failure:?}; diagnostic_retention={retained:?}")
+    });
+    let receipt = match observed {
+        gpe_admission::ObservedAdmission::Admitted(receipt) => receipt,
+        gpe_admission::ObservedAdmission::Confirmed { original, receipt } => {
+            let confirmation = format!(
+                "original_admission={original:?}\ncanonical_presence={receipt:?}\nno_admission_retry=true\n"
+            );
+            let path = c.evidence.join(format!("confirmation-{id}.txt"));
+            let written = fs::write(&path, &confirmation)
+                .and_then(|()| fs::set_permissions(&path, fs::Permissions::from_mode(0o600)))
+                .map_err(|error| error.kind());
+            assert!(
+                written.is_ok(),
+                "{text}{confirmation}confirmation_retention={written:?}"
+            );
+            receipt
+        }
+    };
+    assert!(
+        retained.is_ok(),
+        "fixture admission observation; diagnostic_retention={retained:?}; {text}"
+    );
+    assert!(
+        preceding_launch_slots.is_ok(),
+        "fixture admission observation; dispatch count unavailable; {text}"
+    );
+    receipt
 }
 fn effect(c: &Campaign, store: &ProgramStore, id: &str, event: EffectEvent) {
     admit(c, store, id, Input::SupervisedEffect(Box::new(event)));

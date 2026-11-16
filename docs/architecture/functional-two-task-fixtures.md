@@ -36,6 +36,18 @@ generation and release cannot be reused; original PASS and release history remai
 The upstream producer is preserved. The existing independent-branch regression
 additionally checks that unrelated D/E work survives a scoped A/B/C/F change.
 
+Fixture metadata admission preserves a separate original caller outcome and a
+canonical presence observation. An Indeterminate/Deadline may follow acknowledged
+commit under the unchanged 500 ms storage budget. For explicitly permitted
+metadata and process preparation only, the fixture may inspect that same new
+owned input with read-only `ProgramStore::reconcile`, using its exact initial
+definition, store identity and predecessor. Only matching Present permits the
+fixture to continue from retained state; it does not relabel the original return
+as success. Absent, Conflict, unreadable state or mismatched receipts fail closed.
+No admission is retried. Dispatch, other effect transitions and domain operations
+are excluded; current authority is checked again by each subsequent operation.
+A diagnostic event alone never supplies this canonical receipt.
+
 A new synthetic no-child dispatch in the same main journal retains an Unknown,
 its reservation and metadata claim. Retry, invented settlement and absence/refund
 without observations are refused. This deliberately unresolved synthetic record

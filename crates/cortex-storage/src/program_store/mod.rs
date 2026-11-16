@@ -21,6 +21,7 @@
 //! not preemption of a blocked kernel I/O call. Encoded bounds are not RSS quotas.
 
 mod codec;
+pub mod diagnostics;
 use crate::history_store::{
     self, Access, Completion, ErrorKind, StoreError, StoreId, StoreKey, location::Location,
 };
@@ -28,6 +29,7 @@ use cortex_core::program::ProgramDefinition;
 use cortex_evidence::program::{
     Command, CoordinationKernel, KernelError, KernelReceipt, Operation,
 };
+use diagnostics::{AdmissionDiagnostics, AdmissionStage, Recorder};
 use rusqlite::{Connection, TransactionBehavior};
 use std::{
     error::Error,
@@ -210,6 +212,8 @@ struct Budget {
     start: Instant,
     limits: ReadLimits,
     used: usize,
+    #[cfg(test)]
+    expired: bool,
 }
 impl Budget {
     fn new(limits: ReadLimits) -> Self {
@@ -217,9 +221,15 @@ impl Budget {
             start: Instant::now(),
             limits,
             used: 0,
+            #[cfg(test)]
+            expired: false,
         }
     }
     fn check(&self) -> Result<(), ProgramStoreError> {
+        #[cfg(test)]
+        if self.expired {
+            return Err(ProgramStoreError::Deadline);
+        }
         if self.start.elapsed() >= self.limits.timeout {
             Err(ProgramStoreError::Deadline)
         } else {
@@ -509,6 +519,34 @@ impl ProgramStore {
     ) -> Result<AdmissionReceipt, AdmissionFailure> {
         self.admit_observed(key, input, |_, _| {})
     }
+    /// Admit with an explicitly selected bounded in-memory diagnostic report.
+    ///
+    /// The report is reset before admission; all formatting or persistence belongs
+    /// to the caller after this returns. No diagnostic event changes the journal,
+    /// deadlines, receipt or failure classification. Collection adds clock reads
+    /// and fixed-buffer writes when enabled; no negligible-overhead claim is made.
+    /// On caught unwinding the caller retains an incomplete prefix. A process
+    /// exit can lose it entirely. Exact operation/store/predecessor correspondence
+    /// does not authenticate the input or establish its attempt/generation validity.
+    pub fn admit_with_diagnostics(
+        &self,
+        key: &StoreKey,
+        input: Operation,
+        diagnostics: &mut AdmissionDiagnostics,
+    ) -> Result<AdmissionReceipt, AdmissionFailure> {
+        diagnostics.begin(self.id, &input);
+        let result = self.admit_recorded(
+            key,
+            input,
+            |_, _| {},
+            |_| (),
+            diagnostics,
+            #[cfg(test)]
+            None,
+        );
+        diagnostics.finish(&result);
+        result.map(|(receipt, _)| receipt)
+    }
     fn admit_observed(
         &self,
         key: &StoreKey,
@@ -570,24 +608,91 @@ impl ProgramStore {
         &self,
         key: &StoreKey,
         input: Operation,
-        mut observe: impl FnMut(Stage, &Connection),
+        observe: impl FnMut(Stage, &Connection),
         launch: impl FnOnce(&CoordinationKernel) -> R,
     ) -> Result<(AdmissionReceipt, Option<R>), AdmissionFailure> {
+        self.admit_recorded(
+            key,
+            input,
+            observe,
+            launch,
+            &mut diagnostics::Disabled,
+            #[cfg(test)]
+            None,
+        )
+    }
+    #[cfg(test)]
+    fn admit_diagnostic_observed<R>(
+        &self,
+        key: &StoreKey,
+        input: Operation,
+        observe: impl FnMut(Stage, &Connection),
+        launch: impl FnOnce(&CoordinationKernel) -> R,
+        diagnostics: &mut AdmissionDiagnostics,
+        fault: Option<AdmissionFault>,
+    ) -> Result<(AdmissionReceipt, Option<R>), AdmissionFailure> {
+        diagnostics.begin(self.id, &input);
+        let result = self.admit_recorded(key, input, observe, launch, diagnostics, fault);
+        diagnostics.finish(&result);
+        result
+    }
+    fn admit_recorded<R, D: Recorder>(
+        &self,
+        key: &StoreKey,
+        input: Operation,
+        mut observe: impl FnMut(Stage, &Connection),
+        launch: impl FnOnce(&CoordinationKernel) -> R,
+        diagnostics: &mut D,
+        #[cfg(test)] fault: Option<AdmissionFault>,
+    ) -> Result<(AdmissionReceipt, Option<R>), AdmissionFailure> {
         let mut budget = Budget::new(self.limits);
+        diagnostics.record(AdmissionStage::LockRequested);
         let _lock = self
             .location
             .lock_for(self.limits.timeout)
-            .map_err(AdmissionFailure::rejected)?;
-        self.location.ready().map_err(AdmissionFailure::rejected)?;
-        budget.check().map_err(AdmissionFailure::rejected)?;
+            .map_err(|error| diagnostic_rejection(diagnostics, error.into()))?;
+        diagnostics.record(AdmissionStage::LockAcquired);
+        #[cfg(test)]
+        if fault == Some(AdmissionFault::Deadline(Stage::AfterLock)) {
+            budget.expired = true;
+        }
+        diagnostics.record(AdmissionStage::LocationCheck);
+        self.location
+            .ready()
+            .map_err(|error| diagnostic_rejection(diagnostics, error.into()))?;
+        diagnostics.record(AdmissionStage::PostLockDeadlineCheck);
+        budget
+            .check()
+            .map_err(|error| diagnostic_rejection(diagnostics, error))?;
+        diagnostics.record(AdmissionStage::Connect);
         let mut conn = history_store::connect(&self.location, key, Access::Recover)
-            .map_err(AdmissionFailure::rejected)?;
+            .map_err(|error| diagnostic_rejection(diagnostics, error.into()))?;
+        #[cfg(test)]
+        if fault == Some(AdmissionFault::RollbackDenied) {
+            use rusqlite::hooks::{AuthAction, Authorization, TransactionOperation};
+            conn.authorizer(Some(|context: rusqlite::hooks::AuthContext<'_>| {
+                if matches!(
+                    context.action,
+                    AuthAction::Transaction {
+                        operation: TransactionOperation::Rollback
+                    }
+                ) {
+                    Authorization::Deny
+                } else {
+                    Authorization::Allow
+                }
+            }))
+            .expect("install controlled rollback denial");
+        }
+        diagnostics.record(AdmissionStage::BeginTransaction);
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|e| AdmissionFailure::rejected(sql(e)))?;
+            .map_err(|e| diagnostic_rejection(diagnostics, sql(e)))?;
         let mut validation =
             || -> Result<(KernelReceipt, Zeroizing<Vec<u8>>, CoordinationKernel), ProgramStoreError> {
+                diagnostics.record(AdmissionStage::LoadJournal);
                 let (id, k, profile) = load(&tx, &self.location, &mut budget)?;
+                diagnostics.record(AdmissionStage::ValidateOperation);
                 if id != self.id || profile != self.profile {
                     return Err(ProgramStoreError::TargetChanged);
                 }
@@ -612,8 +717,9 @@ impl ProgramStore {
         let (receipt, encoded, draft) = match validation() {
             Ok(v) => v,
             Err(error) => {
+                diagnostics.record(AdmissionStage::Failure((&error).into()));
                 return Err(AdmissionFailure {
-                    completion: if tx.rollback().is_ok() {
+                    completion: if diagnostic_rollback(tx, diagnostics).is_ok() {
                         Completion::Rejected
                     } else {
                         Completion::Indeterminate
@@ -622,10 +728,18 @@ impl ProgramStore {
                 });
             }
         };
+        diagnostics.record(AdmissionStage::Validated {
+            ordinal: receipt.ordinal,
+            duplicate: receipt.duplicate,
+        });
         if receipt.duplicate {
-            tx.rollback().map_err(|e| AdmissionFailure {
-                completion: Completion::Indeterminate,
-                error: sql(e),
+            diagnostic_rollback(tx, diagnostics).map_err(|e| {
+                let error = sql(e);
+                diagnostics.record(AdmissionStage::Failure((&error).into()));
+                AdmissionFailure {
+                    completion: Completion::Indeterminate,
+                    error,
+                }
             })?;
             return Ok((
                 AdmissionReceipt {
@@ -638,24 +752,22 @@ impl ProgramStore {
         }
         observe(Stage::BeforeWrite, &tx);
         let ordinal = i64::try_from(receipt.ordinal)
-            .map_err(|_| AdmissionFailure::rejected(ProgramStoreError::Capacity))?;
+            .map_err(|_| diagnostic_rejection(diagnostics, ProgramStoreError::Capacity))?;
+        diagnostics.record(AdmissionStage::Insert);
         if let Err(e) = tx.execute(
             "INSERT INTO program_inputs VALUES(?1,?2,?3)",
             rusqlite::params![ordinal, input.id.as_str(), encoded.as_slice()],
         ) {
+            let error = sql(e);
+            diagnostics.record(AdmissionStage::Failure((&error).into()));
+            let rolled_back = if tx.is_autocommit() {
+                diagnostics.record(AdmissionStage::TransactionAlreadyEnded);
+                true
+            } else {
+                diagnostic_rollback(tx, diagnostics).is_ok()
+            };
             return Err(AdmissionFailure {
-                completion: if tx.is_autocommit() || tx.rollback().is_ok() {
-                    Completion::RolledBack
-                } else {
-                    Completion::Indeterminate
-                },
-                error: sql(e),
-            });
-        }
-        observe(Stage::BeforeCommit, &tx);
-        if let Err(error) = budget.check() {
-            return Err(AdmissionFailure {
-                completion: if tx.rollback().is_ok() {
+                completion: if rolled_back {
                     Completion::RolledBack
                 } else {
                     Completion::Indeterminate
@@ -663,14 +775,49 @@ impl ProgramStore {
                 error,
             });
         }
-        tx.commit().map_err(|e| AdmissionFailure {
-            completion: Completion::Indeterminate,
-            error: sql(e),
+        diagnostics.record(AdmissionStage::InsertAcknowledged);
+        observe(Stage::BeforeCommit, &tx);
+        #[cfg(test)]
+        if matches!(
+            fault,
+            Some(AdmissionFault::Deadline(Stage::BeforeCommit) | AdmissionFault::RollbackDenied)
+        ) {
+            budget.expired = true;
+        }
+        diagnostics.record(AdmissionStage::PreCommitDeadlineCheck);
+        if let Err(error) = budget.check() {
+            diagnostics.record(AdmissionStage::Failure((&error).into()));
+            return Err(AdmissionFailure {
+                completion: if diagnostic_rollback(tx, diagnostics).is_ok() {
+                    Completion::RolledBack
+                } else {
+                    Completion::Indeterminate
+                },
+                error,
+            });
+        }
+        diagnostics.record(AdmissionStage::Commit);
+        tx.commit().map_err(|e| {
+            let error = sql(e);
+            diagnostics.record(AdmissionStage::Failure((&error).into()));
+            AdmissionFailure {
+                completion: Completion::Indeterminate,
+                error,
+            }
         })?;
+        diagnostics.record(AdmissionStage::CommitAcknowledged);
         observe(Stage::AfterCommit, &conn);
-        budget.check().map_err(|error| AdmissionFailure {
-            completion: Completion::Indeterminate,
-            error,
+        #[cfg(test)]
+        if fault == Some(AdmissionFault::Deadline(Stage::AfterCommit)) {
+            budget.expired = true;
+        }
+        diagnostics.record(AdmissionStage::PostCommitDeadlineCheck);
+        budget.check().map_err(|error| {
+            diagnostics.record(AdmissionStage::Failure((&error).into()));
+            AdmissionFailure {
+                completion: Completion::Indeterminate,
+                error,
+            }
         })?;
         let receipt = AdmissionReceipt {
             store: self.id,
@@ -775,11 +922,41 @@ impl ProgramStore {
         .remove(key, request)
     }
 }
-#[derive(Clone, Copy)]
+// Deterministic fault boundaries are compiled only into this crate's unit tests.
+// Integration consumers cannot enable them through the diagnostic API.
+#[cfg(test)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AdmissionFault {
+    Deadline(Stage),
+    RollbackDenied,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Stage {
+    #[cfg(test)]
+    AfterLock,
     BeforeWrite,
     BeforeCommit,
     AfterCommit,
+}
+fn diagnostic_rejection(
+    diagnostics: &mut impl Recorder,
+    error: ProgramStoreError,
+) -> AdmissionFailure {
+    diagnostics.record(AdmissionStage::Failure((&error).into()));
+    AdmissionFailure::rejected(error)
+}
+fn diagnostic_rollback(
+    tx: rusqlite::Transaction<'_>,
+    diagnostics: &mut impl Recorder,
+) -> rusqlite::Result<()> {
+    diagnostics.record(AdmissionStage::RollbackRequested);
+    let result = tx.rollback();
+    diagnostics.record(if result.is_ok() {
+        AdmissionStage::RollbackAcknowledged
+    } else {
+        AdmissionStage::RollbackFailed
+    });
+    result
 }
 fn identity(
     c: &Connection,

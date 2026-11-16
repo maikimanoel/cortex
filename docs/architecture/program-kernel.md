@@ -1,5 +1,9 @@
 # GPE-B Stage 1 persistent coordination kernel
 
+The opt-in [admission diagnostics](admission-diagnostics.md) describe bounded
+observations of this existing transaction protocol without changing its journal,
+authority, deadlines or completion classifications.
+
 This bounded implementation path is authorized under the existing capability
 owners: CAP-CORE-003, CAP-WFL-001/002/004, CAP-EVD-003, CAP-MEM-001,
 CAP-SEC-002, CAP-CTX-001/002 and CAP-CLI-004. It does not complete those

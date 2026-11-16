@@ -2,7 +2,7 @@
 use super::fixture;
 use super::*;
 #[path = "../../../../cortex-evidence/tests/support/supervision.rs"]
-mod supervised_fixture;
+pub(super) mod supervised_fixture;
 use cortex_core::program::{
     operational::{EffectEvent, EffectScope, EffectStatus},
     supervision::*,
