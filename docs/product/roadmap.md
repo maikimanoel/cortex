@@ -574,3 +574,13 @@ subtree observations and explains missing whole-domain proof through the existin
 owners and inspection path. Source verification does not qualify the shared
 workstation, settle historical debt, grant provider execution or complete a
 milestone. Actual-host admission retains its enforced-control and authority gates.
+
+### Campaign C bounded native Linux continuation
+
+The owner separately authorizes the [native bootstrap isolation source continuation](../architecture/native-linux-isolation.md)
+on the qualified Campaign B baseline. Implemented mechanisms extend the existing
+prepared domain and preserve admission, Unknown, reservations and no-relaunch
+semantics. They do not complete 004-D or 006-B, qualify an arbitrary executor,
+resolve provider policy, establish comparative improvement or authorize publication.
+Next operational work must qualify the actual owned resource scope, complete
+closure evidence and intended workload before any general execution claim.

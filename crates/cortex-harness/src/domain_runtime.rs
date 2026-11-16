@@ -93,6 +93,19 @@ pub struct DomainRecoveryObservation {
 }
 
 trait DomainManager {
+    fn isolation(&self) -> Option<&crate::native_linux::NativeIsolation> {
+        None
+    }
+    fn verify_ready(&self, hello: &serde_json::Value) -> bool {
+        hello.as_array().is_some_and(|a| a.len() == 6)
+    }
+    fn pin_process(
+        &self,
+        _actual: &ManagedObservation,
+    ) -> Result<Option<crate::native_linux::StableProcess>, DomainDiagnostic> {
+        Ok(None)
+    }
+
     fn corresponds(&self, intent: &DomainIntent) -> Result<(), DomainDiagnostic>;
     fn create(&mut self, intent: &DomainIntent, end: Instant) -> Result<(), DomainDiagnostic>;
     fn observe(
@@ -115,6 +128,21 @@ trait DomainManager {
     ) -> Result<(), DomainDiagnostic>;
 }
 impl DomainManager for SystemdNonceDomain {
+    fn isolation(&self) -> Option<&crate::native_linux::NativeIsolation> {
+        self.isolation()
+    }
+    fn verify_ready(&self, hello: &serde_json::Value) -> bool {
+        self.verify_ready(hello)
+    }
+    fn pin_process(
+        &self,
+        actual: &ManagedObservation,
+    ) -> Result<Option<crate::native_linux::StableProcess>, DomainDiagnostic> {
+        crate::native_linux::StableProcess::acquire(actual.main_pid, actual.start_ticks)
+            .map(Some)
+            .map_err(|e| issue(DomainPhaseDiagnostic::Identity, DomainCause::Io(e.kind())))
+    }
+
     fn corresponds(&self, i: &DomainIntent) -> Result<(), DomainDiagnostic> {
         self.corresponds(i)
     }
@@ -203,6 +231,8 @@ fn current(
 #[must_use = "retain the gate until explicit release or cancellation; dropping it does not prove cleanup"]
 pub struct PreparedNonceDomain {
     channel: UnixStream,
+    process: Option<crate::native_linux::StableProcess>,
+    native: Option<crate::native_linux::NativeReadiness>,
     store: StoreId,
     intent: DomainIntent,
     ids: DomainOperations,
@@ -214,6 +244,12 @@ pub struct PreparedNonceDomain {
     end: Instant,
 }
 impl PreparedNonceDomain {
+    /// Child-installed native controls, only for the selected isolated profile.
+    /// These observations are not operational host qualification or permission.
+    pub fn native_readiness(&self) -> Option<&crate::native_linux::NativeReadiness> {
+        self.native.as_ref()
+    }
+
     /// Exact retained domain, without exposing the channel or adding authority.
     pub fn domain(&self) -> &DomainId {
         &self.ids.domain
@@ -443,7 +479,7 @@ fn prepare<M: DomainManager>(
         let actual = manager.observe(&domain.intent, end)?;
         if peer.pid.as_raw_pid() as u32 != actual.main_pid
             || !actual.populated
-            || hello.as_array().is_none_or(|a| a.len() != 6)
+            || !manager.verify_ready(&hello)
             || hello[0] != 1
             || hello[1] != "hello"
             || hello[2] != domain.intent.request.as_str()
@@ -456,6 +492,10 @@ fn prepare<M: DomainManager>(
                 DomainCause::Correspondence,
             ));
         }
+        let process = manager.pin_process(&actual)?;
+        let native = manager.isolation().map(|policy| {
+            crate::native_linux::NativeReadiness::observed(policy, &actual.identity.boot)
+        });
         let observation = binding_observation(&actual, &domain.intent, &ids.basis)?;
         let kernel = store
             .load(key, Access::ReadOnly)
@@ -477,6 +517,8 @@ fn prepare<M: DomainManager>(
         run.binding = Some(binding);
         Ok(Some(PreparedNonceDomain {
             channel,
+            process,
+            native,
             store: store.id(),
             intent: domain.intent,
             ids: ids.clone(),
@@ -574,6 +616,16 @@ fn release<M: DomainManager>(
                     ));
                 }
                 current(k, ids, prepared.start, prepared.end, cancel)?;
+                if let Some(native) = &prepared.native {
+                    native.check_context().map_err(|e| {
+                        issue(DomainPhaseDiagnostic::Release, DomainCause::Io(e.kind()))
+                    })?;
+                }
+                if let Some(process) = &prepared.process {
+                    process.require_live().map_err(|e| {
+                        issue(DomainPhaseDiagnostic::Release, DomainCause::Io(e.kind()))
+                    })?;
+                }
                 frame_write(
                     &mut prepared.channel,
                     &json!([

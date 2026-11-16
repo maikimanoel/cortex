@@ -1541,3 +1541,15 @@ Full capability statuses and operational prerequisites remain unchanged.
 The bounded recursive native closure readback reuses these existing owners.
 Subtree observations remain non-atomic and cannot supply helper, retained-stream,
 snapshot or final-use proof, settle capacity, or change capability status.
+
+## Campaign C native isolation source continuation
+
+The separately owner-authorized [native Linux bootstrap profile](../architecture/native-linux-isolation.md)
+extends CAP-HRN-001/002, CAP-WFL-001/004 and CAP-SEC-001/002 with child-side
+namespace/root/scratch enforcement, policy-bound readiness, stable direct-process
+identity and a non-networked provider-fixture boundary. Core negotiation and the
+canonical journal remain authoritative. This is restricted to the existing fixed
+trusted payload; general executors, operational containment, providers and complete
+capability acceptance remain gated. Test source defines mechanisms; exact local
+execution/review results and host limitations belong to its candidate handoff.
+No PLANNED capability status advances from this bounded source implementation.

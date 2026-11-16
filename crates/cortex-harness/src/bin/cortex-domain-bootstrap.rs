@@ -2,7 +2,7 @@
 fn main() {
     let arguments = std::env::args_os()
         .skip(1)
-        .take(4)
+        .take(10)
         .map(|value| value.into_string())
         .collect::<Result<Vec<_>, _>>();
     let Ok(arguments) = arguments else {

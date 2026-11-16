@@ -140,6 +140,12 @@ actual case evidence is supplied separately. It preserves missing/contradictory/
 stale support and grants no adoption or execution authority. There is no method
 selector or new CLI command, and broader Skills/Workflow capabilities remain planned.
 
+The bounded [native Linux isolation profile](docs/architecture/native-linux-isolation.md)
+adds child-side namespaces, a minimal read-only root, bounded scratch and
+policy-bound readiness to the prepared fixed-payload domain. A separate in-memory
+provider fixture refuses live routes. These mechanisms do not establish an
+arbitrary-executable backend or operational host/provider qualification.
+
 ## Run locally
 
 The bounded [two-task functional fixture path](docs/architecture/functional-two-task-fixtures.md)

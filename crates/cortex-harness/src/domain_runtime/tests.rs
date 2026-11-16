@@ -111,6 +111,7 @@ struct FakeManager {
     observed: usize,
     change_on_observation: Option<usize>,
     lost: bool,
+    reject_ready: bool,
     replace: bool,
     cancel: Option<Arc<AtomicBool>>,
     worker: Option<thread::JoinHandle<io::Result<()>>>,
@@ -124,6 +125,7 @@ impl FakeManager {
             observed: 0,
             change_on_observation: None,
             lost: false,
+            reject_ready: false,
             replace: false,
             cancel: None,
             worker: None,
@@ -136,6 +138,9 @@ impl FakeManager {
     }
 }
 impl DomainManager for FakeManager {
+    fn verify_ready(&self, hello: &serde_json::Value) -> bool {
+        !self.reject_ready && hello.as_array().is_some_and(|a| a.len() == 6)
+    }
     fn corresponds(&self, _: &DomainIntent) -> Result<(), DomainDiagnostic> {
         Ok(())
     }
@@ -878,4 +883,63 @@ fn recursive_native_consumer_retains_same_store_evidence_without_effect_or_refun
         store.load(&key(), Access::ReadOnly).unwrap().revision(),
         restored.revision()
     );
+}
+
+#[test]
+fn refused_native_readiness_preserves_creation_unknown_without_binding_release_or_replay() {
+    let root = Temp::new();
+    let (store, intent, ids) = stored(&root);
+    let mut manager = FakeManager::new(&root);
+    manager.reject_ready = true;
+    let result = run(&store, &mut manager, &ids, &AtomicBool::new(false));
+    manager.finish();
+    assert!(result.creation.is_some());
+    assert!(result.binding.is_none());
+    assert!(result.release.is_none() && result.nonce.is_none());
+    assert_eq!(
+        result.diagnostic.unwrap().cause,
+        DomainCause::Correspondence
+    );
+    let k = store.load(&key(), Access::ReadOnly).unwrap();
+    let record = k.domains().unwrap().domain(&intent.id).unwrap();
+    assert_eq!(record.outcome, HistoricalOutcome::Unknown);
+    assert!(record.holds(cortex_core::program::scheduling::Resource::WorkerSlots));
+    let second = run(&store, &mut manager, &ids, &AtomicBool::new(false));
+    assert!(second.recovery_only);
+    assert_eq!(manager.created, 1);
+}
+#[test]
+fn changed_native_policy_at_locked_release_keeps_uncertainty_and_cannot_transmit() {
+    let root = Temp::new();
+    let (store, intent, ids) = stored(&root);
+    let mut manager = FakeManager::new(&root);
+    let mut prepared = prepare_only(&store, &mut manager, &ids).prepared.unwrap();
+    let mount = root.0.join("mount");
+    fs::create_dir(&mount).unwrap();
+    fs::set_permissions(&mount, fs::Permissions::from_mode(0o700)).unwrap();
+    let policy = crate::native_linux::NativeIsolation::inspect(&mount, 4096, 16).unwrap();
+    let boot = fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap();
+    // Synthetic readiness exercises the canonical locked-release guard only;
+    // actual namespace installation has its separate process-fixture oracle.
+    prepared.native = Some(crate::native_linux::NativeReadiness::observed(
+        &policy,
+        boot.trim(),
+    ));
+    fs::write(mount.join("changed"), b"owned-canary").unwrap();
+    let result = release(
+        &store,
+        &key(),
+        &mut manager,
+        prepared,
+        &AtomicBool::new(false),
+    );
+    manager.finish();
+    assert!(result.nonce.is_none() && result.report.is_none());
+    assert!(result.diagnostic.is_some());
+    let k = store.load(&key(), Access::ReadOnly).unwrap();
+    let record = k.domains().unwrap().domain(&intent.id).unwrap();
+    assert_eq!(record.phase, DomainPhase::ReleaseUncertain);
+    assert!(record.holds(cortex_core::program::scheduling::Resource::WorkerSlots));
+    assert_eq!(record.outcome, HistoricalOutcome::Unknown);
+    assert_eq!(manager.created, 1);
 }

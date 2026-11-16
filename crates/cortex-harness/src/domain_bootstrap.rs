@@ -108,7 +108,7 @@ fn remaining(end: Instant) -> io::Result<Duration> {
 /// No arbitrary command, environment, private package or provider is supported.
 pub fn run_nonce_bootstrap(stream: UnixStream, request: &str, timeout: Duration) -> io::Result<()> {
     let end = deadline(timeout).map_err(as_io)?;
-    run_until(stream, request, end).map_err(as_io)
+    run_until(stream, request, end, None, None).map_err(as_io)
 }
 
 /// Redacted startup/protocol phase. No path, descriptor target or input is retained.
@@ -128,6 +128,8 @@ pub enum BootstrapPhase {
     Release,
     /// Fixed nonce observation could not be sent.
     Result,
+    /// Native control installation refused; no readiness or payload was emitted.
+    Isolation,
 }
 /// Finite diagnostic containing only a phase, error category and optional OS number.
 #[derive(Clone, Copy, Debug)]
@@ -173,7 +175,13 @@ fn deadline(timeout: Duration) -> Result<Instant, BootstrapFailure> {
         )
     })
 }
-fn run_until(mut stream: UnixStream, request: &str, end: Instant) -> Result<(), BootstrapFailure> {
+fn run_until(
+    mut stream: UnixStream,
+    request: &str,
+    end: Instant,
+    isolation: Option<&crate::native_linux::NativeIsolation>,
+    probe_port: Option<u16>,
+) -> Result<(), BootstrapFailure> {
     use BootstrapPhase::*;
     if !token(request) {
         return Err(failure(Arguments, io::ErrorKind::InvalidInput.into()));
@@ -182,12 +190,36 @@ fn run_until(mut stream: UnixStream, request: &str, end: Instant) -> Result<(), 
     let boot =
         fs::read_to_string("/proc/sys/kernel/random/boot_id").map_err(|e| failure(Identity, e))?;
     let ticks = ticks(pid).map_err(|e| failure(Identity, e))?;
-    frame_write(
-        &mut stream,
-        &json!([1, "hello", request, pid, ticks, boot.trim()]),
-        end,
-    )
-    .map_err(|e| failure(Hello, e))?;
+    let mut hello = json!([1, "hello", request, pid, ticks, boot.trim()]);
+    if let Some(policy) = isolation {
+        use std::os::fd::AsRawFd;
+        remaining(end).map_err(|e| failure(Isolation, e))?;
+        if let Err(error) = crate::native_linux::install(policy, stream.as_raw_fd()) {
+            // Advisory bounded setup diagnostic, never a ready/result frame.
+            // Preserve the setup failure even if diagnostic transport also fails.
+            let _ = frame_write(
+                &mut stream,
+                &json!([
+                    1,
+                    "isolation-refused",
+                    request,
+                    format!("{:?}", error.phase),
+                    error.os_error
+                ]),
+                end,
+            );
+            return Err(failure(Isolation, io::Error::new(error.kind, error)));
+        }
+        if let Some(port) = probe_port {
+            crate::native_linux::probe(policy, port).map_err(|e| failure(Isolation, e))?;
+        }
+        remaining(end).map_err(|e| failure(Isolation, e))?;
+        hello
+            .as_array_mut()
+            .expect("fixed array")
+            .push(json!(policy.digest()));
+    }
+    frame_write(&mut stream, &hello, end).map_err(|e| failure(Hello, e))?;
     let value = frame_read(&mut stream, end).map_err(|e| failure(Release, e))?;
     let a = value
         .as_array()
@@ -215,7 +247,7 @@ pub fn nonce_bootstrap_diagnosed(args: &[String]) -> Result<(), BootstrapFailure
     use BootstrapPhase::*;
     use std::os::fd::AsRawFd;
     let start = Instant::now();
-    if args.len() != 3 || !Path::new(&args[0]).is_absolute() || !token(&args[1]) {
+    if !matches!(args.len(), 3 | 8 | 9) || !Path::new(&args[0]).is_absolute() || !token(&args[1]) {
         return Err(failure(Arguments, io::ErrorKind::InvalidInput.into()));
     }
     let timeout: u64 = args[2]
@@ -224,6 +256,28 @@ pub fn nonce_bootstrap_diagnosed(args: &[String]) -> Result<(), BootstrapFailure
     if timeout == 0 || timeout > 5000 {
         return Err(failure(Arguments, io::ErrorKind::InvalidInput.into()));
     }
+    let isolation = if args.len() >= 8 {
+        if !((args.len() == 8 && args[3] == "isolated-v1")
+            || (args.len() == 9 && args[3] == "isolated-probe-v1"))
+        {
+            return Err(failure(Arguments, io::ErrorKind::InvalidInput.into()));
+        }
+        let bytes = args[5]
+            .parse()
+            .map_err(|_| failure(Arguments, io::ErrorKind::InvalidInput.into()))?;
+        let inodes = args[6]
+            .parse()
+            .map_err(|_| failure(Arguments, io::ErrorKind::InvalidInput.into()))?;
+        let policy =
+            crate::native_linux::NativeIsolation::inspect(Path::new(&args[4]), bytes, inodes)
+                .map_err(|e| failure(Isolation, e))?;
+        if policy.digest() != args[7] {
+            return Err(failure(Isolation, io::ErrorKind::InvalidData.into()));
+        }
+        Some(policy)
+    } else {
+        None
+    };
     let end = start
         .checked_add(Duration::from_millis(timeout))
         .ok_or_else(|| failure(Arguments, io::ErrorKind::InvalidInput.into()))?;
@@ -258,13 +312,40 @@ pub fn nonce_bootstrap_diagnosed(args: &[String]) -> Result<(), BootstrapFailure
     remaining(end).map_err(|e| failure(Connect, e))?;
     let stream = connect_now(Path::new(&args[0])).map_err(|e| failure(Connect, e))?;
     remaining(end).map_err(|e| failure(Connect, e))?;
-    run_until(stream, &args[1], end)
+    let probe_port = if args.len() == 9 {
+        Some(
+            args[8]
+                .parse::<u16>()
+                .ok()
+                .filter(|p| *p != 0)
+                .ok_or_else(|| failure(Arguments, io::ErrorKind::InvalidInput.into()))?,
+        )
+    } else {
+        None
+    };
+    run_until(stream, &args[1], end, isolation.as_ref(), probe_port)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::thread;
+
+    #[test]
+    fn overlong_and_invalid_isolated_arguments_cannot_reach_setup_or_connect() {
+        for n in [4, 7, 10, 11] {
+            let mut args = vec![
+                "/owned/socket".to_string(),
+                "request-1".into(),
+                "1000".into(),
+            ];
+            args.resize(n, "public-extra".into());
+            assert_eq!(
+                nonce_bootstrap_diagnosed(&args).unwrap_err().phase,
+                BootstrapPhase::Arguments
+            );
+        }
+    }
 
     #[test]
     fn fixed_payload_waits_for_exact_release_and_emits_only_nonce() {
