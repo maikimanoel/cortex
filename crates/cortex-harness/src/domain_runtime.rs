@@ -92,7 +92,37 @@ pub struct DomainRecoveryObservation {
     pub snapshot_safe: bool,
 }
 
-trait DomainManager {
+pub(crate) trait DomainManager {
+    fn check_context(
+        &self,
+        _kernel: &CoordinationKernel,
+        _intent: &DomainIntent,
+        _at: u64,
+    ) -> Result<(), DomainDiagnostic> {
+        Ok(())
+    }
+    fn setup(&mut self, _channel: &mut UnixStream, _end: Instant) -> Result<(), DomainDiagnostic> {
+        Ok(())
+    }
+    fn finish(
+        &mut self,
+        channel: &mut UnixStream,
+        intent: &DomainIntent,
+        value: &str,
+        end: Instant,
+        _cancel: &AtomicBool,
+        _authority: &mut dyn FnMut() -> Result<(), DomainDiagnostic>,
+    ) -> Result<cortex_core::program::operational::EffectOutcome, DomainDiagnostic> {
+        let reply = frame_read(channel, end)
+            .map_err(|e| issue(DomainPhaseDiagnostic::Release, DomainCause::Io(e.kind())))?;
+        if reply != json!([1, "nonce", intent.request.as_str(), value]) {
+            return Err(issue(DomainPhaseDiagnostic::Release, DomainCause::Protocol));
+        }
+        Ok(cortex_core::program::operational::EffectOutcome::Succeeded)
+    }
+    fn is_nonce(&self) -> bool {
+        true
+    }
     fn isolation(&self) -> Option<&crate::native_linux::NativeIsolation> {
         None
     }
@@ -419,6 +449,7 @@ fn prepare<M: DomainManager>(
         }
         manager.corresponds(&domain.intent)?;
         let at = current(&kernel, ids, start, end, cancel)?;
+        manager.check_context(&kernel, &domain.intent, at)?;
         let create = operation(
             &kernel,
             ids,
@@ -430,7 +461,8 @@ fn prepare<M: DomainManager>(
         );
         let (creation, created) = store
             .dispatch_domain(key, create, |k| {
-                current(k, ids, start, end, cancel)?;
+                let at = current(k, ids, start, end, cancel)?;
+                manager.check_context(k, &domain.intent, at)?;
                 let listener = listener()?;
                 listener.set_nonblocking(true).map_err(|e| {
                     issue(DomainPhaseDiagnostic::Creation, DomainCause::Io(e.kind()))
@@ -474,6 +506,7 @@ fn prepare<M: DomainManager>(
                 DomainCause::Io(io::Error::from(e).kind()),
             )
         })?;
+        manager.setup(&mut channel, end)?;
         let hello = frame_read(&mut channel, end)
             .map_err(|e| issue(DomainPhaseDiagnostic::Identity, DomainCause::Io(e.kind())))?;
         let actual = manager.observe(&domain.intent, end)?;
@@ -593,7 +626,8 @@ fn release<M: DomainManager>(
         );
         let (receipt, released) = store
             .dispatch_domain(key, release, |k| {
-                current(k, ids, prepared.start, prepared.end, cancel)?;
+                let at = current(k, ids, prepared.start, prepared.end, cancel)?;
+                manager.check_context(k, &prepared.intent, at)?;
                 let current_record = record(k, &ids.domain)?;
                 if current_record.intent != prepared.intent
                     || current_record.binding_observation.as_ref() != Some(&prepared.observation)
@@ -645,12 +679,28 @@ fn release<M: DomainManager>(
             return Ok(());
         };
         released?;
-        let reply = frame_read(&mut prepared.channel, prepared.end)
-            .map_err(|e| issue(DomainPhaseDiagnostic::Release, DomainCause::Io(e.kind())))?;
-        if reply != json!([1, "nonce", prepared.intent.request.as_str(), prepared.nonce]) {
-            return Err(issue(DomainPhaseDiagnostic::Release, DomainCause::Protocol));
+        let mut next_check = Instant::now();
+        let mut authority = || {
+            if Instant::now() >= next_check {
+                let fresh = store
+                    .load(key, Access::ReadOnly)
+                    .map_err(|_| issue(DomainPhaseDiagnostic::Release, DomainCause::Journal))?;
+                current(&fresh, ids, prepared.start, prepared.end, cancel)?;
+                next_check = Instant::now() + Duration::from_millis(1);
+            }
+            Ok(())
+        };
+        let outcome = manager.finish(
+            &mut prepared.channel,
+            &prepared.intent,
+            &prepared.nonce,
+            prepared.end,
+            cancel,
+            &mut authority,
+        )?;
+        if manager.is_nonce() {
+            run.nonce = Some(prepared.nonce.clone());
         }
-        run.nonce = Some(prepared.nonce.clone());
         let kernel = store
             .load(key, Access::ReadOnly)
             .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))?;
@@ -669,7 +719,7 @@ fn release<M: DomainManager>(
             DomainEvent::Report {
                 domain: ids.domain.clone(),
                 identity: prepared.observation.identity.clone(),
-                outcome: cortex_core::program::operational::EffectOutcome::Succeeded,
+                outcome,
                 at,
                 basis: ids.basis.clone(),
             },
@@ -1038,3 +1088,81 @@ fn cancel_domain<M: DomainManager>(
 
 #[cfg(test)]
 pub(crate) mod tests;
+
+/// Strict trusted-executable observations plus the original canonical receipts.
+/// Neither direct exit nor captured output establishes whole-domain closure.
+pub struct ExecutableDomainRun {
+    /// Existing durable domain sequence.
+    pub domain: DomainRun,
+    /// Bounded actual streams and artifact observations, if collection completed.
+    pub execution: Option<crate::native_execution::backend::ExecutionObservation>,
+}
+/// Prepare a trusted executable using exactly the existing domain admission path.
+/// No delegation means refusal before bootstrap creation; there is no fallback.
+pub fn prepare_executable_domain(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut crate::native_execution::backend::NativeExecutionDomain,
+    ids: &DomainOperations,
+    cancel: &AtomicBool,
+) -> DomainPreparation {
+    let start = Instant::now();
+    let end = start.checked_add(Duration::from_millis(backend.wall_ms()));
+    let value = backend.digest().to_owned();
+    let endpoint = backend.endpoint();
+    match end {
+        Some(end) => prepare(
+            store,
+            key,
+            backend,
+            ExecutionRequest {
+                ids,
+                nonce: &value,
+                cancel,
+                start,
+                end,
+            },
+            || {
+                UnixListener::bind(endpoint)
+                    .map_err(|e| issue(DomainPhaseDiagnostic::Creation, DomainCause::Io(e.kind())))
+            },
+        ),
+        None => {
+            let mut run = DomainRun::empty();
+            run.diagnostic = Some(issue(
+                DomainPhaseDiagnostic::Preparation,
+                DomainCause::Deadline,
+            ));
+            DomainPreparation {
+                run,
+                prepared: None,
+            }
+        }
+    }
+}
+/// Consume the uniquely prepared gate once. Collection runs outside the journal
+/// lock; missing acknowledgments cannot reconstruct or replay the release.
+pub fn release_executable_domain(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut crate::native_execution::backend::NativeExecutionDomain,
+    prepared: PreparedNonceDomain,
+    cancel: &AtomicBool,
+) -> ExecutableDomainRun {
+    let domain = release(store, key, backend, prepared, cancel);
+    ExecutableDomainRun {
+        domain,
+        execution: backend.take_observation(),
+    }
+}
+
+/// Persist cancellation before requesting termination of the exact native group.
+/// This observes no closure and never authorizes settlement, replay or refund.
+pub fn cancel_executable_domain(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut crate::native_execution::backend::NativeExecutionDomain,
+    operation: Operation,
+) -> Result<AdmissionReceipt, DomainDiagnostic> {
+    cancel_domain(store, key, backend, operation)
+}

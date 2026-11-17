@@ -22,3 +22,11 @@ nix = { version = "=0.31.3", default-features = false, features = ["process", "s
 
 [lints]
 workspace = true
+
+[[bin]]
+name = "cortex-native-copy-fixture"
+path = "tests/fixtures/native_copy.rs"
+
+[[bin]]
+name = "cortex-native-summary-fixture"
+path = "tests/fixtures/native_summary.rs"

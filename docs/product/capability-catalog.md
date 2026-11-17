@@ -1553,3 +1553,15 @@ trusted payload; general executors, operational containment, providers and compl
 capability acceptance remain gated. Test source defines mechanisms; exact local
 execution/review results and host limitations belong to its candidate handoff.
 No PLANNED capability status advances from this bounded source implementation.
+
+### Campaign D trusted executable source components
+
+The owner-authorized [trusted native executable continuation](../architecture/native-executable-components.md)
+adds immutable executable/source pins, a separate native bootstrap, bounded raw
+streams and artifacts, and descriptor-owned cgroup installation/recovery components
+under CAP-HRN-001/002, CAP-WFL-001/004 and CAP-SEC-001/002. Canonical executable
+release remains refused before creation: independent manager lifetime guarantees
+are not yet implemented, and no delegated host scope is authorized. Source tests
+cannot substitute for that integration or operational qualification. Existing
+fixed-nonce behavior remains supported in its prior scope. No capability status,
+milestone completion, production policy or comparative improvement is advanced.

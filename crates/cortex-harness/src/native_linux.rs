@@ -86,6 +86,12 @@ impl NativeIsolation {
         }
         format!("{:x}", hash.finalize())
     }
+    pub(crate) fn scratch_limits(&self) -> (u64, u64) {
+        (self.scratch_bytes, self.scratch_inodes)
+    }
+    pub(crate) fn root_path(&self) -> &Path {
+        &self.root
+    }
     pub(crate) fn arguments(&self) -> Vec<String> {
         vec![
             "isolated-v1".into(),
@@ -252,6 +258,15 @@ pub(crate) fn descriptors(channel: i32) -> io::Result<()> {
 /// view. No untrusted code runs here. The only retained non-stdio descriptor is
 /// the bounded fixed-protocol controller socket, never an arbitrary payload FD.
 pub(crate) fn install(policy: &NativeIsolation, channel: i32) -> Result<(), IsolationFailure> {
+    install_view(policy, channel, &[])
+}
+/// Dedicated bootstrap only. Sealed files are mounted before the root transition;
+/// writable scratch remains noexec. No whole host directory is ever exposed.
+pub(crate) fn install_view(
+    policy: &NativeIsolation,
+    channel: i32,
+    files: &[crate::native_execution::PinnedFile],
+) -> Result<(), IsolationFailure> {
     use IsolationPhase::*;
     use nix::sched::{CloneFlags, unshare};
     use rustix::{mount::*, thread::*};
@@ -265,7 +280,11 @@ pub(crate) fn install(policy: &NativeIsolation, channel: i32) -> Result<(), Isol
             Ok(())
         })(),
     )?;
-    stage(Descriptors, descriptors(channel))?;
+    if files.is_empty() {
+        stage(Descriptors, descriptors(channel))?;
+    } else {
+        stage(Descriptors, executable_descriptors(channel, files))?;
+    }
     let uid = rustix::process::getuid().as_raw();
     let gid = rustix::process::getgid().as_raw();
     // Safe nix wrapper; no CLONE_FILES or shared descriptor-table operation.
@@ -311,7 +330,11 @@ pub(crate) fn install(policy: &NativeIsolation, channel: i32) -> Result<(), Isol
             &policy.root,
             "tmpfs",
             flags,
-            Some(c"size=4096,nr_inodes=16,mode=0700"),
+            Some(if files.is_empty() {
+                c"size=4096,nr_inodes=16,mode=0700"
+            } else {
+                c"size=65536,nr_inodes=128,mode=0700"
+            }),
         )),
     )?;
     let scratch = policy.root.join("scratch");
@@ -337,6 +360,29 @@ pub(crate) fn install(policy: &NativeIsolation, channel: i32) -> Result<(), Isol
             Some(options.as_c_str()),
         )),
     )?;
+    for file in files {
+        let relative = file
+            .spec
+            .destination
+            .strip_prefix("/")
+            .map_err(|_| IsolationFailure {
+                phase: Filesystem,
+                kind: io::ErrorKind::InvalidInput,
+                os_error: None,
+            })?;
+        let target = policy.root.join(relative);
+        if let Some(parent) = target.parent() {
+            stage(Filesystem, fs::create_dir_all(parent))?;
+        }
+        stage(Filesystem, fs::File::create_new(&target))?;
+        stage(Filesystem, os(mount_bind(file.mount_source(), &target)))?;
+        let mut bind_flags =
+            MountFlags::BIND | MountFlags::RDONLY | MountFlags::NOSUID | MountFlags::NODEV;
+        if file.spec.role == crate::native_execution::FileRole::Input {
+            bind_flags |= MountFlags::NOEXEC;
+        }
+        stage(Filesystem, os(mount_remount(&target, bind_flags, "")))?;
+    }
     stage(Root, os(rustix::process::pivot_root(&policy.root, &old)))?;
     stage(Root, std::env::set_current_dir("/"))?;
     stage(Root, os(unmount("/old-root", UnmountFlags::DETACH)))?;
@@ -525,3 +571,41 @@ impl StableProcess {
 
 #[cfg(test)]
 mod tests;
+
+fn executable_descriptors(
+    channel: i32,
+    files: &[crate::native_execution::PinnedFile],
+) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    // The controller creates anonymous pipes. No ambient file or socket is a
+    // standard-stream exception in the executable profile.
+    for n in 0..=2 {
+        if fs::metadata(format!("/proc/self/fd/{n}"))?.mode() & 0o170000 != 0o010000 {
+            return Err(io::ErrorKind::PermissionDenied.into());
+        }
+    }
+    let fd = fs::File::open("/proc/self/fd")?;
+    let mut dir = rustix::fs::Dir::new(fd)?;
+    let own = dir.fd()?.as_raw_fd();
+    let allowed = files.iter().map(|f| f.file.as_raw_fd()).collect::<Vec<_>>();
+    let mut count = 0;
+    while let Some(entry) = dir.read() {
+        count += 1;
+        if count > 256 {
+            return Err(io::ErrorKind::InvalidData.into());
+        }
+        let entry = entry?;
+        let bytes = entry.file_name().to_bytes();
+        if bytes == b"." || bytes == b".." {
+            continue;
+        }
+        let n = std::str::from_utf8(bytes)
+            .ok()
+            .and_then(|s| s.parse::<i32>().ok())
+            .ok_or(io::ErrorKind::InvalidData)?;
+        if !(0..=2).contains(&n) && n != own && n != channel && !allowed.contains(&n) {
+            return Err(io::ErrorKind::PermissionDenied.into());
+        }
+    }
+    Ok(())
+}

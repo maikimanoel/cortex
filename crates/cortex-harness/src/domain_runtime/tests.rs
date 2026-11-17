@@ -112,6 +112,7 @@ struct FakeManager {
     change_on_observation: Option<usize>,
     lost: bool,
     reject_ready: bool,
+    reject_context: bool,
     replace: bool,
     cancel: Option<Arc<AtomicBool>>,
     worker: Option<thread::JoinHandle<io::Result<()>>>,
@@ -126,6 +127,7 @@ impl FakeManager {
             change_on_observation: None,
             lost: false,
             reject_ready: false,
+            reject_context: false,
             replace: false,
             cancel: None,
             worker: None,
@@ -138,6 +140,21 @@ impl FakeManager {
     }
 }
 impl DomainManager for FakeManager {
+    fn check_context(
+        &self,
+        _: &CoordinationKernel,
+        _: &DomainIntent,
+        _: u64,
+    ) -> Result<(), DomainDiagnostic> {
+        if self.reject_context {
+            Err(issue(
+                DomainPhaseDiagnostic::Preparation,
+                DomainCause::Contract,
+            ))
+        } else {
+            Ok(())
+        }
+    }
     fn verify_ready(&self, hello: &serde_json::Value) -> bool {
         !self.reject_ready && hello.as_array().is_some_and(|a| a.len() == 6)
     }
@@ -942,4 +959,35 @@ fn changed_native_policy_at_locked_release_keeps_uncertainty_and_cannot_transmit
     assert!(record.holds(cortex_core::program::scheduling::Resource::WorkerSlots));
     assert_eq!(record.outcome, HistoricalOutcome::Unknown);
     assert_eq!(manager.created, 1);
+}
+
+#[test]
+fn unsupported_manager_contract_refuses_before_creation_or_journal_mutation() {
+    let root = Temp::new();
+    let (store, _, ids) = stored(&root);
+    let before = store.load(&key(), Access::ReadOnly).unwrap().revision();
+    let mut manager = FakeManager::new(&root);
+    manager.reject_context = true;
+    let start = Instant::now();
+    let result = prepare(
+        &store,
+        &key(),
+        &mut manager,
+        ExecutionRequest {
+            ids: &ids,
+            nonce: "test",
+            cancel: &AtomicBool::new(false),
+            start,
+            end: start + Duration::from_secs(1),
+        },
+        || panic!("listener must not be created"),
+    );
+    assert!(result.prepared.is_none());
+    assert!(result.run.creation.is_none());
+    assert_eq!(manager.created, 0);
+    assert!(manager.worker.is_none());
+    assert_eq!(
+        store.load(&key(), Access::ReadOnly).unwrap().revision(),
+        before
+    );
 }
