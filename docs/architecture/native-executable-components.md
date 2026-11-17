@@ -18,7 +18,11 @@ read-only source inputs, scratch limits and expected outputs are explicit.
 These remain trusted-operator assertions, not authenticated production permission.
 
 The separate single-threaded executable bootstrap accepts bounded setup and
-policy-bound release frames. It verifies and seals the file copies it actually
+policy-bound release frames. Before installing namespaces it independently checks
+its actual cgroup membership, directory/boot identity, domain type, exact configured
+limits and exclusive bootstrap membership. It closes these inspection descriptors
+before confinement. This remains a trusted-controller protocol, not independent
+authentication of canonical admission; the guarded controller owns that authority. It verifies and seals the file copies it actually
 mounts. Individual immutable executable/runtime mounts are executable and read-only;
 inputs are read-only and non-executable. The minimal root is read-only and scratch
 is bounded tmpfs with noexec. No host root, home, credential, network socket or

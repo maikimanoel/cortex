@@ -77,13 +77,35 @@ pub fn run(arguments: &[String]) -> Result<(), ExecutionError> {
         .ok_or(ExecutionError::Policy)?;
     let mut channel = connect_now(Path::new(&arguments[0]))?;
     let setup = frame_read(&mut channel, end)?;
-    if setup.as_array().is_none_or(|a| a.len() != 9)
+    if setup.as_array().is_none_or(|a| a.len() != 10)
         || setup[0] != 1
         || setup[1] != "setup"
         || setup[2] != arguments[2]
     {
         return Err(ExecutionError::Identity);
     }
+    let group = setup[9]
+        .as_array()
+        .filter(|a| a.len() == 9)
+        .ok_or(ExecutionError::Policy)?;
+    let parse = |index: usize| -> Result<u64, ExecutionError> {
+        text(&group[index])?
+            .parse()
+            .map_err(|_| ExecutionError::Policy)
+    };
+    super::cgroup::verify_bootstrap_group(&super::cgroup::BootstrapGroup {
+        path: PathBuf::from(text(&group[0])?),
+        device: parse(1)?,
+        inode: parse(2)?,
+        boot: text(&group[3])?.into(),
+        controls: cortex_core::program::supervision::ScopeControls {
+            cpu_quota_us: parse(4)?,
+            cpu_period_us: parse(5)?,
+            memory_bytes: parse(6)?,
+            swap_bytes: parse(7)?,
+            tasks_max: parse(8)?,
+        },
+    })?;
     let isolation = NativeIsolation::inspect(
         Path::new(&arguments[3]),
         number(&setup[3])?,

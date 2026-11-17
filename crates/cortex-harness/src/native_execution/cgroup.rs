@@ -544,3 +544,124 @@ mod fault_tests {
         assert_eq!(valid.values["memory.swap.max"], "0");
     }
 }
+
+pub(crate) struct BootstrapGroup {
+    pub path: PathBuf,
+    pub device: u64,
+    pub inode: u64,
+    pub boot: String,
+    pub controls: ScopeControls,
+}
+fn member_path(path: &Path, membership: &str) -> Result<(), ExecutionError> {
+    let lines = membership.lines().collect::<Vec<_>>();
+    let [line] = lines.as_slice() else {
+        return Err(ExecutionError::Identity);
+    };
+    let relative = line.strip_prefix("0::/").ok_or(ExecutionError::Identity)?;
+    if relative.is_empty()
+        || Path::new(relative)
+            .components()
+            .any(|c| !matches!(c, std::path::Component::Normal(_)))
+        || Path::new("/sys/fs/cgroup").join(relative) != path
+    {
+        return Err(ExecutionError::Identity);
+    }
+    Ok(())
+}
+/// Read-only bootstrap check before namespaces/payload. No supplied pathname or
+/// parent frame alone establishes containment. No descriptor survives this call.
+pub(crate) fn verify_bootstrap_group(expected: &BootstrapGroup) -> Result<(), ExecutionError> {
+    validate_controls(&expected.controls)?;
+    if expected.controls.tasks_max > 8
+        || expected.controls.swap_bytes != 0
+        || !expected.path.is_absolute()
+        || expected.path.as_os_str().len() > 4096
+        || expected.path.components().any(|c| {
+            !matches!(
+                c,
+                std::path::Component::RootDir | std::path::Component::Normal(_)
+            )
+        })
+    {
+        return Err(ExecutionError::Policy);
+    }
+    member_path(&expected.path, &text(&File::open("/proc/self/cgroup")?)?)?;
+    if text(&File::open("/proc/sys/kernel/random/boot_id")?)?.trim() != expected.boot {
+        return Err(ExecutionError::Identity);
+    }
+    let host = rustix::fs::open(
+        "/",
+        OFlags::PATH | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )?;
+    let relative = expected
+        .path
+        .strip_prefix("/")
+        .map_err(|_| ExecutionError::Policy)?;
+    let dir = File::from(rustix::fs::openat2(
+        &host,
+        relative,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+        ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_MAGICLINKS,
+    )?);
+    let m = dir.metadata()?;
+    if rustix::fs::fstatfs(&dir)?.f_type as u64 != 0x63677270
+        || (m.dev(), m.ino()) != (expected.device, expected.inode)
+        || text(&open(&dir, Path::new("cgroup.type"), false)?)?.trim() != "domain"
+    {
+        return Err(ExecutionError::Identity);
+    }
+    for (name, value) in control_values(&expected.controls) {
+        if text(&open(&dir, Path::new(name), false)?)?.trim() != value {
+            return Err(ExecutionError::Identity);
+        }
+    }
+    let actual = text(&open(&dir, Path::new("cgroup.procs"), false)?)?;
+    let members = actual.split_whitespace().collect::<Vec<_>>();
+    let own = std::process::id().to_string();
+    if members != [own.as_str()]
+        || !parse_populated(&text(&open(&dir, Path::new("cgroup.events"), false)?)?)?
+    {
+        return Err(ExecutionError::Identity);
+    }
+    // Recheck membership after all reads. The parent also verifies the held
+    // incarnation/controls inside canonical locked release; same-user host
+    // administration remains a documented cooperating-operator assumption.
+    member_path(&expected.path, &text(&File::open("/proc/self/cgroup")?)?)?;
+    Ok(())
+}
+#[cfg(test)]
+mod bootstrap_tests {
+    use super::*;
+    #[test]
+    fn bootstrap_rejects_shared_root_ambiguous_or_changed_membership() {
+        let expected = Path::new("/sys/fs/cgroup/owned/attempt");
+        assert_eq!(
+            member_path(
+                expected,
+                "0::/owned/attempt
+"
+            ),
+            Ok(())
+        );
+        for invalid in [
+            "0::/
+",
+            "1:cpu:/owned/attempt
+",
+            "0::/owned/neighbor
+",
+            "0::/owned/../attempt
+",
+            "0::/owned/attempt
+0::/owned/attempt
+",
+        ] {
+            assert_eq!(
+                member_path(expected, invalid),
+                Err(ExecutionError::Identity)
+            );
+        }
+    }
+}

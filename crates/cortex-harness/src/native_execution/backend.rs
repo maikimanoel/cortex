@@ -254,7 +254,23 @@ impl DomainManager for NativeExecutionDomain {
                     .collect::<Vec<_>>(),
                 self.plan.spec.arguments,
                 self.plan.spec.environment,
-                self.plan.spec.working_directory
+                self.plan.spec.working_directory,
+                [
+                    self.group
+                        .as_ref()
+                        .unwrap()
+                        .path()
+                        .to_string_lossy()
+                        .into_owned(),
+                    self.group.as_ref().unwrap().identity().0.to_string(),
+                    self.group.as_ref().unwrap().identity().1.to_string(),
+                    self.identity.as_ref().unwrap().boot.clone(),
+                    self.plan.spec.controls.cpu_quota_us.to_string(),
+                    self.plan.spec.controls.cpu_period_us.to_string(),
+                    self.plan.spec.controls.memory_bytes.to_string(),
+                    self.plan.spec.controls.swap_bytes.to_string(),
+                    self.plan.spec.controls.tasks_max.to_string()
+                ]
             ]),
             end,
         )
