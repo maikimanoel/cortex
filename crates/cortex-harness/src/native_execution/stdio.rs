@@ -137,6 +137,17 @@ pub(crate) fn receive(channel: &UnixStream, end: Instant) -> io::Result<[OwnedFd
 /// Called only by the dedicated single-threaded executable bootstrap. The
 /// ordinary multithreaded controller/tests never replace their standard streams.
 pub(crate) fn install(channel: &mut UnixStream, end: Instant) -> io::Result<()> {
+    // Dedicated cooperating bootstrap only: refuse before receiving rights or
+    // changing process-global stdio. No adversarial thread-creation exclusion
+    // is claimed by this finite snapshot.
+    let mut tasks = std::fs::read_dir("/proc/self/task")?;
+    tasks.next().transpose()?.ok_or_else(invalid)?;
+    if tasks.next().transpose()?.is_some() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "standard-stream installation requires a single-threaded bootstrap",
+        ));
+    }
     let fds = receive(channel, end)?;
     rustix::stdio::dup2_stdin(&fds[0])?;
     rustix::stdio::dup2_stdout(&fds[1])?;
@@ -239,5 +250,38 @@ mod tests {
                 io::ErrorKind::InvalidData
             );
         }
+    }
+    #[test]
+    fn multithreaded_install_refuses_before_receiving_or_changing_standard_descriptors() {
+        let input = io::stdin();
+        let output = io::stdout();
+        let error = io::stderr();
+        let fds = [input.as_fd(), output.as_fd(), error.as_fd()];
+        let identity = || {
+            fds.iter()
+                .map(|fd| {
+                    let m = rustix::fs::fstat(fd)?;
+                    Ok((m.st_dev, m.st_ino, fcntl_getfl(fd)?))
+                })
+                .collect::<Result<Vec<_>, rustix::io::Errno>>()
+        };
+        let before = identity().unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let other = barrier.clone();
+        let worker = std::thread::spawn(move || {
+            other.wait();
+            other.wait();
+        });
+        barrier.wait();
+        let (mut channel, _peer) = UnixStream::pair().unwrap();
+        let result = install(
+            &mut channel,
+            Instant::now() + std::time::Duration::from_millis(30),
+        );
+        let after = identity();
+        barrier.wait();
+        worker.join().unwrap();
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(before, after.unwrap());
     }
 }

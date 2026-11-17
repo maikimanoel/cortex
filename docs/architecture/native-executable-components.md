@@ -179,3 +179,16 @@ scenario therefore observes two reports and one debt-held dependent, preserving
 occupancy and performing no settlement. A completed strict three-task graph has
 not been demonstrated. Read-only direct-cgroup recovery treats a missing lookup
 path as unverifiable, since a renamed original group may still exist.
+
+Standard-stream installation refuses multithreaded callers before receiving
+descriptors or replacing stdin/stdout/stderr. This finite snapshot relies on the
+dedicated cooperating bootstrap not creating threads; it does not exclude an
+adversarial thread-creation race. Partial installation remains a preparation
+failure with no payload release.
+
+The exact cgroup.kill descriptor must be openable for writing during preparation,
+before readiness or process attachment. No termination value is written then.
+Canonical cancellation writes only that retained descriptor after current exact
+group checks; a later pathname replacement cannot redirect it. Read-only recovery
+does not acquire termination authority. Descriptor availability is a prerequisite,
+not proof that an eventual kernel write, quiescence or cleanup will succeed.

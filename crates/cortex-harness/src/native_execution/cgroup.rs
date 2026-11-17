@@ -48,6 +48,9 @@ fn open(root: impl AsFd, name: &Path, write: bool) -> Result<File, ExecutionErro
         ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_MAGICLINKS,
     )?))
 }
+fn termination_control(dir: &File) -> Result<File, ExecutionError> {
+    open(dir, Path::new("cgroup.kill"), true)
+}
 fn text(file: &File) -> Result<String, ExecutionError> {
     let mut f = file;
     f.seek(SeekFrom::Start(0))?;
@@ -185,6 +188,8 @@ impl Delegation {
             .to_str()
             .ok_or(ExecutionError::Identity)?
             .to_owned();
+        // Read-only preparation of targeting authority: open, never write.
+        let termination = termination_control(&dir)?;
         let group = OwnedGroup {
             dir,
             parent: self.root.try_clone()?,
@@ -195,6 +200,7 @@ impl Delegation {
             boot: self.boot.clone(),
             controls: Some(controls.clone()),
             attached: None,
+            termination: Some(termination),
         };
         group.check_controls()?;
         Ok(group)
@@ -248,6 +254,7 @@ impl Delegation {
             boot: self.boot.clone(),
             controls: None,
             attached: None,
+            termination: None,
         };
         group.recover()
     }
@@ -299,6 +306,7 @@ impl Delegation {
             boot: self.boot.clone(),
             controls: None,
             attached: None,
+            termination: None,
         })
     }
 }
@@ -314,6 +322,8 @@ pub struct OwnedGroup {
     boot: String,
     controls: Option<ScopeControls>,
     attached: Option<(u32, u64)>,
+    // Opened before readiness; never forwarded to bootstrap or payload.
+    termination: Option<File>,
 }
 /// Finite point-in-time group observation. No field alone settles reservations.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -380,6 +390,7 @@ impl OwnedGroup {
         }
         self.controls = None;
         install_controls(&mut GroupIo(&self.dir), controls)?;
+        self.termination = Some(termination_control(&self.dir)?);
         self.controls = Some(controls.clone());
         Ok(())
     }
@@ -450,7 +461,11 @@ impl OwnedGroup {
     /// Repeated requests do not target a replaced group or recycled PID.
     pub fn request_termination(&self) -> Result<(), ExecutionError> {
         self.check_controls()?;
-        write(&open(&self.dir, Path::new("cgroup.kill"), true)?, "1")?;
+        let termination = self
+            .termination
+            .as_ref()
+            .ok_or(ExecutionError::Delegation)?;
+        write(termination, "1")?;
         Ok(())
     }
     /// Read-only reinspection. No signal, recreation, replay or settlement.
@@ -541,6 +556,34 @@ mod tests {
             identity.cgroup_inode
         );
         fs::remove_dir_all(root_path).unwrap();
+    }
+    #[test]
+    fn termination_must_be_pinned_writable_before_readiness_and_not_retargeted() {
+        // SOURCE_SIMULATION: ordinary files, no actual cgroup or process kill.
+        use std::os::unix::fs::PermissionsExt;
+        let path =
+            std::env::temp_dir().join(format!("cortex-termination-pin-{}", std::process::id()));
+        fs::create_dir(&path).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        let dir = File::open(&path).unwrap();
+        assert!(termination_control(&dir).is_err());
+        fs::write(path.join("cgroup.kill"), "0").unwrap();
+        fs::set_permissions(path.join("cgroup.kill"), fs::Permissions::from_mode(0o400)).unwrap();
+        assert!(
+            termination_control(&dir).is_err(),
+            "non-root fixture requires actual write permission"
+        );
+        fs::set_permissions(path.join("cgroup.kill"), fs::Permissions::from_mode(0o600)).unwrap();
+        let pinned = termination_control(&dir).unwrap();
+        fs::rename(path.join("cgroup.kill"), path.join("original")).unwrap();
+        fs::write(path.join("cgroup.kill"), "neighbor").unwrap();
+        write(&pinned, "1").unwrap();
+        assert_eq!(fs::read_to_string(path.join("original")).unwrap(), "1");
+        assert_eq!(
+            fs::read_to_string(path.join("cgroup.kill")).unwrap(),
+            "neighbor"
+        );
+        fs::remove_dir_all(path).unwrap();
     }
     #[test]
     fn managed_group_pin_cannot_select_root_neighbor_or_traversal() {

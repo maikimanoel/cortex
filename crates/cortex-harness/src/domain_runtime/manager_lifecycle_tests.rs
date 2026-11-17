@@ -651,8 +651,9 @@ fn source_graph_accepted_dependencies_do_not_settle_execution_debt() {
         .unwrap()
         .trim()
         .into();
-    // Explicit finite logical fixture allowance retains all three Unknown
-    // reservations; no closure or physical resource enforcement is asserted.
+    // Explicit finite logical fixture allowance. B/E retain reservations with
+    // unknown final consumption; F remains debt-held without a reservation.
+    // No closure or physical resource enforcement is asserted.
     for capacity in &mut pool.capacities {
         if capacity.resource == Resource::WorkerSlots {
             capacity.available = Some(4);
