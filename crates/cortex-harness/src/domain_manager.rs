@@ -131,6 +131,7 @@ pub struct SystemdNonceDomain {
     manager: String,
     boot: String,
     configuration: SourceReference,
+    isolation: Option<crate::native_linux::NativeIsolation>,
 }
 #[derive(Clone)]
 pub(crate) struct ManagedObservation {
@@ -236,7 +237,62 @@ impl SystemdNonceDomain {
             manager,
             boot,
             configuration,
+            isolation: None,
         })
+    }
+    /// Select native namespace/root enforcement for the fixed trusted payload.
+    /// This read-only preparation is not host qualification. Setup failure in the
+    /// dedicated bootstrap prevents hello and therefore prevents durable release.
+    /// Required cgroup controls still use the original manager/readback contract.
+    pub fn inspect_isolated(
+        selection: ServiceSelection,
+        policy: crate::native_linux::NativeIsolation,
+    ) -> Result<Self, DomainDiagnostic> {
+        policy.check().map_err(|_| {
+            issue(
+                DomainPhaseDiagnostic::Preparation,
+                DomainCause::Correspondence,
+            )
+        })?;
+        let mut backend = Self::inspect(selection)?;
+        backend.isolation = Some(policy);
+        backend.configuration = SourceReference::operator_reported(
+            "selected-native-backend",
+            "systemd-isolated-nonce-v1",
+            &backend.current_configuration()?,
+        )
+        .map_err(|_| issue(DomainPhaseDiagnostic::Preparation, DomainCause::Capacity))?;
+        Ok(backend)
+    }
+    fn current_configuration(&self) -> Result<String, DomainDiagnostic> {
+        let original = configuration_bytes(
+            &self.selection,
+            &self.manager,
+            self.connection.server_guid().as_str(),
+        )?;
+        match &self.isolation {
+            None => Ok(original),
+            Some(policy) => {
+                policy.check().map_err(|_| {
+                    issue(
+                        DomainPhaseDiagnostic::Preparation,
+                        DomainCause::Correspondence,
+                    )
+                })?;
+                Ok(json!(["isolated-v1", original, policy.digest()]).to_string())
+            }
+        }
+    }
+    pub(crate) fn isolation(&self) -> Option<&crate::native_linux::NativeIsolation> {
+        self.isolation.as_ref()
+    }
+    pub(crate) fn verify_ready(&self, hello: &serde_json::Value) -> bool {
+        match &self.isolation {
+            None => hello.as_array().is_some_and(|a| a.len() == 6),
+            Some(policy) => hello
+                .as_array()
+                .is_some_and(|a| a.len() == 7 && a[6] == policy.digest()),
+        }
     }
     /// Exact selected configuration and SHA-256 executable correspondence.
     pub fn configuration(&self) -> &SourceReference {
@@ -335,12 +391,7 @@ impl SystemdNonceDomain {
             .map_err(|_| issue(phase, DomainCause::Correspondence))?;
         let boot = fs::read_to_string("/proc/sys/kernel/random/boot_id")
             .map_err(|e| issue(phase, DomainCause::Io(e.kind())))?;
-        if boot.trim() != self.boot
-            || configuration_bytes(
-                &self.selection,
-                &self.manager,
-                self.connection.server_guid().as_str(),
-            )? != self.configuration.version()
+        if boot.trim() != self.boot || self.current_configuration()? != self.configuration.version()
         {
             return Err(issue(phase, DomainCause::Correspondence));
         }
@@ -352,7 +403,21 @@ impl SystemdNonceDomain {
         end: Instant,
     ) -> Result<(), DomainDiagnostic> {
         self.corresponds(intent)?;
-        let properties = creation_properties(&self.selection, intent)?;
+        let mut properties = creation_properties(&self.selection, intent)?;
+        if let Some(policy) = &self.isolation {
+            for (name, value) in &mut properties {
+                if name == "ExecStart" {
+                    let mut exec: Vec<(String, Vec<String>, bool)> =
+                        value.clone().try_into().map_err(|_| {
+                            issue(DomainPhaseDiagnostic::Creation, DomainCause::Protocol)
+                        })?;
+                    exec[0].1.extend(policy.arguments());
+                    *value = Value::new(exec).try_to_owned().map_err(|_| {
+                        issue(DomainPhaseDiagnostic::Creation, DomainCause::Protocol)
+                    })?;
+                }
+            }
+        }
         let auxiliaries: Vec<(String, Vec<(String, OwnedValue)>)> = vec![];
         let body = (unit(intent), "fail", properties, auxiliaries);
         let reply = bounded(
@@ -456,7 +521,7 @@ impl SystemdNonceDomain {
             .bootstrap
             .to_str()
             .ok_or_else(|| issue(DomainPhaseDiagnostic::Identity, DomainCause::Contract))?;
-        let expected = vec![
+        let mut expected = vec![
             cleaner.to_string(),
             "-i".into(),
             bootstrap.to_string(),
@@ -467,11 +532,24 @@ impl SystemdNonceDomain {
             intent.request.as_str().into(),
             self.selection.limits.wall_ms.to_string(),
         ];
+        if let Some(policy) = &self.isolation {
+            expected.extend(policy.arguments());
+        }
         if exec.len() != 1 || exec[0].0 != cleaner || exec[0].1 != expected || exec[0].2 {
             return Err(issue(
                 DomainPhaseDiagnostic::Identity,
                 DomainCause::Correspondence,
             ));
+        }
+        if self.isolation.is_some() {
+            for name in ["StandardInput", "StandardOutput", "StandardError"] {
+                if as_string(self.property(&object, si, name, end)?)? != "null" {
+                    return Err(issue(
+                        DomainPhaseDiagnostic::Identity,
+                        DomainCause::Correspondence,
+                    ));
+                }
+            }
         }
         let nnp: bool = self
             .property(&object, si, "NoNewPrivileges", end)?

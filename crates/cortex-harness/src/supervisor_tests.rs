@@ -773,7 +773,7 @@ fn authority_read_delay_cannot_refresh_idle_or_startup_deadlines() {
 #[path = "../../cortex-evidence/tests/support/program.rs"]
 pub(crate) mod fixture;
 #[path = "../../cortex-evidence/tests/support/supervision.rs"]
-mod support;
+pub(crate) mod support;
 use cortex_storage::program_store::ReadLimits;
 struct DurableFixture {
     root: Temp,
