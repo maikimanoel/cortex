@@ -569,63 +569,8 @@ fn summary(spec: &ProcessSpec, id: ObservationId, basis: SourceReference) -> Pro
         unresolved_scope_helpers: vec![],
     }
 }
-struct Framing {
-    bytes: Vec<u8>,
-    records: u64,
-    malformed: bool,
-    record_limit: Option<u64>,
-}
-impl Framing {
-    fn valid(&self) -> bool {
-        if self.record_limit.is_some() {
-            // The extended transport validates JSON syntax without constructing
-            // a semantic tree. Historical fixtures keep their original parser.
-            serde_json::from_slice::<&serde_json::value::RawValue>(&self.bytes).is_ok()
-        } else {
-            serde_json::from_slice::<serde_json::Value>(&self.bytes).is_ok()
-        }
-    }
-    fn record(&mut self) -> Result<(), InterruptionReason> {
-        self.records = self
-            .records
-            .checked_add(1)
-            .ok_or(InterruptionReason::EventLimit)?;
-        if self.record_limit.is_some_and(|max| self.records > max) {
-            return Err(InterruptionReason::EventLimit);
-        }
-        Ok(())
-    }
-    fn finish(&mut self) -> Result<(), InterruptionReason> {
-        if !self.bytes.is_empty() {
-            if !self.valid() {
-                self.malformed = true;
-                return Err(InterruptionReason::MalformedOutput);
-            }
-            self.record()?;
-            self.bytes.clear();
-        }
-        Ok(())
-    }
-    fn feed(&mut self, input: &[u8], max: u64) -> Result<(), InterruptionReason> {
-        for byte in input {
-            if *byte == b'\n' {
-                if self.bytes.is_empty() || !self.valid() {
-                    self.malformed = true;
-                    return Err(InterruptionReason::MalformedOutput);
-                }
-                self.record()?;
-                self.bytes.clear();
-            } else {
-                if self.bytes.len() as u64 >= max {
-                    self.malformed = true;
-                    return Err(InterruptionReason::MalformedOutput);
-                }
-                self.bytes.push(*byte);
-            }
-        }
-        Ok(())
-    }
-}
+use crate::structured_output::Framing;
+
 fn capture(
     stream: &mut UnixStream,
     count: &mut u64,

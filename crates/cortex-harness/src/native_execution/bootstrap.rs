@@ -59,7 +59,7 @@ fn file_spec(v: &Value) -> Result<FileSpec, ExecutionError> {
 /// only after parent-owned cgroup attachment; exact readiness precedes release.
 /// Failure never falls back to host execution or a shell.
 pub fn run(arguments: &[String]) -> Result<(), ExecutionError> {
-    if arguments.len() != 6
+    if !(arguments.len() == 6 || (arguments.len() == 7 && arguments[6] == "stdio-v1"))
         || !token(&arguments[1])
         || arguments[2].len() != 64
         || !arguments[2].bytes().all(|b| b.is_ascii_hexdigit())
@@ -76,6 +76,9 @@ pub fn run(arguments: &[String]) -> Result<(), ExecutionError> {
         .checked_add(Duration::from_millis(wall))
         .ok_or(ExecutionError::Policy)?;
     let mut channel = connect_now(Path::new(&arguments[0]))?;
+    if arguments.len() == 7 {
+        super::stdio::install(&mut channel, end)?;
+    }
     let setup = frame_read(&mut channel, end)?;
     if setup.as_array().is_none_or(|a| a.len() != 10)
         || setup[0] != 1

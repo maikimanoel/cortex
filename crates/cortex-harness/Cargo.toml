@@ -12,7 +12,7 @@ cortex-core = { path = "../cortex-core" }
 cortex-evidence = { path = "../cortex-evidence" }
 cortex-storage = { path = "../cortex-storage" }
 serde_json = { version = "1.0.154", features = ["raw_value"] }
-rustix = { version = "=1.1.6", features = ["net", "fs", "process", "thread", "mount", "event"] }
+rustix = { version = "=1.1.6", features = ["net", "fs", "process", "thread", "mount", "event", "time", "stdio", "pipe"] }
 sha2 = "=0.10.9"
 zbus = { version = "=5.19.0", default-features = false, features = ["async-io"] }
 async-io = "2.6"
@@ -30,3 +30,7 @@ path = "tests/fixtures/native_copy.rs"
 [[bin]]
 name = "cortex-native-summary-fixture"
 path = "tests/fixtures/native_summary.rs"
+
+[[bin]]
+name = "cortex-structured-fixture"
+path = "src/bin/cortex-structured-fixture.rs"

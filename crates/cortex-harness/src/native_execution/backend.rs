@@ -18,7 +18,7 @@ use std::{
     os::unix::{fs::MetadataExt, net::UnixStream},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::Ordering,
     time::{Duration, Instant},
 };
 
@@ -30,6 +30,8 @@ pub struct ExecutionObservation {
     pub artifacts: Vec<artifacts::CapturedArtifact>,
     /// Kernel recursive population, absent if observation failed.
     pub domain_populated: Option<bool>,
+    /// Present only for explicitly selected JSON-lines and exact canonical context.
+    pub structured: Option<crate::structured_output::BoundStructuredObservation>,
 }
 /// Owned strict adapter. It never uses service-name termination or adopts a
 /// recovered PID. Drop retains canonical uncertainty and performs no settlement.
@@ -382,30 +384,53 @@ impl DomainManager for NativeExecutionDomain {
     fn finish(
         &mut self,
         _: &mut UnixStream,
-        _: &DomainIntent,
-        _: &str,
-        end: Instant,
-        cancel: &AtomicBool,
+        context: crate::domain_runtime::DomainFinish<'_>,
         authority: &mut dyn FnMut() -> Result<(), DomainDiagnostic>,
     ) -> Result<EffectOutcome, DomainDiagnostic> {
+        let end = context.end;
+        let cancel = context.cancel;
         use cortex_core::program::supervision::InterruptionReason;
         let child = self
             .child
             .as_mut()
             .ok_or_else(|| diagnostic(ExecutionError::Identity))?;
-        let streams = transport::collect(
-            child,
-            self.plan.input(),
-            &self.plan.spec.limits,
-            end,
-            || {
-                if cancel.load(Ordering::SeqCst) {
-                    return Err(InterruptionReason::Cancelled);
-                }
-                authority().map_err(|_| InterruptionReason::AuthorityUnknown)
-            },
-        )
-        .map_err(diagnostic)?;
+        let mut check = || {
+            if cancel.load(Ordering::SeqCst) {
+                return Err(InterruptionReason::Cancelled);
+            }
+            authority().map_err(|_| InterruptionReason::AuthorityUnknown)
+        };
+        let (streams, structured) = if self.plan.uses_json_lines() {
+            let captured = transport::collect_structured(
+                child,
+                self.plan.input(),
+                &self.plan.spec.limits,
+                context.start,
+                end,
+                &mut check,
+            )
+            .map_err(diagnostic)?;
+            let bound = crate::structured_output::BoundStructuredObservation::new(
+                context.intent,
+                context.binding,
+                context.release,
+                captured.structured,
+            )
+            .map_err(|_| diagnostic(ExecutionError::Identity))?;
+            (captured.streams, Some(bound))
+        } else {
+            (
+                transport::collect(
+                    child,
+                    self.plan.input(),
+                    &self.plan.spec.limits,
+                    end,
+                    &mut check,
+                )
+                .map_err(diagnostic)?,
+                None,
+            )
+        };
         let group = self
             .group
             .as_ref()
@@ -438,6 +463,7 @@ impl DomainManager for NativeExecutionDomain {
             streams,
             artifacts: captured,
             domain_populated: populated,
+            structured,
         });
         if succeeded {
             Ok(EffectOutcome::Succeeded)

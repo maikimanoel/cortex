@@ -348,6 +348,7 @@ impl ExecutionSpec {
 pub struct ExecutionPlan {
     pub(crate) spec: ExecutionSpec,
     pub(crate) pins: Vec<PinnedFile>,
+    structured: bool,
     prepared: PreparedInput,
     input_operation: OperationId,
     digest: String,
@@ -398,10 +399,43 @@ impl ExecutionPlan {
         Ok(Self {
             spec,
             pins,
+            structured: false,
             prepared,
             input_operation: input_operation.clone(),
             digest,
         })
+    }
+    /// Explicitly select the existing JSON-lines contract. This changes the
+    /// immutable configuration digest; a raw preparation cannot silently switch.
+    pub fn with_json_lines(mut self) -> Result<Self, ExecutionError> {
+        if !self.structured {
+            let t = self
+                .spec
+                .limits
+                .transport
+                .as_ref()
+                .ok_or(ExecutionError::Policy)?;
+            let raw = t
+                .stdout_bytes
+                .checked_add(t.stderr_bytes)
+                .ok_or(ExecutionError::Policy)?;
+            crate::structured_output::StructuredObserver::new(
+                &self.spec.limits,
+                self.input().len() as u64,
+                raw,
+            )
+            .map_err(|_| ExecutionError::Policy)?;
+            let mut h = Sha256::new();
+            hash_field(&mut h, b"cortex-existing-json-lines-observer");
+            hash_field(&mut h, self.digest.as_bytes());
+            self.digest = format!("{:x}", h.finalize());
+            self.structured = true;
+        }
+        Ok(self)
+    }
+    /// Whether the caller explicitly selected bounded canonical JSON-lines.
+    pub fn uses_json_lines(&self) -> bool {
+        self.structured
     }
     /// Exact configuration digest, suitable for the existing DomainIntent.
     pub fn digest(&self) -> &str {
@@ -414,6 +448,15 @@ impl ExecutionPlan {
         kernel: &CoordinationKernel,
         intent: &DomainIntent,
         at: u64,
+    ) -> Result<(), ExecutionError> {
+        self.check_with_configuration(kernel, intent, at, &self.configuration()?)
+    }
+    pub(crate) fn check_with_configuration(
+        &self,
+        kernel: &CoordinationKernel,
+        intent: &DomainIntent,
+        at: u64,
+        configuration: &SourceReference,
     ) -> Result<(), ExecutionError> {
         for pin in &self.pins {
             pin.verify()?;
@@ -448,7 +491,7 @@ impl ExecutionPlan {
             || request.generation != scope.generation
             || request.id != scope.package
             || request.revision != scope.package_revision
-            || intent.configuration != self.configuration()?
+            || &intent.configuration != configuration
         {
             return Err(ExecutionError::Authority);
         }

@@ -36,10 +36,22 @@ cooperating-host assumption.
 Raw standard-stream collection feeds bounded input while draining stdout and
 stderr together, enforcing independent and aggregate capture bounds. Overflow
 returns the original interruption with a finite prefix, never successful complete
-output. EOF, partial input, cancellation, timeout, exit code, signal and unknown
-cleanup remain distinct. This component consumes the raw byte/idle/wall subset of
-Core ProcessLimits; it does not implement JSON frame/event or startup-record
-validation and does not advertise those executor capabilities.
+output. Explicit ExecutionPlan::with_json_lines selects the existing Core
+JSON-lines contract: each nonempty stdout line is a JSON value, the first complete
+valid value is startup, and EOF may finish a final non-newline value. There is no
+payload request/version/kind/terminal schema in this contract. Repeated object
+tags therefore carry no special authority or completion meaning. Binary stdout
+continues to use the raw collector unchanged.
+
+The selected consumer bounds frame bytes (at most 1 MiB), record count and retained
+capture/frame buffers. Each byte is scanned once and each completed frame is
+syntax-checked once. Partial UTF-8 and tokens survive read boundaries; malformed
+encoding, empty frames, partial EOF, startup timeout and overflow retain their
+original interruption. The original preparation clock supplies startup/wall
+deadlines; stderr progress does not establish startup. A read-only observation
+binds the summary to existing full intent, binding and release identities. These
+caller-correlated observations are not authentication or accepted artifacts.
+Process exit, stream EOF, cancellation and whole-domain quiescence remain separate.
 
 Artifact capture consumes only declared normal relative paths through an owned
 directory descriptor, with openat2 beneath/no-symlink/no-mount-crossing resolution,
@@ -75,25 +87,45 @@ Controller presence or writable-looking desktop metadata is not authorization.
 This development host has no owner-authorized delegated scope; actual cgroup
 mutation, resource-denial and descendant-termination qualification are blocked.
 
-## Canonical integration blocker
+## Independent manager composition
 
-The executable adapter reuses existing CreateRequested, BoundObserved,
-ReleaseRequested and Report owners and the uniquely held preparation channel.
-Its guard currently refuses **before CreateRequested or host creation** because
-the existing DomainBindingObservation contract requires independently managed
-runtime/stop deadlines and retained manager state. A direct cgroup plus a
-controller timer cannot truthfully provide those readbacks. No true readback is
-fabricated, Core/schema is unchanged, and no operational executable release is
-available through this adapter. Resolving this source integration gap requires
-implementing/qualifying those manager guarantees with existing ownership; merely
-authorizing a delegated path would not resolve it.
+The original direct-cgroup executable adapter retains its fail-closed
+ManagerGuarantees guard before CreateRequested. A cgroup plus a controller timer
+still cannot provide independent manager lifetime or retained-state guarantees.
 
-The executable bootstrap, byte pins, raw transport, artifact capture and cgroup
-components are implemented mechanisms. Their composition is not an operationally
-qualified general executor. The strict two-independent-plus-dependent GPE host
-scenario, canonical structured-output consumer, complete descendant cleanup and
-durable recovery qualification remain blocked/incomplete. Existing fixed-nonce
-and fixture authority/recovery regressions remain applicable to their own scope.
+The separate ManagedExecutionDomain composes the existing typed systemd user-manager
+adapter with the same canonical CreateRequested, BoundObserved, ReleaseRequested
+and Report engines and unique preparation channel. It binds explicit executable
+policy to manager/configuration identity, uses an explicit bounded standard-stream descriptor handoff over the held
+bootstrap channel, and validates actual service type, restart/kill/privilege controls,
+runtime and stop readbacks. The independently installed runtime is an explicit
+caller-selected sub-budget: actual manager activation plus that runtime must not
+extend past the original monotonic deadline. The separate 500 ms manager stop
+grace must fit the explicit cleanup budget. Runtime expiry is not cleanup proof.
+
+RemainAfterExit retains an active exited service for readback within that manager's
+actual lifetime. It is not permanent retention: manager restart, garbage collection,
+lost bus ownership, absent name and changed invocation are distinct read-only
+recovery observations. Missing properties or ambiguous submission refuse rather
+than substituting requested configuration. Consumed pipe submission cannot be
+regenerated after a lost creation reply. Completion status comes from the manager;
+the controller never adopts a numeric PID or reaps a manager-owned child.
+
+An explicitly authorized delegated resource root remains mandatory before any
+manager connection through this composition. The exact manager-created cgroup is
+pinned beneath that root by descriptor and boot/device/inode identity before
+payload release. Canonical Cancel precedes termination through that held group's
+cgroup.kill; the strict profile sends no name-based StopUnit request. Actual
+recursive population, direct exit, stream closure, scratch artifacts and historical
+effects remain separate. Neither stop acknowledgment nor empty population creates
+a ClosureReceipt or refunds reservations. Legacy fixed-nonce manager behavior and
+retained bytes keep their existing meanings and documented cooperation assumptions.
+
+These source mechanisms do not qualify a host. The dedicated delegated-host,
+controller-interruption/restart, resource-denial, complete descendant cleanup and
+strict two-independent-plus-dependent GPE graph remain BLOCKED pending separate
+authority and candidate-bound actual-host evidence. Source fake-manager scenarios
+are SOURCE_SIMULATION, not strict host or operational acceptance.
 
 ## Verification and performance
 
@@ -111,3 +143,39 @@ provider, hostile workload, production resource defaults or authenticated
 principal is introduced. P1 component timings are observations only; P2 governed
 comparison and P3 accepted software-development productivity are not established.
 No speedup or operational-readiness claim follows from compile/test success.
+
+Manager readback in the serialized release callback preserves the existing
+authority cut. The journal's 500 ms admission budget is checked before that
+external-effect callback; it is not a measured end-to-end manager response bound.
+The callback can occupy the journal lock until its original deadline, affecting
+neighbor admission latency. Stream pumping and parsing occur after that lock is
+released. Neither latency nor service responsiveness has been host-qualified.
+On capture overflow, the retained raw prefix can include bytes not yet parsed;
+record counts describe parsed observations rather than every raw-prefix record.
+
+The executable profile leaves manager stdio null. After authenticating the actual
+bootstrap peer, the controller transfers exactly three owned FIFO endpoints using
+SCM_RIGHTS on the existing control channel. The single-threaded bootstrap validates
+count, roles, distinct identities and close-on-exec, intentionally duplicates them
+only onto stdin/stdout/stderr, closes ancillary copies and acknowledges installation.
+Canonical binding subsequently checks the actual bootstrap pipe identities.
+The manager never receives workload-pipe writers: retained manager state therefore
+does not itself hold output EOF open. A missing/truncated/ambiguous handoff refuses
+before readiness and is never resent. Explicit stdio-v1 selection preserves the
+legacy setup profile; it is not a new workflow command or journal format.
+
+Partial descriptor installation is a preparation failure: no readiness or payload
+release follows it. Ancillary descriptors are RAII-owned; only the dedicated
+single-threaded bootstrap intentionally replaces its standard descriptors.
+In-process source tests never replace the controller's standard streams.
+
+The canonical source simulation uses existing independent B/E tasks and dependent
+F. Parsed/process reports cannot release BF/EF dependencies; explicit synthetic
+artifact/evidence/review acceptance is required. Fresh F authority after both
+accepted edges still does not permit a new reservation when B/E final cumulative
+consumption is unresolved: Core returns Debt(CpuExecutionMillis). Reported
+execution success and unknown consumption are separate dimensions. The source
+scenario therefore observes two reports and one debt-held dependent, preserving
+occupancy and performing no settlement. A completed strict three-task graph has
+not been demonstrated. Read-only direct-cgroup recovery treats a missing lookup
+path as unverifiable, since a renamed original group may still exist.

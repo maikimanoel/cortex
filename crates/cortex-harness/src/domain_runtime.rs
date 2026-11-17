@@ -92,6 +92,15 @@ pub struct DomainRecoveryObservation {
     pub snapshot_safe: bool,
 }
 
+pub(crate) struct DomainFinish<'a> {
+    pub intent: &'a DomainIntent,
+    pub binding: &'a DomainBindingObservation,
+    pub release: &'a OperationId,
+    pub value: &'a str,
+    pub start: Instant,
+    pub end: Instant,
+    pub cancel: &'a AtomicBool,
+}
 pub(crate) trait DomainManager {
     fn check_context(
         &self,
@@ -107,15 +116,12 @@ pub(crate) trait DomainManager {
     fn finish(
         &mut self,
         channel: &mut UnixStream,
-        intent: &DomainIntent,
-        value: &str,
-        end: Instant,
-        _cancel: &AtomicBool,
+        context: DomainFinish<'_>,
         _authority: &mut dyn FnMut() -> Result<(), DomainDiagnostic>,
     ) -> Result<cortex_core::program::operational::EffectOutcome, DomainDiagnostic> {
-        let reply = frame_read(channel, end)
+        let reply = frame_read(channel, context.end)
             .map_err(|e| issue(DomainPhaseDiagnostic::Release, DomainCause::Io(e.kind())))?;
-        if reply != json!([1, "nonce", intent.request.as_str(), value]) {
+        if reply != json!([1, "nonce", context.intent.request.as_str(), context.value]) {
             return Err(issue(DomainPhaseDiagnostic::Release, DomainCause::Protocol));
         }
         Ok(cortex_core::program::operational::EffectOutcome::Succeeded)
@@ -692,10 +698,15 @@ fn release<M: DomainManager>(
         };
         let outcome = manager.finish(
             &mut prepared.channel,
-            &prepared.intent,
-            &prepared.nonce,
-            prepared.end,
-            cancel,
+            DomainFinish {
+                intent: &prepared.intent,
+                binding: &prepared.observation,
+                release: &ids.release,
+                value: &prepared.nonce,
+                start: prepared.start,
+                end: prepared.end,
+                cancel,
+            },
             &mut authority,
         )?;
         if manager.is_nonce() {
@@ -1162,6 +1173,78 @@ pub fn cancel_executable_domain(
     store: &ProgramStore,
     key: &StoreKey,
     backend: &mut crate::native_execution::backend::NativeExecutionDomain,
+    operation: Operation,
+) -> Result<AdmissionReceipt, DomainDiagnostic> {
+    cancel_domain(store, key, backend, operation)
+}
+
+/// Prepare the explicitly selected independent-manager executable profile.
+/// Missing delegation or manager facts cannot fall back to direct execution.
+pub fn prepare_managed_executable_domain(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut crate::native_execution::managed_backend::ManagedExecutionDomain,
+    ids: &DomainOperations,
+    cancel: &AtomicBool,
+) -> DomainPreparation {
+    let start = Instant::now();
+    let end = start.checked_add(Duration::from_millis(backend.wall_ms()));
+    let value = backend.digest().to_owned();
+    let endpoint = store
+        .load(key, Access::ReadOnly)
+        .ok()
+        .and_then(|k| record(&k, &ids.domain).ok())
+        .and_then(|r| backend.endpoint(&r.intent.request).ok());
+    match (end, endpoint) {
+        (Some(end), Some(endpoint)) => prepare(
+            store,
+            key,
+            backend,
+            ExecutionRequest {
+                ids,
+                nonce: &value,
+                cancel,
+                start,
+                end,
+            },
+            || {
+                UnixListener::bind(endpoint)
+                    .map_err(|e| issue(DomainPhaseDiagnostic::Creation, DomainCause::Io(e.kind())))
+            },
+        ),
+        _ => {
+            let mut run = DomainRun::empty();
+            run.diagnostic = Some(issue(
+                DomainPhaseDiagnostic::Preparation,
+                DomainCause::Deadline,
+            ));
+            DomainPreparation {
+                run,
+                prepared: None,
+            }
+        }
+    }
+}
+/// Consume the original unique managed gate through canonical locked release.
+pub fn release_managed_executable_domain(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut crate::native_execution::managed_backend::ManagedExecutionDomain,
+    prepared: PreparedNonceDomain,
+    cancel: &AtomicBool,
+) -> ExecutableDomainRun {
+    let domain = release(store, key, backend, prepared, cancel);
+    ExecutableDomainRun {
+        domain,
+        execution: backend.take_observation(),
+    }
+}
+/// Commit cancellation before the exact same-incarnation manager stop request.
+/// A stop acknowledgment is not closure, settlement or reusable capacity.
+pub fn cancel_managed_executable_domain(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut crate::native_execution::managed_backend::ManagedExecutionDomain,
     operation: Operation,
 ) -> Result<AdmissionReceipt, DomainDiagnostic> {
     cancel_domain(store, key, backend, operation)

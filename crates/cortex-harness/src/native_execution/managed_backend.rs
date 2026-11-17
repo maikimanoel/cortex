@@ -1,0 +1,402 @@
+//! Canonical executable-domain composition with independently managed lifetime.
+//! No constructor call or source test constitutes permission for a host launch.
+use super::{
+    ExecutionError, ExecutionPlan, artifacts,
+    backend::ExecutionObservation,
+    bootstrap,
+    cgroup::{Delegation, DelegationAuthorization, OwnedGroup},
+    managed::ManagerRecoveryState,
+    transport,
+};
+use crate::{
+    domain_manager::*,
+    domain_runtime::{DomainFinish, DomainManager},
+    native_linux::{NativeIsolation, StableProcess},
+};
+use cortex_core::{
+    program::{
+        domain::*,
+        operational::EffectOutcome,
+        supervision::{InterruptionReason, ProcessCompletion},
+    },
+    temporal::SourceReference,
+};
+use cortex_evidence::program::CoordinationKernel;
+use std::{
+    fs::File,
+    os::unix::{fs::MetadataExt, net::UnixStream},
+    path::PathBuf,
+    sync::atomic::Ordering,
+    time::Instant,
+};
+
+fn diagnostic(error: ExecutionError) -> DomainDiagnostic {
+    issue(
+        DomainPhaseDiagnostic::Identity,
+        match error {
+            ExecutionError::Authority => DomainCause::Authority,
+            ExecutionError::Io(k) => DomainCause::Io(k),
+            _ => DomainCause::Correspondence,
+        },
+    )
+}
+/// Manager owns service lifetime and reaping; held delegation independently
+/// establishes the permitted resource scope. Neither owns canonical authority.
+pub struct ManagedExecutionDomain {
+    plan: ExecutionPlan,
+    manager: SystemdNonceDomain,
+    delegation: Delegation,
+    intent: Option<DomainIntent>,
+    group: Option<OwnedGroup>,
+    scratch: Option<File>,
+    observation: Option<ExecutionObservation>,
+}
+impl ManagedExecutionDomain {
+    /// Read-only preparation of an explicitly authorized scope. None refuses
+    /// before manager connection or pipe creation. This does not create a unit.
+    pub fn inspect(
+        plan: ExecutionPlan,
+        selection: ServiceSelection,
+        isolation: NativeIsolation,
+        authorization: Option<DelegationAuthorization>,
+    ) -> Result<Self, DomainDiagnostic> {
+        let authorization = authorization.ok_or_else(|| diagnostic(ExecutionError::Delegation))?;
+        if authorization.root != selection.delegated_root {
+            return Err(diagnostic(ExecutionError::Identity));
+        }
+        validate_selection(&plan, &selection, &isolation).map_err(diagnostic)?;
+        let delegation = Delegation::inspect(Some(authorization)).map_err(diagnostic)?;
+        let manager = SystemdNonceDomain::inspect_executable(selection, isolation, plan.digest())?;
+        Ok(Self {
+            plan,
+            manager,
+            delegation,
+            intent: None,
+            group: None,
+            scratch: None,
+            observation: None,
+        })
+    }
+    /// Exact manager/policy/immutable source configuration for canonical intent.
+    pub fn configuration(&self) -> &SourceReference {
+        self.manager.configuration()
+    }
+    pub(crate) fn wall_ms(&self) -> u64 {
+        self.plan.spec.limits.wall_ms
+    }
+    pub(crate) fn digest(&self) -> &str {
+        self.plan.digest()
+    }
+    pub(crate) fn endpoint(
+        &self,
+        request: &cortex_core::program::OperationId,
+    ) -> Result<PathBuf, DomainDiagnostic> {
+        self.manager.endpoint(request)
+    }
+    pub(crate) fn take_observation(&mut self) -> Option<ExecutionObservation> {
+        self.observation.take()
+    }
+    /// Read-only exact-incarnation recovery. No channel, unit, release, stop or
+    /// resource settlement is reconstructed. Caller supplies the recorded end.
+    pub fn inspect_recovery(
+        &mut self,
+        intent: &DomainIntent,
+        identity: &DomainIdentity,
+        end: Instant,
+    ) -> ManagerRecoveryState {
+        if let Err(error) = self.delegation.check().map_err(diagnostic) {
+            return ManagerRecoveryState::Unavailable(error);
+        }
+        self.manager.recover_execution(intent, identity, end)
+    }
+    fn retain_scratch(&mut self, actual: &ManagedObservation) -> Result<(), DomainDiagnostic> {
+        let stable = StableProcess::acquire(actual.main_pid, actual.start_ticks)
+            .map_err(|e| diagnostic(e.into()))?;
+        stable.require_live().map_err(|e| diagnostic(e.into()))?;
+        let scratch = File::open(format!("/proc/{}/root/scratch", actual.main_pid))
+            .map_err(|e| diagnostic(e.into()))?;
+        if rustix::fs::fstatfs(&scratch)
+            .map_err(|e| diagnostic(e.into()))?
+            .f_type as u64
+            != 0x01021994
+        {
+            return Err(diagnostic(ExecutionError::Identity));
+        }
+        stable.require_live().map_err(|e| diagnostic(e.into()))?;
+        if let Some(old) = &self.scratch {
+            let a = old.metadata().map_err(|e| diagnostic(e.into()))?;
+            let b = scratch.metadata().map_err(|e| diagnostic(e.into()))?;
+            if (a.dev(), a.ino()) != (b.dev(), b.ino()) {
+                return Err(diagnostic(ExecutionError::Identity));
+            }
+        } else {
+            self.scratch = Some(scratch);
+        }
+        Ok(())
+    }
+}
+fn validate_selection(
+    plan: &ExecutionPlan,
+    s: &ServiceSelection,
+    isolation: &NativeIsolation,
+) -> Result<(), ExecutionError> {
+    let l = &s.limits;
+    let c = &plan.spec.controls;
+    if s.nonce != plan.digest()
+        || l.wall_ms == 0
+        || l.wall_ms > plan.spec.limits.wall_ms
+        || plan.spec.limits.wall_ms > 15000
+        || plan.spec.limits.cleanup_ms < 500
+        || l.cpu_quota_us != c.cpu_quota_us
+        || l.cpu_period_us != c.cpu_period_us
+        || l.memory_bytes != c.memory_bytes
+        || l.swap_bytes != c.swap_bytes
+        || l.tasks != c.tasks_max
+        || isolation.scratch_limits() != (plan.spec.scratch_bytes, plan.spec.scratch_inodes)
+    {
+        return Err(ExecutionError::Policy);
+    }
+    Ok(())
+}
+impl DomainManager for ManagedExecutionDomain {
+    fn check_context(
+        &self,
+        k: &CoordinationKernel,
+        i: &DomainIntent,
+        at: u64,
+    ) -> Result<(), DomainDiagnostic> {
+        self.delegation.check().map_err(diagnostic)?;
+        self.manager
+            .execution_isolation()
+            .ok_or_else(|| diagnostic(ExecutionError::Policy))?
+            .check()
+            .map_err(|e| diagnostic(e.into()))?;
+        self.manager.corresponds(i)?;
+        self.plan
+            .check_with_configuration(k, i, at, self.configuration())
+            .map_err(diagnostic)
+    }
+    fn corresponds(&self, i: &DomainIntent) -> Result<(), DomainDiagnostic> {
+        self.delegation.check().map_err(diagnostic)?;
+        self.manager.corresponds(i)
+    }
+    fn is_nonce(&self) -> bool {
+        false
+    }
+    fn isolation(&self) -> Option<&NativeIsolation> {
+        self.manager.execution_isolation()
+    }
+    fn verify_ready(&self, hello: &serde_json::Value) -> bool {
+        self.manager.verify_ready(hello)
+    }
+    fn pin_process(
+        &self,
+        a: &ManagedObservation,
+    ) -> Result<Option<StableProcess>, DomainDiagnostic> {
+        StableProcess::acquire(a.main_pid, a.start_ticks)
+            .map(Some)
+            .map_err(|e| diagnostic(e.into()))
+    }
+    fn create(&mut self, i: &DomainIntent, end: Instant) -> Result<(), DomainDiagnostic> {
+        if self.intent.is_some() {
+            return Err(diagnostic(ExecutionError::Identity));
+        }
+        // Preserve the attempted identity before submission, including lost reply.
+        self.intent = Some(i.clone());
+        self.manager.create(i, end)
+    }
+    fn setup(&mut self, channel: &mut UnixStream, end: Instant) -> Result<(), DomainDiagnostic> {
+        let intent = self
+            .intent
+            .as_ref()
+            .ok_or_else(|| diagnostic(ExecutionError::Identity))?;
+        let actual = self
+            .manager
+            .transfer_execution_pipes(intent, channel, end)?;
+        let peer =
+            rustix::net::sockopt::socket_peercred(&*channel).map_err(|e| diagnostic(e.into()))?;
+        if peer.pid.as_raw_pid() as u32 != actual.main_pid {
+            return Err(diagnostic(ExecutionError::Identity));
+        }
+        let group = self
+            .delegation
+            .inspect_bound_group(&actual.identity, &self.plan.spec.controls)
+            .map_err(diagnostic)?;
+        self.group = Some(group);
+        let c = &self.plan.spec.controls;
+        let path = PathBuf::from("/sys/fs/cgroup")
+            .join(actual.identity.control_group.trim_start_matches('/'));
+        crate::domain_bootstrap::frame_write(
+            channel,
+            &serde_json::json!([
+                1,
+                "setup",
+                self.plan.digest(),
+                self.plan.spec.scratch_bytes,
+                self.plan.spec.scratch_inodes,
+                self.plan
+                    .spec
+                    .files
+                    .iter()
+                    .map(bootstrap::file_value)
+                    .collect::<Vec<_>>(),
+                self.plan.spec.arguments,
+                self.plan.spec.environment,
+                self.plan.spec.working_directory,
+                [
+                    path.to_str()
+                        .ok_or_else(|| diagnostic(ExecutionError::Identity))?
+                        .to_owned(),
+                    actual.identity.cgroup_device.to_string(),
+                    actual.identity.cgroup_inode.to_string(),
+                    actual.identity.boot,
+                    c.cpu_quota_us.to_string(),
+                    c.cpu_period_us.to_string(),
+                    c.memory_bytes.to_string(),
+                    c.swap_bytes.to_string(),
+                    c.tasks_max.to_string()
+                ]
+            ]),
+            end,
+        )
+        .map_err(|e| diagnostic(e.into()))
+    }
+    fn observe(
+        &mut self,
+        i: &DomainIntent,
+        end: Instant,
+    ) -> Result<ManagedObservation, DomainDiagnostic> {
+        let actual = self.manager.observe(i, end)?;
+        let group = self
+            .group
+            .as_ref()
+            .ok_or_else(|| diagnostic(ExecutionError::Identity))?;
+        if group.identity() != (actual.identity.cgroup_device, actual.identity.cgroup_inode) {
+            return Err(diagnostic(ExecutionError::Identity));
+        }
+        group.check_controls().map_err(diagnostic)?;
+        self.retain_scratch(&actual)?;
+        Ok(actual)
+    }
+    fn observe_tree(
+        &mut self,
+        i: &DomainIntent,
+        end: Instant,
+    ) -> Result<(ManagedObservation, Vec<DomainCgroupObservation>), DomainDiagnostic> {
+        self.manager.observe_tree(i, end)
+    }
+    fn stop(
+        &mut self,
+        i: &DomainIntent,
+        identity: &DomainIdentity,
+        end: Instant,
+    ) -> Result<(), DomainDiagnostic> {
+        if self.intent.as_ref() != Some(i) || Instant::now() >= end {
+            return Err(diagnostic(ExecutionError::Identity));
+        }
+        let actual = self.manager.observe_tree(i, end)?.0;
+        let group = self
+            .group
+            .as_ref()
+            .ok_or_else(|| diagnostic(ExecutionError::Identity))?;
+        if actual.identity != *identity
+            || group.identity() != (identity.cgroup_device, identity.cgroup_inode)
+        {
+            return Err(diagnostic(ExecutionError::Identity));
+        }
+        // No name-based StopUnit request: concurrent name reuse cannot redirect
+        // this write away from the held, verified kernel cgroup incarnation.
+        // Acknowledgment is not observed quiescence, closure or refund.
+        group.request_termination().map_err(diagnostic)
+    }
+    fn finish(
+        &mut self,
+        _channel: &mut UnixStream,
+        context: DomainFinish<'_>,
+        authority: &mut dyn FnMut() -> Result<(), DomainDiagnostic>,
+    ) -> Result<EffectOutcome, DomainDiagnostic> {
+        let pipes = self.manager.take_execution_pipes()?;
+        let mut readback_error = None;
+        let manager = &mut self.manager;
+        let mut poll = |end| match manager.execution_completion(
+            context.intent,
+            &context.binding.identity,
+            end,
+        ) {
+            Ok(result) => Ok(result),
+            Err(error) => {
+                readback_error = Some(error);
+                Err(std::io::Error::other("manager observation unavailable"))
+            }
+        };
+        let mut current = || {
+            if context.cancel.load(Ordering::SeqCst) {
+                return Err(InterruptionReason::Cancelled);
+            }
+            authority().map_err(|_| InterruptionReason::AuthorityUnknown)
+        };
+        let (streams, summary) = transport::collect_managed(
+            pipes,
+            self.plan.input(),
+            &self.plan.spec.limits,
+            context.start,
+            context.end,
+            &mut current,
+            &mut poll,
+            self.plan.uses_json_lines(),
+        )
+        .map_err(diagnostic)?;
+        let populated = self
+            .manager
+            .observe_tree(context.intent, context.end)
+            .ok()
+            .and_then(|(a, _)| (a.identity == context.binding.identity).then_some(a.populated));
+        let artifacts = if populated == Some(false) {
+            artifacts::capture(
+                self.scratch
+                    .as_ref()
+                    .ok_or_else(|| diagnostic(ExecutionError::Identity))?,
+                &self.plan.spec.artifacts,
+                self.plan.spec.scratch_bytes,
+            )
+            .map_err(diagnostic)?
+        } else {
+            Vec::new()
+        };
+        let structured = summary
+            .map(|s| {
+                crate::structured_output::BoundStructuredObservation::new(
+                    context.intent,
+                    context.binding,
+                    context.release,
+                    s,
+                )
+            })
+            .transpose()
+            .map_err(|_| diagnostic(ExecutionError::Identity))?;
+        let succeeded = matches!(
+            streams.completion,
+            ProcessCompletion::Exited {
+                code: Some(0),
+                signal: None
+            }
+        ) && streams.input_complete
+            && streams.stdout_complete
+            && streams.stderr_complete
+            && populated == Some(false);
+        self.observation = Some(ExecutionObservation {
+            streams,
+            artifacts,
+            domain_populated: populated,
+            structured,
+        });
+        if let Some(error) = readback_error {
+            return Err(error);
+        }
+        Ok(if succeeded {
+            EffectOutcome::Succeeded
+        } else {
+            EffectOutcome::Interrupted
+        })
+    }
+}

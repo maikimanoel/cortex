@@ -10,3 +10,8 @@ pub mod transport;
 pub use policy::{ExecutionError, ExecutionPlan, ExecutionSpec, FileRole, FileSpec, PinnedFile};
 pub mod backend;
 pub mod bootstrap;
+pub mod managed;
+
+pub mod managed_backend;
+
+pub(crate) mod stdio;

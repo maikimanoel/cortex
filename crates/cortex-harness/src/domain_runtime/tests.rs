@@ -991,3 +991,6 @@ fn unsupported_manager_contract_refuses_before_creation_or_journal_mutation() {
         before
     );
 }
+
+#[path = "manager_lifecycle_tests.rs"]
+mod manager_lifecycle_tests;

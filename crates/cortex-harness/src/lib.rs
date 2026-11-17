@@ -59,3 +59,12 @@ pub use domain_runtime::{
 
 #[cfg(target_os = "linux")]
 pub use domain_runtime::cancel_executable_domain;
+
+#[cfg(target_os = "linux")]
+pub mod structured_output;
+
+#[cfg(target_os = "linux")]
+pub use domain_runtime::{
+    cancel_managed_executable_domain, prepare_managed_executable_domain,
+    release_managed_executable_domain,
+};

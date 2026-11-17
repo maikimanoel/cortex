@@ -74,6 +74,31 @@ pub(crate) fn validate_controls(c: &ScopeControls) -> Result<(), ExecutionError>
     }
     Ok(())
 }
+fn bound_relative(root: &Path, control_group: &str) -> Result<PathBuf, ExecutionError> {
+    let group = Path::new(control_group);
+    if !group.is_absolute()
+        || group.components().any(|c| {
+            !matches!(
+                c,
+                std::path::Component::RootDir | std::path::Component::Normal(_)
+            )
+        })
+    {
+        return Err(ExecutionError::Identity);
+    }
+    let full = Path::new("/sys/fs/cgroup").join(
+        group
+            .strip_prefix("/")
+            .map_err(|_| ExecutionError::Identity)?,
+    );
+    let relative = full
+        .strip_prefix(root)
+        .map_err(|_| ExecutionError::Identity)?;
+    if relative.as_os_str().is_empty() {
+        return Err(ExecutionError::Identity);
+    }
+    Ok(relative.into())
+}
 fn controllers(available: &str, enabled: &str) -> Result<(), ExecutionError> {
     for required in ["cpu", "memory", "pids"] {
         if !available.split_whitespace().any(|v| v == required)
@@ -124,6 +149,56 @@ impl Delegation {
             boot: a.boot,
         })
     }
+    /// Pin an already manager-created exact incarnation beneath the explicitly
+    /// authorized root. This does not create, configure, attach or signal work.
+    /// A held descriptor, rather than a manager lookup name, selects later stop.
+    pub(crate) fn inspect_bound_group(
+        &self,
+        identity: &cortex_core::program::domain::DomainIdentity,
+        controls: &ScopeControls,
+    ) -> Result<OwnedGroup, ExecutionError> {
+        self.check()?;
+        if identity.boot != self.boot {
+            return Err(ExecutionError::Identity);
+        }
+        let relative = bound_relative(&self.path, &identity.control_group)?;
+        let dir = File::from(rustix::fs::openat2(
+            &self.root,
+            &relative,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+            Mode::empty(),
+            ResolveFlags::BENEATH
+                | ResolveFlags::NO_SYMLINKS
+                | ResolveFlags::NO_MAGICLINKS
+                | ResolveFlags::NO_XDEV,
+        )?);
+        let m = dir.metadata()?;
+        if m.dev() != identity.cgroup_device
+            || m.ino() != identity.cgroup_inode
+            || m.uid() != rustix::process::getuid().as_raw()
+            || rustix::fs::fstatfs(&dir)?.f_type as u64 != 0x63677270
+            || text(&open(&dir, Path::new("cgroup.type"), false)?)?.trim() != "domain"
+        {
+            return Err(ExecutionError::Identity);
+        }
+        let name = relative
+            .to_str()
+            .ok_or(ExecutionError::Identity)?
+            .to_owned();
+        let group = OwnedGroup {
+            dir,
+            parent: self.root.try_clone()?,
+            name,
+            path: self.path.clone(),
+            device: m.dev(),
+            inode: m.ino(),
+            boot: self.boot.clone(),
+            controls: Some(controls.clone()),
+            attached: None,
+        };
+        group.check_controls()?;
+        Ok(group)
+    }
     /// Reopen only the exact recorded group for read-only recovery. This never
     /// creates a group, reconstructs a live release channel, attaches or signals.
     pub fn inspect_recovery(
@@ -148,7 +223,9 @@ impl Delegation {
             ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS,
         ) {
             Ok(fd) => File::from(fd),
-            Err(rustix::io::Errno::NOENT) => return RecoveryObservation::Gone,
+            // A missing lookup path can be a renamed surviving directory.
+            // Only a held descriptor with nlink=0 supports Gone.
+            Err(rustix::io::Errno::NOENT) => return RecoveryObservation::Unverifiable,
             Err(_) => return RecoveryObservation::Unverifiable,
         };
         let Ok(m) = dir.metadata() else {
@@ -175,7 +252,7 @@ impl Delegation {
         group.recover()
     }
 
-    fn check(&self) -> Result<(), ExecutionError> {
+    pub(crate) fn check(&self) -> Result<(), ExecutionError> {
         let m = self.root.metadata()?;
         if m.dev() != self.device
             || m.ino() != self.inode
@@ -414,6 +491,78 @@ fn parse_populated(s: &str) -> Result<bool, ExecutionError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn renamed_group_path_absence_is_not_physical_disappearance() {
+        // SOURCE_SIMULATION: ordinary owned directories, no kernel cgroup.
+        use std::os::unix::fs::PermissionsExt;
+        let root_path =
+            std::env::temp_dir().join(format!("cortex-recovery-rename-{}", std::process::id()));
+        fs::create_dir(&root_path).unwrap();
+        fs::set_permissions(&root_path, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::write(root_path.join("cgroup.controllers"), "cpu memory pids").unwrap();
+        fs::write(root_path.join("cgroup.subtree_control"), "cpu memory pids").unwrap();
+        fs::create_dir(root_path.join("cortex-old")).unwrap();
+        let root = File::open(&root_path).unwrap();
+        let m = root.metadata().unwrap();
+        let child = fs::metadata(root_path.join("cortex-old")).unwrap();
+        let boot = fs::read_to_string("/proc/sys/kernel/random/boot_id")
+            .unwrap()
+            .trim()
+            .to_owned();
+        let scope = Delegation {
+            root,
+            path: root_path.clone(),
+            device: m.dev(),
+            inode: m.ino(),
+            boot: boot.clone(),
+        };
+        let identity = cortex_core::program::domain::DomainIdentity {
+            pool: cortex_core::program::domain::PoolIdentity {
+                physical: "fixture".into(),
+                incarnation: "one".into(),
+                host: "fixture".into(),
+                boot: boot.clone(),
+            },
+            request: cortex_core::program::OperationId::new("rename").unwrap(),
+            manager: "fixture".into(),
+            invocation: "one".into(),
+            control_group: root_path.join("cortex-old").to_str().unwrap().into(),
+            cgroup_device: child.dev(),
+            cgroup_inode: child.ino(),
+            boot,
+        };
+        fs::rename(root_path.join("cortex-old"), root_path.join("renamed")).unwrap();
+        assert!(matches!(
+            scope.inspect_recovery(&identity),
+            RecoveryObservation::Unverifiable
+        ));
+        assert_eq!(
+            fs::metadata(root_path.join("renamed")).unwrap().ino(),
+            identity.cgroup_inode
+        );
+        fs::remove_dir_all(root_path).unwrap();
+    }
+    #[test]
+    fn managed_group_pin_cannot_select_root_neighbor_or_traversal() {
+        let root = Path::new("/sys/fs/cgroup/owned");
+        assert_eq!(
+            bound_relative(root, "/owned/child.service"),
+            Ok(PathBuf::from("child.service"))
+        );
+        assert_eq!(
+            bound_relative(root, "/owned/nested/child.service"),
+            Ok(PathBuf::from("nested/child.service"))
+        );
+        for wrong in [
+            "/owned",
+            "/neighbor/job",
+            "/owned/../neighbor",
+            "relative",
+            "/",
+        ] {
+            assert_eq!(bound_relative(root, wrong), Err(ExecutionError::Identity));
+        }
+    }
     #[test]
     fn absent_authorization_never_discovers_a_scope() {
         assert!(matches!(
