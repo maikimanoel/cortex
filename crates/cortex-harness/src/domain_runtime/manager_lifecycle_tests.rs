@@ -13,7 +13,8 @@ struct LifecycleManager {
     lost_stop: bool,
     completions: usize,
     structured_stdout: Option<&'static [u8]>,
-    synthetic_closed_cpu: Option<u64>,
+    synthetic_empty_tree: bool,
+    synthetic_cpu_micros: Option<u64>,
 }
 impl LifecycleManager {
     fn new(root: &Temp, intent: &DomainIntent) -> Self {
@@ -31,7 +32,8 @@ impl LifecycleManager {
             lost_stop: false,
             completions: 0,
             structured_stdout: None,
-            synthetic_closed_cpu: None,
+            synthetic_empty_tree: false,
+            synthetic_cpu_micros: None,
         }
     }
     fn check_readback(
@@ -98,12 +100,12 @@ impl DomainManager for LifecycleManager {
         end: Instant,
     ) -> Result<(ManagedObservation, Vec<DomainCgroupObservation>), DomainDiagnostic> {
         let mut observed = self.observe(intent, end)?;
-        if let Some(cpu) = self.synthetic_closed_cpu {
+        if self.synthetic_empty_tree {
             observed.main_pid = 0;
             observed.start_ticks = 0;
             observed.populated = false;
             observed.direct_members.clear();
-            observed.cpu_micros = Some(cpu);
+            observed.cpu_micros = self.synthetic_cpu_micros;
         }
         let root = DomainCgroupObservation {
             relative_path: String::new(),

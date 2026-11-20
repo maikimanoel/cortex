@@ -21,7 +21,7 @@ fn tick(k: &CoordinationKernel) -> u64 {
     k.domains().unwrap().last_tick() + 1
 }
 
-fn sample(store: &ProgramStore, i: &DomainIntent, label: &str, micros: u64) -> u64 {
+fn sample(store: &ProgramStore, i: &DomainIntent, label: &str, micros: Option<u64>) -> u64 {
     let k = load(store);
     let at = tick(&k);
     let cancel = input(
@@ -37,7 +37,8 @@ fn sample(store: &ProgramStore, i: &DomainIntent, label: &str, micros: u64) -> u
     store.admit(&key(), cancel).unwrap();
     let root = Temp::new();
     let mut fake = LifecycleManager::new(&root, i);
-    fake.synthetic_closed_cpu = Some(micros);
+    fake.synthetic_empty_tree = true;
+    fake.synthetic_cpu_micros = micros;
     let ids = DomainOperations {
         domain: i.id.clone(),
         create: OperationId::new("unused-create").unwrap(),
@@ -108,8 +109,18 @@ pub(super) fn exercise_settlement(
     e: &DomainIntent,
     f: &DomainIntent,
 ) {
-    let b_at = sample(store, b, "B", parse_cpu_usage("usage_usec 1001\n").unwrap());
-    let e_at = sample(store, e, "E", parse_cpu_usage("usage_usec 9201\n").unwrap());
+    let b_at = sample(
+        store,
+        b,
+        "B",
+        Some(parse_cpu_usage("usage_usec 1001\n").unwrap()),
+    );
+    let e_at = sample(
+        store,
+        e,
+        "E",
+        Some(parse_cpu_usage("usage_usec 9201\n").unwrap()),
+    );
     check_debt(store, f);
     let k = load(store);
     let domains = k.domains().unwrap();
@@ -269,7 +280,7 @@ fn cpu_corroboration_refuses_incomplete_stale_and_cross_incarnation_claims() {
     let run = execute_lifecycle(&store, &mut manager, &ids);
     manager.inner.finish();
     assert!(run.report.is_some());
-    let at = sample(&store, &i, "single", 1001);
+    let at = sample(&store, &i, "single", Some(1001));
     let kernel = load(&store);
     let exact = kernel.domains().unwrap().domain(&i.id).unwrap();
     let receipt = close_assertion(&i, Some(2));
@@ -343,7 +354,7 @@ fn mixed_closure_history_cannot_hide_a_counter_decrease() {
     let run = execute_lifecycle(&store, &mut manager, &ids);
     manager.inner.finish();
     assert!(run.report.is_some());
-    sample(&store, &intent, "mixed-history", 9_000);
+    sample(&store, &intent, "mixed-history", Some(9_000));
     let kernel = load(&store);
     let domain = kernel.domains().unwrap().domain(&intent.id).unwrap();
     let mut tree = domain.closure_tree_observations[0].clone();
@@ -401,7 +412,7 @@ fn cpu_sampling_rounds_up_even_at_the_integer_limit() {
     let run = execute_lifecycle(&store, &mut manager, &ids);
     manager.inner.finish();
     assert!(run.report.is_some());
-    let at = sample(&store, &i, "range", 0);
+    let at = sample(&store, &i, "range", Some(0));
     let k = load(&store);
     let mut record = k.domains().unwrap().domain(&i.id).unwrap().clone();
     for (microseconds, expected) in [
@@ -469,4 +480,97 @@ fn partial_accounting_capture_requires_cancellation_and_the_original_open_window
     assert_eq!(refused.cause, DomainCause::Contract);
     assert_eq!(manager.inner.observed, observed);
     assert_eq!(load(&store).revision(), revision);
+}
+
+#[test]
+fn successful_report_and_missing_counter_do_not_settle_after_reopen() {
+    use cortex_core::program::operational::EffectOutcome;
+    let root = Temp::new();
+    let (store, intent, ids) = stored(&root);
+    let component = Temp::new();
+    let mut manager = LifecycleManager::new(&component, &intent);
+    let run = execute_lifecycle(&store, &mut manager, &ids);
+    manager.inner.finish();
+    assert!(run.report.is_some() && run.diagnostic.is_none());
+    assert_eq!((manager.inner.created, manager.completions), (1, 1));
+
+    let before = load(&store);
+    let report = before.domains().unwrap().domain(&intent.id).unwrap();
+    assert_eq!(
+        report.outcome,
+        HistoricalOutcome::Reported(EffectOutcome::Succeeded)
+    );
+    assert!(!report.cancelled);
+    assert!(report.holds(Resource::DiskBytes) && report.unresolved_consumption(CPU));
+    let at = sample(&store, &intent, "unavailable-counter", None);
+    let store_id = store.id();
+    let limits = store.read_limits();
+    drop(store);
+
+    let mut zero = close_assertion(&intent, Some(0));
+    let durable_revision;
+    {
+        let reopened =
+            ProgramStore::open(&root.0.join("store"), &key(), Access::ReadOnly, limits).unwrap();
+        assert!(reopened.id() == store_id);
+        let k = load(&reopened);
+        durable_revision = k.revision();
+        assert_eq!(durable_revision, before.revision() + 2);
+        let record = k.domains().unwrap().domain(&intent.id).unwrap();
+        assert_eq!(record.closure_tree_observations.len(), 1);
+        let observation = &record.closure_tree_observations[0].sample;
+        assert_eq!(observation.observed_at, at);
+        assert!(!observation.populated);
+        assert_eq!(observation.cpu_micros, None);
+        assert!(record.cancelled && record.closure.is_none());
+        assert_eq!(
+            record.outcome,
+            HistoricalOutcome::Reported(EffectOutcome::Succeeded)
+        );
+        assert_eq!(
+            check_cpu_closure_against_sample(record, at, &zero),
+            Err(CpuClosureCheckError::MissingSample)
+        );
+    }
+
+    let store = ProgramStore::open(&root.0.join("store"), &key(), Access::Recover, limits).unwrap();
+    let k = load(&store);
+    let attempt_settlement = input(
+        &k,
+        "premature-zero-settlement",
+        DomainEvent::Settle {
+            domain: intent.id.clone(),
+            receipt: zero.clone(),
+            at: tick(&k),
+        },
+    );
+    zero.whole_domain = false;
+    let attempt_closure = input(
+        &k,
+        "premature-closure-from-empty-sample",
+        DomainEvent::Closed {
+            domain: intent.id.clone(),
+            receipt: zero,
+            at: tick(&k),
+        },
+    );
+    for operation in [attempt_settlement, attempt_closure] {
+        let refused = store.admit(&key(), operation).unwrap_err();
+        assert_eq!(refused.completion, Completion::Rejected);
+        assert!(matches!(
+            refused.error,
+            ProgramStoreError::Domain(KernelError::Domain(DomainError::Correspondence))
+        ));
+        assert_eq!(load(&store).revision(), durable_revision);
+    }
+
+    let after = load(&store);
+    let record = after.domains().unwrap().domain(&intent.id).unwrap();
+    assert_eq!(
+        record.outcome,
+        HistoricalOutcome::Reported(EffectOutcome::Succeeded)
+    );
+    assert!(record.closure.is_none() && record.holds(Resource::DiskBytes));
+    assert!(record.holds(Resource::WorkerSlots) && record.unresolved_consumption(CPU));
+    assert_eq!(record.measured_consumption(CPU), None);
 }
