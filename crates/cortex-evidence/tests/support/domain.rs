@@ -89,14 +89,26 @@ pub fn named_definition(name: &str) -> ProgramDefinition {
     .unwrap()
 }
 pub fn setup(k: &mut CoordinationKernel, task: &str) -> DomainIntent {
+    setup_with_expiration(k, task, 1000)
+}
+pub fn setup_with_expiration(
+    k: &mut CoordinationKernel,
+    task: &str,
+    expires_before: u64,
+) -> DomainIntent {
     let selected = k
         .domains()
         .and_then(|projection| projection.pool())
         .cloned()
         .unwrap_or_else(pool);
-    setup_in_pool(k, task, &selected)
+    setup_in_pool(k, task, &selected, expires_before)
 }
-fn setup_in_pool(k: &mut CoordinationKernel, task: &str, selected: &PoolContract) -> DomainIntent {
+fn setup_in_pool(
+    k: &mut CoordinationKernel,
+    task: &str,
+    selected: &PoolContract,
+    expires_before: u64,
+) -> DomainIntent {
     let scope = k
         .state()
         .readiness()
@@ -196,7 +208,7 @@ fn setup_in_pool(k: &mut CoordinationKernel, task: &str, selected: &PoolContract
         policy: source("domain-member-policy"),
         scope: scope.clone(),
         not_before: 1,
-        expires_before: 1000,
+        expires_before,
         ceilings: demand.clone(),
         basis: source("explicit-fixture-grant"),
     };
@@ -297,7 +309,7 @@ pub fn add_member(k: &mut CoordinationKernel, name: &str) -> DomainIntent {
         .and_then(|projection| projection.pool())
         .cloned()
         .unwrap_or_else(pool);
-    let i = setup_in_pool(&mut member, "A", &selected);
+    let i = setup_in_pool(&mut member, "A", &selected, 1000);
     submit(
         k,
         &format!("register-{name}"),

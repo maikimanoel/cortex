@@ -947,7 +947,7 @@ impl SystemdNonceDomain {
         }
         let cpu = bounded_metadata(&path.join("cpu.stat"))
             .ok()
-            .and_then(|v| key_number(&v, "usage_usec"));
+            .and_then(|v| crate::native_execution::accounting::parse_cpu_usage(&v).ok());
         let memory = bounded_metadata(&path.join("memory.peak"))
             .ok()
             .and_then(|v| v.trim().parse().ok());

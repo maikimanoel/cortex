@@ -192,3 +192,33 @@ Canonical cancellation writes only that retained descriptor after current exact
 group checks; a later pathname replacement cannot redirect it. Read-only recovery
 does not acquire termination authority. Descriptor availability is a prerequisite,
 not proof that an eventual kernel write, quiescence or cleanup will succeed.
+
+## CPU accounting observations
+
+The managed executable can publish a partial tree observation after durable
+cancellation through the existing domain journal. It brackets the manager's
+tree observation with bounded reads of the held cgroup's CPU counter and matches
+the sampled boot, invocation, device, and inode. The capture uses the original
+deadline. Publication retains the canonical store's completion classification,
+including indeterminate admission. Inspection of that event does not repeat
+cancellation or signal a domain.
+
+The selected counter is cumulative CPU microseconds from the cgroup v2
+`cpu.stat` field `usage_usec`. Missing, malformed, duplicated, truncated,
+out-of-range or contradictory reads supply no numeric evidence. An empty tree
+and stable counter do not cover external helpers, prove absence of re-entry, or
+exclude snapshot resurrection.
+
+A read-only check can compare an independently proposed closure receipt with the
+latest retained tree sample and reject an amount below the sample rounded up to
+whole CPU execution milliseconds. It verifies exact recorded correspondence and
+screens the proposed debit. It cannot establish the independence of an observer,
+complete accounting coverage, or the finality of the proposed measurement. Only
+the existing canonical closure and settlement operations can account final use.
+No measurement is written from a partial native sample.
+
+A source simulation supplies independent synthetic closure assertions for B and
+E through those existing operations. F remains held when either final debit is
+missing, even when both artifact edges are accepted. After both final debits are
+admitted, fresh F reservation and its simulated lifecycle proceed. Native
+final-counter production and actual host execution remain unqualified.

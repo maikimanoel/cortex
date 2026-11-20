@@ -927,7 +927,66 @@ fn observe_closure_tree<M: DomainManager>(
     observation_id: OperationId,
 ) -> Result<AdmissionReceipt, DomainDiagnostic> {
     let start = Instant::now();
-    let end = start + Duration::from_secs(1);
+    let operation = capture_closure_tree(
+        store,
+        key,
+        backend,
+        ids,
+        observation_id,
+        start,
+        start + Duration::from_secs(1),
+    )?;
+    store
+        .admit(key, operation)
+        .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))
+}
+
+/// Failure of a managed tree observation or of its distinct journal publication.
+#[derive(Debug)]
+pub enum ManagedClosureObservationError {
+    /// Capture refused without submitting a journal entry.
+    Capture(DomainDiagnostic),
+    /// Canonical admission failed. Preserve its original completion classification.
+    Admission(cortex_storage::program_store::AdmissionFailure),
+}
+
+/// Capture and publish a partial post-cancel observation of a still-held managed
+/// executable. Uses the original deadline and the existing locked admission
+/// rules. After indeterminate publication, inspect the journal for the exact
+/// observation ID. This function grants no authority to repeat effects.
+pub fn observe_managed_executable_closure_tree(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut crate::native_execution::managed_backend::ManagedExecutionDomain,
+    ids: &DomainOperations,
+    observation_id: OperationId,
+) -> Result<AdmissionReceipt, ManagedClosureObservationError> {
+    let start = Instant::now();
+    let end = backend.observation_end().ok_or_else(|| {
+        ManagedClosureObservationError::Capture(issue(
+            DomainPhaseDiagnostic::Closure,
+            DomainCause::Correspondence,
+        ))
+    })?;
+    let operation = capture_closure_tree(store, key, backend, ids, observation_id, start, end)
+        .map_err(ManagedClosureObservationError::Capture)?;
+    store
+        .admit(key, operation)
+        .map_err(ManagedClosureObservationError::Admission)
+}
+
+fn capture_closure_tree<M: DomainManager>(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut M,
+    ids: &DomainOperations,
+    observation_id: OperationId,
+    start: Instant,
+    end: Instant,
+) -> Result<Operation, DomainDiagnostic> {
+    if start >= end {
+        return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Deadline));
+    }
     let kernel = store
         .load(key, Access::ReadOnly)
         .map_err(|_| issue(DomainPhaseDiagnostic::Closure, DomainCause::Journal))?;
@@ -988,21 +1047,19 @@ fn observe_closure_tree<M: DomainManager>(
     observation
         .validate()
         .map_err(|_| issue(DomainPhaseDiagnostic::Closure, DomainCause::Correspondence))?;
-    store
-        .admit(
-            key,
-            operation(
-                &kernel,
-                ids,
-                observation_id,
-                DomainEvent::ClosureTreeObserved {
-                    domain: ids.domain.clone(),
-                    observation,
-                    at,
-                },
-            ),
-        )
-        .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))
+    if Instant::now() >= end {
+        return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Deadline));
+    }
+    Ok(operation(
+        &kernel,
+        ids,
+        observation_id,
+        DomainEvent::ClosureTreeObserved {
+            domain: ids.domain.clone(),
+            observation,
+            at,
+        },
+    ))
 }
 
 /// Consume a retained pre-release channel through canonical cancellation. The

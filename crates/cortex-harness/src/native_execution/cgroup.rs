@@ -3,7 +3,7 @@
 //! Controller presence, installed readback and empirical enforcement are separate
 //! facts. This adapter changes only a freshly owned child. Drop never signals,
 //! deletes, refunds or fabricates closure. The caller retains cleanup ownership.
-use super::ExecutionError;
+use super::{ExecutionError, accounting::parse_cpu_usage};
 use cortex_core::program::supervision::ScopeControls;
 use rustix::fs::{Mode, OFlags, ResolveFlags};
 use std::{
@@ -427,6 +427,25 @@ impl OwnedGroup {
         self.attached = Some((pid, ticks));
         Ok(())
     }
+    /// Read the CPU counter through this held directory. Keep absent and
+    /// contradictory metadata from becoming a numeric observation.
+    pub(crate) fn cpu_usage(
+        &self,
+        identity: &cortex_core::program::domain::DomainIdentity,
+    ) -> Result<Option<u64>, ExecutionError> {
+        if self.boot != identity.boot
+            || self.identity() != (identity.cgroup_device, identity.cgroup_inode)
+        {
+            return Err(ExecutionError::Identity);
+        }
+        self.check()?;
+        let value = open(&self.dir, Path::new("cpu.stat"), false)
+            .and_then(|file| text(&file))
+            .ok()
+            .and_then(|stat| parse_cpu_usage(&stat).ok());
+        self.check()?;
+        Ok(value)
+    }
     /// Read bounded kernel facts. Recursive population is authoritative for this
     /// observation; direct membership alone cannot prove descendant quiescence.
     pub fn observe(&self) -> Result<GroupObservation, ExecutionError> {
@@ -441,10 +460,7 @@ impl OwnedGroup {
             return Err(ExecutionError::Policy);
         }
         let cpu = text(&open(&self.dir, Path::new("cpu.stat"), false)?)?;
-        let cpu_micros = cpu
-            .lines()
-            .find_map(|l| l.strip_prefix("usage_usec "))
-            .and_then(|n| n.parse().ok());
+        let cpu_micros = parse_cpu_usage(&cpu).ok();
         let memory_peak = open(&self.dir, Path::new("memory.peak"), false)
             .ok()
             .and_then(|f| text(&f).ok())

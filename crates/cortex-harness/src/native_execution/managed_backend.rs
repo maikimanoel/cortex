@@ -47,6 +47,8 @@ pub struct ManagedExecutionDomain {
     manager: SystemdNonceDomain,
     delegation: Delegation,
     intent: Option<DomainIntent>,
+    original_end: Option<Instant>,
+    bound_group: Option<DomainIdentity>,
     group: Option<OwnedGroup>,
     scratch: Option<File>,
     observation: Option<ExecutionObservation>,
@@ -72,6 +74,8 @@ impl ManagedExecutionDomain {
             manager,
             delegation,
             intent: None,
+            original_end: None,
+            bound_group: None,
             group: None,
             scratch: None,
             observation: None,
@@ -80,6 +84,9 @@ impl ManagedExecutionDomain {
     /// Exact manager/policy/immutable source configuration for canonical intent.
     pub fn configuration(&self) -> &SourceReference {
         self.manager.configuration()
+    }
+    pub(crate) fn observation_end(&self) -> Option<Instant> {
+        self.original_end
     }
     pub(crate) fn wall_ms(&self) -> u64 {
         self.plan.spec.limits.wall_ms
@@ -203,6 +210,7 @@ impl DomainManager for ManagedExecutionDomain {
         }
         // Preserve the attempted identity before submission, including lost reply.
         self.intent = Some(i.clone());
+        self.original_end = Some(end);
         self.manager.create(i, end)
     }
     fn setup(&mut self, channel: &mut UnixStream, end: Instant) -> Result<(), DomainDiagnostic> {
@@ -223,6 +231,7 @@ impl DomainManager for ManagedExecutionDomain {
             .inspect_bound_group(&actual.identity, &self.plan.spec.controls)
             .map_err(diagnostic)?;
         self.group = Some(group);
+        self.bound_group = Some(actual.identity.clone());
         let c = &self.plan.spec.controls;
         let path = PathBuf::from("/sys/fs/cgroup")
             .join(actual.identity.control_group.trim_start_matches('/'));
@@ -283,7 +292,32 @@ impl DomainManager for ManagedExecutionDomain {
         i: &DomainIntent,
         end: Instant,
     ) -> Result<(ManagedObservation, Vec<DomainCgroupObservation>), DomainDiagnostic> {
-        self.manager.observe_tree(i, end)
+        let end = end.min(
+            self.original_end
+                .ok_or_else(|| diagnostic(ExecutionError::Identity))?,
+        );
+        if Instant::now() >= end || self.intent.as_ref() != Some(i) {
+            return Err(diagnostic(ExecutionError::Identity));
+        }
+        let identity = self
+            .bound_group
+            .as_ref()
+            .ok_or_else(|| diagnostic(ExecutionError::Identity))?;
+        let group = self
+            .group
+            .as_ref()
+            .ok_or_else(|| diagnostic(ExecutionError::Identity))?;
+        let before = group.cpu_usage(identity).map_err(diagnostic)?;
+        let (mut actual, tree) = self.manager.observe_tree(i, end)?;
+        if &actual.identity != identity || Instant::now() >= end {
+            return Err(diagnostic(ExecutionError::Identity));
+        }
+        let after = group.cpu_usage(identity).map_err(diagnostic)?;
+        if Instant::now() >= end {
+            return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Deadline));
+        }
+        actual.cpu_micros = super::accounting::bracketed_cpu_usage(before, after, actual.populated);
+        Ok((actual, tree))
     }
     fn stop(
         &mut self,

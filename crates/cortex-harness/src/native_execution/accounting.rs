@@ -1,0 +1,208 @@
+//! Cgroup CPU samples and read-only corroboration of an independent closure claim.
+use cortex_core::program::domain::{
+    ClosureReceipt, Consumption, DomainClosureTreeObservation, DomainRecord,
+};
+
+const CPU_STAT_LIMIT: usize = 16_384;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CounterError {
+    Missing,
+    Malformed,
+    Duplicate,
+    Range,
+    Incomplete,
+}
+
+/// Read one complete kernel flat-keyed counter. Other keys may be added by the
+/// kernel. A malformed occurrence of the selected key still counts as a row.
+pub(crate) fn parse_cpu_usage(input: &str) -> Result<u64, CounterError> {
+    if input.len() > CPU_STAT_LIMIT || !input.ends_with('\n') {
+        return Err(CounterError::Incomplete);
+    }
+    let mut rows = input.lines().filter_map(|line| {
+        let mut fields = line.split_ascii_whitespace();
+        (fields.next() == Some("usage_usec")).then_some(fields)
+    });
+    let mut entry = rows.next().ok_or(CounterError::Missing)?;
+    if rows.next().is_some() {
+        return Err(CounterError::Duplicate);
+    }
+    let value = entry.next().ok_or(CounterError::Malformed)?;
+    if entry.next().is_some() || !value.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(CounterError::Malformed);
+    }
+    value.parse().map_err(|_| CounterError::Range)
+}
+
+/// Compare samples of one already verified counter epoch. An empty observation
+/// with changing usage cannot corroborate that window. Equality is not a fence.
+pub(crate) fn bracketed_cpu_usage(
+    before: Option<u64>,
+    after: Option<u64>,
+    populated: bool,
+) -> Option<u64> {
+    let (before, after) = (before?, after?);
+    (after >= before && (populated || after == before)).then_some(after)
+}
+
+/// Why a candidate closure debit could not be compared with an exact sample.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CpuClosureCheckError {
+    /// No retained sample at the requested tick, or its numeric value is absent.
+    MissingSample,
+    /// A newer retained sample or a decreasing observation invalidates the comparison.
+    StaleSample,
+    /// Domain, incarnation, configuration, scope, or binding does not match.
+    Correspondence,
+    /// The observation or asserted closure lacks the applicable coverage.
+    Incomplete,
+    /// The candidate repeats, omits, or leaves the CPU dimension unresolved.
+    Debit,
+    /// The claimed final amount is below the observed cumulative sample.
+    Undercount,
+}
+
+/// Compare a proposed existing closure receipt against a retained native tree
+/// observation from the same epoch. Return the sample rounded upward in
+/// cumulative scheduled CPU milliseconds. This screens for undercounting.
+/// The caller must separately establish finality, authenticity, freshness and
+/// authorization before submitting the receipt through the canonical journal.
+/// No usage is accepted or released by this check.
+pub fn check_cpu_closure_against_sample(
+    record: &DomainRecord,
+    sampled_at: u64,
+    receipt: &ClosureReceipt,
+) -> Result<u64, CpuClosureCheckError> {
+    let observation = record
+        .closure_tree_observations
+        .last()
+        .ok_or(CpuClosureCheckError::MissingSample)?;
+    if observation.sample.observed_at != sampled_at
+        || record
+            .closure_observations
+            .last()
+            .is_some_and(|entry| entry.observed_at > sampled_at)
+    {
+        return Err(CpuClosureCheckError::StaleSample);
+    }
+    let amount = check_sample(record, observation, receipt)?;
+    if record.closure_tree_observations.iter().any(|previous| {
+        previous
+            .sample
+            .cpu_micros
+            .zip(observation.sample.cpu_micros)
+            .is_some_and(|(previous, latest)| previous > latest)
+    }) {
+        return Err(CpuClosureCheckError::StaleSample);
+    }
+    Ok(amount)
+}
+
+fn check_sample(
+    record: &DomainRecord,
+    observation: &DomainClosureTreeObservation,
+    receipt: &ClosureReceipt,
+) -> Result<u64, CpuClosureCheckError> {
+    let invalid = CpuClosureCheckError::Correspondence;
+    observation.validate().map_err(|_| invalid)?;
+    let sample = &observation.sample;
+    let binding = record.binding_observation.as_ref().ok_or(invalid)?;
+    if receipt.domain != record.intent.id
+        || record.identity.as_ref() != Some(&sample.identity)
+        || binding.identity != sample.identity
+        || receipt.identity != sample.identity
+        || sample.configuration != record.intent.configuration
+        || binding.configuration != sample.configuration
+        || receipt.configuration != sample.configuration
+        || sample.scope != record.intent.effect.scope
+        || receipt.scope != sample.scope
+        || sample.binding_main != binding.main
+        || record.cancelled_at.is_none_or(|at| sample.observed_at < at)
+    {
+        return Err(invalid);
+    }
+    if observation.nodes.iter().any(|node| node.populated)
+        || sample.observed_main.is_some()
+        || !sample.restart_prevented
+        || !receipt.whole_domain
+        || !receipt.restart_prevented
+        || !receipt.snapshot_safe
+        || !receipt.quiescent
+        || receipt.evidence == sample.basis
+    {
+        return Err(CpuClosureCheckError::Incomplete);
+    }
+    let measured = sample
+        .cpu_micros
+        .ok_or(CpuClosureCheckError::MissingSample)?;
+    let mut debits = receipt
+        .consumption
+        .iter()
+        .filter(|d| d.dimension == Consumption::CpuExecutionMillis);
+    let final_ms = debits
+        .next()
+        .and_then(|d| d.measured)
+        .ok_or(CpuClosureCheckError::Debit)?;
+    if debits.next().is_some()
+        || !record
+            .intent
+            .consumption
+            .iter()
+            .any(|value| value.dimension == Consumption::CpuExecutionMillis)
+    {
+        return Err(CpuClosureCheckError::Debit);
+    }
+    let sample_ms = measured.div_ceil(1000);
+    if final_ms < sample_ms {
+        return Err(CpuClosureCheckError::Undercount);
+    }
+    Ok(sample_ms)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kernel_usage_requires_one_complete_unsigned_counter() {
+        assert_eq!(parse_cpu_usage("usage_usec 0\nuser_usec 0\n"), Ok(0));
+        assert_eq!(
+            parse_cpu_usage("usage_usec 18446744073709551615\n"),
+            Ok(u64::MAX)
+        );
+        for (input, expected) in [
+            ("user_usec 100\n", CounterError::Missing),
+            ("usage_usec 10", CounterError::Incomplete),
+            ("usage_usec\n", CounterError::Malformed),
+            ("usage_usec +0\n", CounterError::Malformed),
+            ("usage_usec -1\n", CounterError::Malformed),
+            ("usage_usec 11 extra\n", CounterError::Malformed),
+            ("usage_usec 18446744073709551616\n", CounterError::Range),
+            (
+                "usage_usec 0\nusage_usec invalid\n",
+                CounterError::Duplicate,
+            ),
+            (
+                "usage_usec invalid\n usage_usec 0\n",
+                CounterError::Duplicate,
+            ),
+        ] {
+            assert_eq!(parse_cpu_usage(input), Err(expected), "{input:?}");
+        }
+        assert_eq!(
+            parse_cpu_usage(&format!("usage_usec 0\n{}\n", "x".repeat(CPU_STAT_LIMIT))),
+            Err(CounterError::Incomplete)
+        );
+    }
+
+    #[test]
+    fn bracketed_reading_does_not_fill_gaps_or_accept_resets() {
+        assert_eq!(bracketed_cpu_usage(Some(0), Some(0), false), Some(0));
+        assert_eq!(bracketed_cpu_usage(Some(9), Some(11), true), Some(11));
+        assert_eq!(bracketed_cpu_usage(Some(9), Some(11), false), None);
+        assert_eq!(bracketed_cpu_usage(Some(u64::MAX), Some(0), true), None);
+        assert_eq!(bracketed_cpu_usage(None, Some(0), false), None);
+        assert_eq!(bracketed_cpu_usage(Some(0), None, true), None);
+    }
+}

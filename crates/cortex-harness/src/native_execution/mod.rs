@@ -3,6 +3,7 @@
 //! The strict path requires an explicitly authorized delegated cgroup. There is
 //! no unrestricted fallback, provider route or implicit production resource policy.
 //! Returned process observations never settle canonical reservations.
+pub mod accounting;
 pub mod artifacts;
 pub mod cgroup;
 mod policy;

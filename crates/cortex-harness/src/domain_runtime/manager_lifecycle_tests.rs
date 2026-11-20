@@ -13,6 +13,7 @@ struct LifecycleManager {
     lost_stop: bool,
     completions: usize,
     structured_stdout: Option<&'static [u8]>,
+    synthetic_closed_cpu: Option<u64>,
 }
 impl LifecycleManager {
     fn new(root: &Temp, intent: &DomainIntent) -> Self {
@@ -30,6 +31,7 @@ impl LifecycleManager {
             lost_stop: false,
             completions: 0,
             structured_stdout: None,
+            synthetic_closed_cpu: None,
         }
     }
     fn check_readback(
@@ -95,7 +97,14 @@ impl DomainManager for LifecycleManager {
         intent: &DomainIntent,
         end: Instant,
     ) -> Result<(ManagedObservation, Vec<DomainCgroupObservation>), DomainDiagnostic> {
-        let observed = self.observe(intent, end)?;
+        let mut observed = self.observe(intent, end)?;
+        if let Some(cpu) = self.synthetic_closed_cpu {
+            observed.main_pid = 0;
+            observed.start_ticks = 0;
+            observed.populated = false;
+            observed.direct_members.clear();
+            observed.cpu_micros = Some(cpu);
+        }
         let root = DomainCgroupObservation {
             relative_path: String::new(),
             device: observed.identity.cgroup_device,
@@ -641,8 +650,19 @@ fn malformed_structured_stream_refuses_canonical_report_without_replay_or_neighb
     assert!(after.domains().unwrap().domain(&intent.id).unwrap() == &original);
 }
 
+#[path = "accounting_tests.rs"]
+mod accounting;
 #[test]
 fn source_graph_accepted_dependencies_do_not_settle_execution_debt() {
+    source_graph_with_accounting(false);
+}
+
+#[test]
+fn source_simulated_closure_and_settlement_allow_fresh_dependent_admission() {
+    source_graph_with_accounting(true);
+}
+
+fn source_graph_with_accounting(apply_accounting: bool) {
     use cortex_core::program::operational::{EffectEvent, EffectMode, Policy};
     let root = Temp::new();
     let mut kernel = CoordinationKernel::new_domain_fixture(fixture::definition()).unwrap();
@@ -835,7 +855,10 @@ fn source_graph_accepted_dependencies_do_not_settle_execution_debt() {
     // Its package/generation are captured fresh; no premature authority is saved.
     let mut prepared_f = store.load(&key(), Access::ReadOnly).unwrap();
     let revision = prepared_f.revision();
-    let f = fixture::setup(&mut prepared_f, "F");
+    // This fresh synthetic grant must cover the original one-second fixture
+    // lifecycle after the upstream journal's monotonic time has advanced.
+    let fresh_expiry = prepared_f.domains().unwrap().last_tick() + 2000;
+    let f = fixture::setup_with_expiration(&mut prepared_f, "F", fresh_expiry);
     for op in &prepared_f.operations()[revision as usize..] {
         store.admit(&key(), op.clone()).unwrap();
     }
@@ -882,5 +905,58 @@ fn source_graph_accepted_dependencies_do_not_settle_execution_debt() {
     }
     for kind in [0, 2, 3] {
         assert_eq!(count_event(&final_kernel, &f.id, kind), 0);
+    }
+    if apply_accounting {
+        accounting::exercise_settlement(&store, &b, &e, &f);
+        let root = Temp::new();
+        let mut manager = LifecycleManager::new(&root, &f);
+        manager.structured_stdout = Some(b"null\n");
+        let ids = make_ids(&f, "F");
+        let before = store.load(&key(), Access::ReadOnly).unwrap();
+        assert_eq!(before.check_domain_current(&f.id, ids.at), Ok(()));
+        let start = Instant::now();
+        let result = execute_lifecycle(&store, &mut manager, &ids);
+        manager.inner.finish();
+        assert!(
+            result.diagnostic.is_none(),
+            "F lifecycle: {:?}, initial tick {}, elapsed {:?}, creation {}, binding {}, release {}",
+            result.diagnostic,
+            ids.at,
+            start.elapsed(),
+            result.creation.is_some(),
+            result.binding.is_some(),
+            result.release.is_some()
+        );
+        assert!(result.creation.is_some() && result.binding.is_some() && result.release.is_some());
+        assert!(result.report.is_some());
+        assert_eq!((manager.inner.created, manager.completions), (1, 1));
+        let replay = store.load(&key(), Access::ReadOnly).unwrap();
+        for kind in 0..=3 {
+            assert_eq!(count_event(&replay, &f.id, kind), 1);
+        }
+        assert!(
+            replay
+                .domains()
+                .unwrap()
+                .domain(&f.id)
+                .unwrap()
+                .unresolved_consumption(Consumption::CpuExecutionMillis)
+        );
+        assert!(
+            !replay
+                .domains()
+                .unwrap()
+                .domain(&b.id)
+                .unwrap()
+                .holds(Resource::WorkerSlots)
+        );
+        assert!(
+            !replay
+                .domains()
+                .unwrap()
+                .domain(&e.id)
+                .unwrap()
+                .holds(Resource::WorkerSlots)
+        );
     }
 }
