@@ -87,16 +87,35 @@ pub fn check_cpu_closure_against_sample(
         return Err(CpuClosureCheckError::StaleSample);
     }
     let amount = check_sample(record, observation, receipt)?;
-    if record.closure_tree_observations.iter().any(|previous| {
-        previous
-            .sample
-            .cpu_micros
-            .zip(observation.sample.cpu_micros)
-            .is_some_and(|(previous, latest)| previous > latest)
-    }) {
+    if !monotonic_cpu_history(record) {
         return Err(CpuClosureCheckError::StaleSample);
     }
     Ok(amount)
+}
+
+fn monotonic_cpu_history(record: &DomainRecord) -> bool {
+    // Core admits both observation kinds in strictly increasing tick order.
+    // Merge the retained sequences without allocation to check the same epoch.
+    let mut direct = record.closure_observations.iter().peekable();
+    let mut tree = record
+        .closure_tree_observations
+        .iter()
+        .map(|entry| &entry.sample)
+        .peekable();
+    let mut previous = 0;
+    while let Some(entry) = match (direct.peek(), tree.peek()) {
+        (Some(left), Some(right)) if left.observed_at < right.observed_at => direct.next(),
+        (_, Some(_)) => tree.next(),
+        _ => direct.next(),
+    } {
+        if let Some(usage) = entry.cpu_micros {
+            if usage < previous {
+                return false;
+            }
+            previous = usage;
+        }
+    }
+    true
 }
 
 fn check_sample(

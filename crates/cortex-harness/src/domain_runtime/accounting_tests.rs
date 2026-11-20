@@ -335,6 +335,64 @@ fn cpu_corroboration_refuses_incomplete_stale_and_cross_incarnation_claims() {
 }
 
 #[test]
+fn mixed_closure_history_cannot_hide_a_counter_decrease() {
+    let root = Temp::new();
+    let (store, intent, ids) = stored(&root);
+    let component = Temp::new();
+    let mut manager = LifecycleManager::new(&component, &intent);
+    let run = execute_lifecycle(&store, &mut manager, &ids);
+    manager.inner.finish();
+    assert!(run.report.is_some());
+    sample(&store, &intent, "mixed-history", 9_000);
+    let kernel = load(&store);
+    let domain = kernel.domains().unwrap().domain(&intent.id).unwrap();
+    let mut tree = domain.closure_tree_observations[0].clone();
+    let mut direct = tree.sample.clone();
+    direct.observed_at = tick(&kernel);
+    direct.cpu_micros = Some(1_000);
+    let at = direct.observed_at;
+    store
+        .admit(
+            &key(),
+            input(
+                &kernel,
+                "mixed-direct-sample",
+                DomainEvent::ClosureObserved {
+                    domain: intent.id.clone(),
+                    observation: direct,
+                    at,
+                },
+            ),
+        )
+        .unwrap();
+    let kernel = load(&store);
+    tree.sample.observed_at = tick(&kernel);
+    tree.sample.cpu_micros = Some(10_000);
+    let at = tree.sample.observed_at;
+    store
+        .admit(
+            &key(),
+            input(
+                &kernel,
+                "mixed-tree-sample",
+                DomainEvent::ClosureTreeObserved {
+                    domain: intent.id.clone(),
+                    observation: tree,
+                    at,
+                },
+            ),
+        )
+        .unwrap();
+    let kernel = load(&store);
+    let domain = kernel.domains().unwrap().domain(&intent.id).unwrap();
+    assert_eq!(
+        check_cpu_closure_against_sample(domain, at, &close_assertion(&intent, Some(10))),
+        Err(CpuClosureCheckError::StaleSample)
+    );
+    assert!(domain.unresolved_consumption(CPU));
+}
+
+#[test]
 fn cpu_sampling_rounds_up_even_at_the_integer_limit() {
     let root = Temp::new();
     let (store, i, ids) = stored(&root);
