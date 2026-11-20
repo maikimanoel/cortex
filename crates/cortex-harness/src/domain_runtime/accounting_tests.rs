@@ -539,7 +539,6 @@ fn successful_report_and_missing_counter_do_not_settle_after_reopen() {
         &k,
         "premature-zero-settlement",
         DomainEvent::Settle {
-            domain: intent.id.clone(),
             receipt: zero.clone(),
             at: tick(&k),
         },
@@ -549,7 +548,6 @@ fn successful_report_and_missing_counter_do_not_settle_after_reopen() {
         &k,
         "premature-closure-from-empty-sample",
         DomainEvent::Closed {
-            domain: intent.id.clone(),
             receipt: zero,
             at: tick(&k),
         },
