@@ -112,6 +112,8 @@ struct FakeManager {
     change_on_observation: Option<usize>,
     lost: bool,
     reject_ready: bool,
+    reject_context: bool,
+    selected_scratch: Option<fn(DomainPhase) -> u64>,
     replace: bool,
     cancel: Option<Arc<AtomicBool>>,
     worker: Option<thread::JoinHandle<io::Result<()>>>,
@@ -126,6 +128,8 @@ impl FakeManager {
             change_on_observation: None,
             lost: false,
             reject_ready: false,
+            reject_context: false,
+            selected_scratch: None,
             replace: false,
             cancel: None,
             worker: None,
@@ -138,6 +142,30 @@ impl FakeManager {
     }
 }
 impl DomainManager for FakeManager {
+    fn check_context(
+        &self,
+        kernel: &CoordinationKernel,
+        intent: &DomainIntent,
+        _: u64,
+    ) -> Result<(), DomainDiagnostic> {
+        if self.reject_context {
+            return Err(issue(
+                DomainPhaseDiagnostic::Preparation,
+                DomainCause::Contract,
+            ));
+        }
+        if let Some(scratch_for_phase) = self.selected_scratch {
+            let domains = kernel.domains().unwrap();
+            let phase = domains.domain(&intent.id).unwrap().phase;
+            crate::native_execution::managed_backend::check_scratch_reservation(
+                domains,
+                intent,
+                scratch_for_phase(phase),
+            )
+            .map_err(|_| issue(DomainPhaseDiagnostic::Identity, DomainCause::Correspondence))?;
+        }
+        Ok(())
+    }
     fn verify_ready(&self, hello: &serde_json::Value) -> bool {
         !self.reject_ready && hello.as_array().is_some_and(|a| a.len() == 6)
     }
@@ -943,3 +971,40 @@ fn changed_native_policy_at_locked_release_keeps_uncertainty_and_cannot_transmit
     assert_eq!(record.outcome, HistoricalOutcome::Unknown);
     assert_eq!(manager.created, 1);
 }
+
+#[test]
+fn unsupported_manager_contract_refuses_before_creation_or_journal_mutation() {
+    let root = Temp::new();
+    let (store, _, ids) = stored(&root);
+    let before = store.load(&key(), Access::ReadOnly).unwrap().revision();
+    let mut manager = FakeManager::new(&root);
+    manager.reject_context = true;
+    let start = Instant::now();
+    let result = prepare(
+        &store,
+        &key(),
+        &mut manager,
+        ExecutionRequest {
+            ids: &ids,
+            nonce: "test",
+            cancel: &AtomicBool::new(false),
+            start,
+            end: start + Duration::from_secs(1),
+        },
+        || panic!("listener must not be created"),
+    );
+    assert!(result.prepared.is_none());
+    assert!(result.run.creation.is_none());
+    assert_eq!(manager.created, 0);
+    assert!(manager.worker.is_none());
+    assert_eq!(
+        store.load(&key(), Access::ReadOnly).unwrap().revision(),
+        before
+    );
+}
+
+#[path = "manager_lifecycle_tests.rs"]
+mod manager_lifecycle_tests;
+
+#[path = "scratch_tests.rs"]
+mod scratch_tests;

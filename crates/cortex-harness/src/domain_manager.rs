@@ -1,8 +1,12 @@
-//! Native structured systemd D-Bus transport for one fixed nonce service.
+//! Typed systemd D-Bus transport for bounded nonce and executable profiles.
 //! No external manager helper is spawned; the selected manager and cooperating
 //! owner are trusted. Missing manager state is never evidence of noncreation.
 use crate::{
     domain_bootstrap::{connect_now, ticks, token},
+    native_execution::managed::{
+        self, ManagedPipeEndpoints, ManagerLifecycleReadback, ManagerRecoveryState, PipeIdentity,
+        ServicePipes,
+    },
     supervisor::PinnedExecutable,
 };
 use cortex_core::{
@@ -132,6 +136,22 @@ pub struct SystemdNonceDomain {
     boot: String,
     configuration: SourceReference,
     isolation: Option<crate::native_linux::NativeIsolation>,
+    execution: Option<ExecutableService>,
+}
+#[derive(Clone, Copy)]
+enum ObservationMode {
+    BeforeStdio,
+    Ready,
+    Cleanup,
+}
+struct ExecutableService {
+    isolation: crate::native_linux::NativeIsolation,
+    policy_digest: String,
+    child_pipes: Option<ServicePipes>,
+    controller_pipes: Option<ManagedPipeEndpoints>,
+    pipe_identities: [PipeIdentity; 3],
+    original_end_monotonic_us: Option<u64>,
+    stdio_transferred: bool,
 }
 #[derive(Clone)]
 pub(crate) struct ManagedObservation {
@@ -238,7 +258,122 @@ impl SystemdNonceDomain {
             boot,
             configuration,
             isolation: None,
+            execution: None,
         })
+    }
+    /// Select a general trusted executable bootstrap while retaining the existing
+    /// typed manager owner. This crate-private constructor cannot be substituted
+    /// into the public fixed-nonce entry point by a downstream caller.
+    pub(crate) fn inspect_executable(
+        selection: ServiceSelection,
+        isolation: crate::native_linux::NativeIsolation,
+        policy_digest: &str,
+    ) -> Result<Self, DomainDiagnostic> {
+        if policy_digest.len() != 64
+            || !policy_digest.bytes().all(|b| b.is_ascii_hexdigit())
+            || selection.nonce != policy_digest
+        {
+            return Err(issue(
+                DomainPhaseDiagnostic::Preparation,
+                DomainCause::Contract,
+            ));
+        }
+        isolation.check().map_err(|_| {
+            issue(
+                DomainPhaseDiagnostic::Preparation,
+                DomainCause::Correspondence,
+            )
+        })?;
+        let mut manager = Self::inspect(selection)?;
+        let (child_pipes, controller_pipes) = ServicePipes::create()?;
+        let pipe_identities = child_pipes.identities();
+        manager.execution = Some(ExecutableService {
+            isolation,
+            policy_digest: policy_digest.into(),
+            child_pipes: Some(child_pipes),
+            controller_pipes: Some(controller_pipes),
+            pipe_identities,
+            original_end_monotonic_us: None,
+            stdio_transferred: false,
+        });
+        manager.configuration = SourceReference::operator_reported(
+            "selected-native-backend",
+            "systemd-executable-v1",
+            &manager.current_configuration()?,
+        )
+        .map_err(|_| issue(DomainPhaseDiagnostic::Preparation, DomainCause::Capacity))?;
+        Ok(manager)
+    }
+    pub(crate) fn take_execution_pipes(
+        &mut self,
+    ) -> Result<ManagedPipeEndpoints, DomainDiagnostic> {
+        self.execution
+            .as_mut()
+            .and_then(|e| e.controller_pipes.take())
+            .ok_or_else(|| issue(DomainPhaseDiagnostic::Preparation, DomainCause::Contract))
+    }
+    pub(crate) fn transfer_execution_pipes(
+        &mut self,
+        intent: &DomainIntent,
+        channel: &mut std::os::unix::net::UnixStream,
+        end: Instant,
+    ) -> Result<ManagedObservation, DomainDiagnostic> {
+        let execution = self
+            .execution
+            .as_ref()
+            .ok_or_else(|| issue(DomainPhaseDiagnostic::Preparation, DomainCause::Contract))?;
+        if execution.stdio_transferred || execution.child_pipes.is_none() {
+            return Err(issue(
+                DomainPhaseDiagnostic::Preparation,
+                DomainCause::Correspondence,
+            ));
+        }
+        let observed = self.read_observation_mode(intent, end, ObservationMode::BeforeStdio)?;
+        let peer = rustix::net::sockopt::socket_peercred(&*channel).map_err(|e| {
+            issue(
+                DomainPhaseDiagnostic::Identity,
+                DomainCause::Io(std::io::Error::from(e).kind()),
+            )
+        })?;
+        if peer.pid.as_raw_pid() as u32 != observed.main_pid
+            || peer.uid != rustix::process::getuid()
+        {
+            return Err(issue(
+                DomainPhaseDiagnostic::Identity,
+                DomainCause::Correspondence,
+            ));
+        }
+        let execution = self
+            .execution
+            .as_mut()
+            .ok_or_else(|| issue(DomainPhaseDiagnostic::Preparation, DomainCause::Contract))?;
+        // Consume before transfer: a missing acknowledgment cannot authorize
+        // another transfer to the same or a reconstructed controller channel.
+        let fds = execution
+            .child_pipes
+            .take()
+            .ok_or_else(|| {
+                issue(
+                    DomainPhaseDiagnostic::Preparation,
+                    DomainCause::Correspondence,
+                )
+            })?
+            .into_fds();
+        crate::native_execution::stdio::send(channel, &fds, end).map_err(|e| {
+            issue(
+                DomainPhaseDiagnostic::Preparation,
+                if e.kind() == io::ErrorKind::TimedOut {
+                    DomainCause::Deadline
+                } else {
+                    DomainCause::Io(e.kind())
+                },
+            )
+        })?;
+        execution.stdio_transferred = true;
+        Ok(observed)
+    }
+    pub(crate) fn execution_isolation(&self) -> Option<&crate::native_linux::NativeIsolation> {
+        self.execution.as_ref().map(|e| &e.isolation)
     }
     /// Select native namespace/root enforcement for the fixed trusted payload.
     /// This read-only preparation is not host qualification. Setup failure in the
@@ -270,6 +405,21 @@ impl SystemdNonceDomain {
             &self.manager,
             self.connection.server_guid().as_str(),
         )?;
+        if let Some(execution) = &self.execution {
+            execution.isolation.check().map_err(|_| {
+                issue(
+                    DomainPhaseDiagnostic::Preparation,
+                    DomainCause::Correspondence,
+                )
+            })?;
+            return Ok(json!([
+                "executable-v1",
+                original,
+                execution.policy_digest,
+                execution.isolation.digest()
+            ])
+            .to_string());
+        }
         match &self.isolation {
             None => Ok(original),
             Some(policy) => {
@@ -287,6 +437,11 @@ impl SystemdNonceDomain {
         self.isolation.as_ref()
     }
     pub(crate) fn verify_ready(&self, hello: &serde_json::Value) -> bool {
+        if let Some(execution) = &self.execution {
+            return hello
+                .as_array()
+                .is_some_and(|a| a.len() == 7 && a[6] == execution.policy_digest);
+        }
         match &self.isolation {
             None => hello.as_array().is_some_and(|a| a.len() == 6),
             Some(policy) => hello
@@ -300,6 +455,9 @@ impl SystemdNonceDomain {
     }
     /// The profile intentionally has no arbitrary executable/provider transport.
     pub fn support_profile(&self) -> &'static str {
+        if self.execution.is_some() {
+            return "trusted-executable-components; host-unqualified; no-provider; manager-runtime-readback-required";
+        }
         "fixed-public-nonce-only; host-unqualified; no-arbitrary-exec; no-provider; scratch-and-hard-cumulative-cpu-unsupported"
     }
     pub(crate) fn endpoint(&self, request: &OperationId) -> Result<PathBuf, DomainDiagnostic> {
@@ -397,14 +555,86 @@ impl SystemdNonceDomain {
         }
         Ok(())
     }
+    fn service_description(&self, intent: &DomainIntent) -> String {
+        if self.execution.is_some() {
+            executable_description(intent)
+        } else {
+            description(intent)
+        }
+    }
+    fn expected_command(&self, intent: &DomainIntent) -> Result<Vec<String>, DomainDiagnostic> {
+        let phase = DomainPhaseDiagnostic::Preparation;
+        let cleaner = self
+            .selection
+            .environment_cleaner
+            .to_str()
+            .ok_or_else(|| issue(phase, DomainCause::Contract))?;
+        let bootstrap = self
+            .selection
+            .bootstrap
+            .to_str()
+            .ok_or_else(|| issue(phase, DomainCause::Contract))?;
+        let endpoint = self.endpoint(&intent.request)?;
+        let endpoint = endpoint
+            .to_str()
+            .ok_or_else(|| issue(phase, DomainCause::Contract))?;
+        let mut command = vec![
+            cleaner.into(),
+            "-i".into(),
+            bootstrap.into(),
+            endpoint.into(),
+            intent.request.as_str().into(),
+        ];
+        if let Some(execution) = &self.execution {
+            return executable_command(
+                &self.selection,
+                intent,
+                &execution.policy_digest,
+                execution.isolation.root_path(),
+                &execution.isolation.digest(),
+            );
+        } else {
+            command.push(self.selection.limits.wall_ms.to_string());
+            if let Some(policy) = &self.isolation {
+                command.extend(policy.arguments());
+            }
+        }
+        Ok(command)
+    }
     pub(crate) fn create(
         &mut self,
         intent: &DomainIntent,
         end: Instant,
     ) -> Result<(), DomainDiagnostic> {
         self.corresponds(intent)?;
+        if self
+            .execution
+            .as_ref()
+            .is_some_and(|e| e.original_end_monotonic_us.is_some())
+        {
+            return Err(issue(
+                DomainPhaseDiagnostic::Creation,
+                DomainCause::Correspondence,
+            ));
+        }
         let mut properties = creation_properties(&self.selection, intent)?;
-        if let Some(policy) = &self.isolation {
+        if self.execution.is_some() {
+            let end_monotonic = managed::monotonic_deadline(end)?;
+            let execution = self
+                .execution
+                .as_mut()
+                .ok_or_else(|| issue(DomainPhaseDiagnostic::Creation, DomainCause::Contract))?;
+            // Mark submission before the bounded manager call. An ambiguous
+            // reply cannot authorize a second creation request on this adapter.
+            execution.original_end_monotonic_us = Some(end_monotonic);
+            properties = executable_properties(
+                &self.selection,
+                intent,
+                &execution.policy_digest,
+                execution.isolation.root_path(),
+                &execution.isolation.digest(),
+            )?;
+        } else if let Some(policy) = &self.isolation {
             for (name, value) in &mut properties {
                 if name == "ExecStart" {
                     let mut exec: Vec<(String, Vec<String>, bool)> =
@@ -479,6 +709,34 @@ impl SystemdNonceDomain {
         end: Instant,
         cleanup: bool,
     ) -> Result<ManagedObservation, DomainDiagnostic> {
+        if !cleanup
+            && self
+                .execution
+                .as_ref()
+                .is_some_and(|e| !e.stdio_transferred)
+        {
+            return Err(issue(
+                DomainPhaseDiagnostic::Identity,
+                DomainCause::Correspondence,
+            ));
+        }
+        self.read_observation_mode(
+            intent,
+            end,
+            if cleanup {
+                ObservationMode::Cleanup
+            } else {
+                ObservationMode::Ready
+            },
+        )
+    }
+    fn read_observation_mode(
+        &mut self,
+        intent: &DomainIntent,
+        end: Instant,
+        phase: ObservationMode,
+    ) -> Result<ManagedObservation, DomainDiagnostic> {
+        let cleanup = matches!(phase, ObservationMode::Cleanup);
         self.corresponds(intent)?;
         let reply = bounded(
             self.connection.call_method(
@@ -500,7 +758,10 @@ impl SystemdNonceDomain {
         let description_actual = as_string(self.property(&object, ui, "Description", end)?)?;
         let restart = as_string(self.property(&object, si, "Restart", end)?)?;
         let mode = as_string(self.property(&object, si, "KillMode", end)?)?;
-        if description_actual != description(intent) || restart != "no" || mode != "control-group" {
+        if description_actual != self.service_description(intent)
+            || restart != "no"
+            || mode != "control-group"
+        {
             return Err(issue(
                 DomainPhaseDiagnostic::Identity,
                 DomainCause::Correspondence,
@@ -510,38 +771,19 @@ impl SystemdNonceDomain {
             .property(&object, si, "ExecStart", end)?
             .try_into()
             .map_err(|_| issue(DomainPhaseDiagnostic::Identity, DomainCause::Protocol))?;
-        let endpoint = self.endpoint(&intent.request)?;
         let cleaner = self
             .selection
             .environment_cleaner
             .to_str()
             .ok_or_else(|| issue(DomainPhaseDiagnostic::Identity, DomainCause::Contract))?;
-        let bootstrap = self
-            .selection
-            .bootstrap
-            .to_str()
-            .ok_or_else(|| issue(DomainPhaseDiagnostic::Identity, DomainCause::Contract))?;
-        let mut expected = vec![
-            cleaner.to_string(),
-            "-i".into(),
-            bootstrap.to_string(),
-            endpoint
-                .to_str()
-                .ok_or_else(|| issue(DomainPhaseDiagnostic::Identity, DomainCause::Contract))?
-                .into(),
-            intent.request.as_str().into(),
-            self.selection.limits.wall_ms.to_string(),
-        ];
-        if let Some(policy) = &self.isolation {
-            expected.extend(policy.arguments());
-        }
+        let expected = self.expected_command(intent)?;
         if exec.len() != 1 || exec[0].0 != cleaner || exec[0].1 != expected || exec[0].2 {
             return Err(issue(
                 DomainPhaseDiagnostic::Identity,
                 DomainCause::Correspondence,
             ));
         }
-        if self.isolation.is_some() {
+        if self.isolation.is_some() || self.execution.is_some() {
             for name in ["StandardInput", "StandardOutput", "StandardError"] {
                 if as_string(self.property(&object, si, name, end)?)? != "null" {
                     return Err(issue(
@@ -705,7 +947,7 @@ impl SystemdNonceDomain {
         }
         let cpu = bounded_metadata(&path.join("cpu.stat"))
             .ok()
-            .and_then(|v| key_number(&v, "usage_usec"));
+            .and_then(|v| crate::native_execution::accounting::parse_cpu_usage(&v).ok());
         let memory = bounded_metadata(&path.join("memory.peak"))
             .ok()
             .and_then(|v| v.trim().parse().ok());
@@ -715,7 +957,7 @@ impl SystemdNonceDomain {
                 DomainCause::Deadline,
             ));
         }
-        Ok(ManagedObservation {
+        let observation = ManagedObservation {
             identity: DomainIdentity {
                 pool: intent.pool.clone(),
                 request: intent.request.clone(),
@@ -747,7 +989,197 @@ impl SystemdNonceDomain {
             cpu_micros: cpu,
             memory_peak: memory,
             restart_prevented: true,
-        })
+        };
+        if let Some(execution) = &self.execution
+            && !cleanup
+        {
+            if matches!(phase, ObservationMode::Ready) {
+                for (fd, expected) in execution.pipe_identities.iter().enumerate() {
+                    let actual = fs::metadata(format!("/proc/{main}/fd/{fd}")).map_err(|e| {
+                        issue(DomainPhaseDiagnostic::Identity, DomainCause::Io(e.kind()))
+                    })?;
+                    if actual.mode() & 0o170000 != 0o010000
+                        || actual.dev() != expected.device
+                        || actual.ino() != expected.inode
+                    {
+                        return Err(issue(
+                            DomainPhaseDiagnostic::Identity,
+                            DomainCause::Correspondence,
+                        ));
+                    }
+                }
+            }
+            let readback = ManagerLifecycleReadback {
+                identity: observation.identity.clone(),
+                service_type: Some(as_string(self.property(&object, si, "Type", end)?)?),
+                restart: Some(restart),
+                kill_mode: Some(mode),
+                controls: Some(observation.controls.clone()),
+                active_enter_monotonic_us: Some(
+                    self.property(&object, ui, "ActiveEnterTimestampMonotonic", end)?
+                        .try_into()
+                        .map_err(|_| {
+                            issue(DomainPhaseDiagnostic::Identity, DomainCause::Protocol)
+                        })?,
+                ),
+            };
+            readback
+                .check(
+                    &observation.identity,
+                    &self.selection.limits,
+                    execution.original_end_monotonic_us,
+                )
+                .map_err(|error| {
+                    issue(
+                        DomainPhaseDiagnostic::Identity,
+                        match error {
+                            managed::ManagerObservationError::DeadlineMismatch => {
+                                DomainCause::Deadline
+                            }
+                            _ => DomainCause::Correspondence,
+                        },
+                    )
+                })?;
+        }
+        Ok(observation)
+    }
+    pub(crate) fn execution_completion(
+        &mut self,
+        intent: &DomainIntent,
+        expected: &DomainIdentity,
+        end: Instant,
+    ) -> Result<Option<cortex_core::program::supervision::ProcessCompletion>, DomainDiagnostic>
+    {
+        let observed = self.read_observation(intent, end, true)?;
+        if observed.identity != *expected {
+            return Err(issue(
+                DomainPhaseDiagnostic::Identity,
+                DomainCause::Correspondence,
+            ));
+        }
+        let object_reply = bounded(
+            self.connection.call_method(
+                Some(self.manager.as_str()),
+                MANAGER_PATH,
+                Some(MANAGER_INTERFACE),
+                "GetUnit",
+                &(unit(intent),),
+            ),
+            DomainPhaseDiagnostic::Identity,
+            end,
+        )?;
+        let object: OwnedObjectPath = object_reply
+            .body()
+            .deserialize()
+            .map_err(|_| issue(DomainPhaseDiagnostic::Identity, DomainCause::Protocol))?;
+        let invocation: Vec<u8> = self
+            .property(
+                &object,
+                "org.freedesktop.systemd1.Unit",
+                "InvocationID",
+                end,
+            )?
+            .try_into()
+            .map_err(|_| issue(DomainPhaseDiagnostic::Identity, DomainCause::Protocol))?;
+        if invocation
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+            != expected.invocation
+        {
+            return Err(issue(
+                DomainPhaseDiagnostic::Identity,
+                DomainCause::Correspondence,
+            ));
+        }
+        let code: i32 = self
+            .property(
+                &object,
+                "org.freedesktop.systemd1.Service",
+                "ExecMainCode",
+                end,
+            )?
+            .try_into()
+            .map_err(|_| issue(DomainPhaseDiagnostic::Identity, DomainCause::Protocol))?;
+        let status: i32 = self
+            .property(
+                &object,
+                "org.freedesktop.systemd1.Service",
+                "ExecMainStatus",
+                end,
+            )?
+            .try_into()
+            .map_err(|_| issue(DomainPhaseDiagnostic::Identity, DomainCause::Protocol))?;
+        let after: Vec<u8> = self
+            .property(
+                &object,
+                "org.freedesktop.systemd1.Unit",
+                "InvocationID",
+                end,
+            )?
+            .try_into()
+            .map_err(|_| issue(DomainPhaseDiagnostic::Identity, DomainCause::Protocol))?;
+        if after != invocation {
+            return Err(issue(
+                DomainPhaseDiagnostic::Identity,
+                DomainCause::Correspondence,
+            ));
+        }
+        managed::completion(code, status, observed.main_pid)
+    }
+    pub(crate) fn recover_execution(
+        &mut self,
+        intent: &DomainIntent,
+        expected: &DomainIdentity,
+        end: Instant,
+    ) -> ManagerRecoveryState {
+        if expected.boot != self.boot
+            || expected.manager != format!("{}|{}", self.connection.server_guid(), self.manager)
+        {
+            return ManagerRecoveryState::ChangedIncarnation;
+        }
+        let owner = bounded(
+            self.connection.call_method(
+                Some("org.freedesktop.DBus"),
+                "/org/freedesktop/DBus",
+                Some("org.freedesktop.DBus"),
+                "GetNameOwner",
+                &("org.freedesktop.systemd1",),
+            ),
+            DomainPhaseDiagnostic::Identity,
+            end,
+        );
+        match owner.and_then(|reply| {
+            reply
+                .body()
+                .deserialize::<String>()
+                .map_err(|_| issue(DomainPhaseDiagnostic::Identity, DomainCause::Protocol))
+        }) {
+            Ok(actual) if actual != self.manager => {
+                return ManagerRecoveryState::ChangedIncarnation;
+            }
+            Err(error) => return ManagerRecoveryState::Unavailable(error),
+            _ => {}
+        }
+        match self.read_observation(intent, end, true) {
+            Ok(observed) if observed.identity != *expected => {
+                ManagerRecoveryState::ChangedIncarnation
+            }
+            Ok(observed) => match self.execution_completion(intent, expected, end) {
+                Ok(completion) => ManagerRecoveryState::SameIncarnation {
+                    completion,
+                    populated: observed.populated,
+                },
+                Err(error) => ManagerRecoveryState::Unavailable(error),
+            },
+            Err(error)
+                if error.manager_error.as_deref()
+                    == Some("org.freedesktop.systemd1.NoSuchUnit") =>
+            {
+                ManagerRecoveryState::NameAbsent
+            }
+            Err(error) => ManagerRecoveryState::Unavailable(error),
+        }
     }
     pub(crate) fn observe_tree(
         &mut self,
@@ -1098,6 +1530,69 @@ fn creation_properties(
     ])
 }
 
+fn executable_description(intent: &DomainIntent) -> String {
+    format!(
+        "Cortex executable v1 {} {:x}",
+        intent.request.as_str(),
+        Sha256::digest(intent.configuration.version().as_bytes())
+    )
+}
+fn executable_command(
+    selection: &ServiceSelection,
+    intent: &DomainIntent,
+    policy: &str,
+    root: &Path,
+    isolation_digest: &str,
+) -> Result<Vec<String>, DomainDiagnostic> {
+    let phase = DomainPhaseDiagnostic::Preparation;
+    let text = |p: &Path| {
+        p.to_str()
+            .map(str::to_owned)
+            .ok_or_else(|| issue(phase, DomainCause::Contract))
+    };
+    Ok(vec![
+        text(&selection.environment_cleaner)?,
+        "-i".into(),
+        text(&selection.bootstrap)?,
+        text(&endpoint(selection, &intent.request)?)?,
+        intent.request.as_str().into(),
+        policy.into(),
+        text(root)?,
+        isolation_digest.into(),
+        selection.limits.wall_ms.to_string(),
+        "stdio-v1".into(),
+    ])
+}
+fn executable_properties(
+    selection: &ServiceSelection,
+    intent: &DomainIntent,
+    policy: &str,
+    root: &Path,
+    isolation_digest: &str,
+) -> Result<Vec<(String, OwnedValue)>, DomainDiagnostic> {
+    let mut properties = creation_properties(selection, intent)?;
+    let command = executable_command(selection, intent, policy, root, isolation_digest)?;
+    for (name, value) in &mut properties {
+        if name == "Description" {
+            *value = Value::from(executable_description(intent))
+                .try_to_owned()
+                .map_err(|_| issue(DomainPhaseDiagnostic::Preparation, DomainCause::Protocol))?;
+        }
+        if name == "ExecStart" {
+            *value = Value::new(vec![(
+                selection.environment_cleaner.to_string_lossy().into_owned(),
+                command.clone(),
+                false,
+            )])
+            .try_to_owned()
+            .map_err(|_| issue(DomainPhaseDiagnostic::Preparation, DomainCause::Protocol))?;
+        }
+    }
+    // systemd must not retain pipe writers under RemainAfterExit: the verified
+    // bootstrap receives stdio separately over its already owned control channel.
+    Ok(properties)
+}
+
 fn endpoint(
     selection: &ServiceSelection,
     request: &OperationId,
@@ -1248,6 +1743,118 @@ mod tests {
         let object = OwnedObjectPath::try_from("/org/freedesktop/systemd1/job/1").unwrap();
         let bytes = to_bytes(Context::new_dbus(LE, 0), &object).unwrap();
         assert_eq!(bytes.deserialize::<OwnedObjectPath>().unwrap().0, object);
+    }
+    #[test]
+    fn executable_start_properties_use_exact_bootstrap_metadata_and_typed_pipe_roles() {
+        use zbus::zvariant::{LE, serialized::Context, to_bytes};
+        type Properties = Vec<(String, OwnedValue)>;
+        type Start = (String, String, Properties, Vec<(String, Properties)>);
+        let (_, intent) = crate::domain_runtime::tests::fixture::coordinator();
+        let selection = ServiceSelection {
+            environment_cleaner: "/owned/env".into(),
+            bootstrap: "/owned/exec-bootstrap".into(),
+            controller_dir: "/owned/control".into(),
+            runtime_dir: "/owned/runtime".into(),
+            delegated_root: "/owned/cgroup".into(),
+            executable_bytes: 4096,
+            nonce: "a".repeat(64),
+            limits: ServiceLimits {
+                wall_ms: 100,
+                cpu_quota_us: 50000,
+                cpu_period_us: 100000,
+                memory_bytes: 134217728,
+                swap_bytes: 0,
+                tasks: 8,
+            },
+        };
+        let props = executable_properties(
+            &selection,
+            &intent,
+            &"a".repeat(64),
+            Path::new("/owned/root"),
+            &"b".repeat(64),
+        )
+        .unwrap();
+        let bytes = to_bytes(
+            Context::new_dbus(LE, 0),
+            &(
+                unit(&intent),
+                "fail".to_string(),
+                props,
+                Vec::<(String, Properties)>::new(),
+            ),
+        )
+        .unwrap();
+        let (decoded, used): (Start, usize) = bytes.deserialize().unwrap();
+        assert_eq!(used, bytes.len());
+        let properties = decoded.2;
+        assert!(
+            !properties
+                .iter()
+                .any(|(name, _)| name.ends_with("FileDescriptor"))
+        );
+        let property = |name: &str| {
+            properties
+                .iter()
+                .find(|(n, _)| n == name)
+                .unwrap()
+                .1
+                .try_clone()
+                .unwrap()
+        };
+        let command: Vec<(String, Vec<String>, bool)> = property("ExecStart").try_into().unwrap();
+        assert_eq!(
+            command,
+            vec![(
+                "/owned/env".into(),
+                vec![
+                    "/owned/env".into(),
+                    "-i".into(),
+                    "/owned/exec-bootstrap".into(),
+                    format!("/owned/control/{}.sock", intent.request.as_str()),
+                    intent.request.as_str().into(),
+                    "a".repeat(64),
+                    "/owned/root".into(),
+                    "b".repeat(64),
+                    "100".into(),
+                    "stdio-v1".into()
+                ],
+                false
+            )]
+        );
+        let description: String = property("Description").try_into().unwrap();
+        assert!(description.starts_with(&format!(
+            "Cortex executable v1 {} ",
+            intent.request.as_str()
+        )));
+        assert_eq!(intent.configuration.version(), "1");
+        assert_eq!(
+            description,
+            format!(
+                "Cortex executable v1 {} 6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+                intent.request.as_str()
+            )
+        );
+        assert_eq!(u64::try_from(property("RuntimeMaxUSec")).unwrap(), 100000);
+        assert_eq!(u64::try_from(property("TimeoutStopUSec")).unwrap(), 500000);
+        for name in ["StandardInput", "StandardOutput", "StandardError"] {
+            assert_eq!(String::try_from(property(name)).unwrap(), "null");
+        }
+        // Non-UTF-8 mount identity is refused, not silently rewritten into another path.
+        use std::os::unix::ffi::OsStringExt;
+        let invalid = PathBuf::from(std::ffi::OsString::from_vec(vec![b'/', 0xff]));
+        assert_eq!(
+            executable_command(
+                &selection,
+                &intent,
+                &"a".repeat(64),
+                &invalid,
+                &"b".repeat(64)
+            )
+            .unwrap_err()
+            .cause,
+            DomainCause::Contract
+        );
     }
     #[test]
     fn direct_member_parser_rejects_ambiguity_and_bounds_without_host_effects() {
