@@ -17,6 +17,7 @@ use cortex_core::{
     program::{
         domain::*,
         operational::EffectOutcome,
+        scheduling::Resource,
         supervision::{InterruptionReason, ProcessCompletion},
     },
     temporal::SourceReference,
@@ -165,6 +166,34 @@ fn validate_selection(
     }
     Ok(())
 }
+
+// The caller checks current authority separately. The projection supplies the
+// admitted amount and whether that same domain still holds it.
+pub(crate) fn check_scratch_reservation(
+    domains: &DomainProjection,
+    intent: &DomainIntent,
+    scratch_bytes: u64,
+) -> Result<(), ExecutionError> {
+    let record = domains
+        .domain(&intent.id)
+        .filter(|record| &record.intent == intent)
+        .ok_or(ExecutionError::Authority)?;
+    let reserved_bytes = record
+        .intent
+        .effect
+        .demand
+        .iter()
+        .find(|demand| demand.resource == Resource::DiskBytes)
+        .and_then(|demand| demand.amount);
+    if scratch_bytes == 0
+        || !record.holds(Resource::DiskBytes)
+        || reserved_bytes.is_none_or(|bytes| bytes < scratch_bytes)
+    {
+        return Err(ExecutionError::Policy);
+    }
+    Ok(())
+}
+
 impl DomainManager for ManagedExecutionDomain {
     fn check_context(
         &self,
@@ -173,15 +202,19 @@ impl DomainManager for ManagedExecutionDomain {
         at: u64,
     ) -> Result<(), DomainDiagnostic> {
         self.delegation.check().map_err(diagnostic)?;
-        self.manager
+        let isolation = self
+            .manager
             .execution_isolation()
-            .ok_or_else(|| diagnostic(ExecutionError::Policy))?
-            .check()
-            .map_err(|e| diagnostic(e.into()))?;
+            .ok_or_else(|| diagnostic(ExecutionError::Policy))?;
+        isolation.check().map_err(|e| diagnostic(e.into()))?;
         self.manager.corresponds(i)?;
         self.plan
             .check_with_configuration(k, i, at, self.configuration())
-            .map_err(diagnostic)
+            .map_err(diagnostic)?;
+        let domains = k
+            .domains()
+            .ok_or_else(|| diagnostic(ExecutionError::Authority))?;
+        check_scratch_reservation(domains, i, isolation.scratch_limits().0).map_err(diagnostic)
     }
     fn corresponds(&self, i: &DomainIntent) -> Result<(), DomainDiagnostic> {
         self.delegation.check().map_err(diagnostic)?;

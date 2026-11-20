@@ -103,6 +103,12 @@ caller-selected sub-budget: actual manager activation plus that runtime must not
 extend past the original monotonic deadline. The separate 500 ms manager stop
 grace must fit the explicit cleanup budget. Runtime expiry is not cleanup proof.
 
+The selected writable scratch quota must fit the same domain's still-held
+canonical `DiskBytes` reservation. The managed adapter checks the committed
+intent and quota before creation and again in the locked create and release
+callbacks. The quota is a configured byte ceiling. Actual consumption and
+terminal closure require separate evidence.
+
 RemainAfterExit retains an active exited service for readback within that manager's
 actual lifetime. It is not permanent retention: manager restart, garbage collection,
 lost bus ownership, absent name and changed invocation are distinct read-only

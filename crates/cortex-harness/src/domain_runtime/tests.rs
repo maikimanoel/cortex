@@ -113,6 +113,7 @@ struct FakeManager {
     lost: bool,
     reject_ready: bool,
     reject_context: bool,
+    selected_scratch: Option<fn(DomainPhase) -> u64>,
     replace: bool,
     cancel: Option<Arc<AtomicBool>>,
     worker: Option<thread::JoinHandle<io::Result<()>>>,
@@ -128,6 +129,7 @@ impl FakeManager {
             lost: false,
             reject_ready: false,
             reject_context: false,
+            selected_scratch: None,
             replace: false,
             cancel: None,
             worker: None,
@@ -142,18 +144,27 @@ impl FakeManager {
 impl DomainManager for FakeManager {
     fn check_context(
         &self,
-        _: &CoordinationKernel,
-        _: &DomainIntent,
+        kernel: &CoordinationKernel,
+        intent: &DomainIntent,
         _: u64,
     ) -> Result<(), DomainDiagnostic> {
         if self.reject_context {
-            Err(issue(
+            return Err(issue(
                 DomainPhaseDiagnostic::Preparation,
                 DomainCause::Contract,
-            ))
-        } else {
-            Ok(())
+            ));
         }
+        if let Some(scratch_for_phase) = self.selected_scratch {
+            let domains = kernel.domains().unwrap();
+            let phase = domains.domain(&intent.id).unwrap().phase;
+            crate::native_execution::managed_backend::check_scratch_reservation(
+                domains,
+                intent,
+                scratch_for_phase(phase),
+            )
+            .map_err(|_| issue(DomainPhaseDiagnostic::Identity, DomainCause::Correspondence))?;
+        }
+        Ok(())
     }
     fn verify_ready(&self, hello: &serde_json::Value) -> bool {
         !self.reject_ready && hello.as_array().is_some_and(|a| a.len() == 6)
@@ -994,3 +1005,6 @@ fn unsupported_manager_contract_refuses_before_creation_or_journal_mutation() {
 
 #[path = "manager_lifecycle_tests.rs"]
 mod manager_lifecycle_tests;
+
+#[path = "scratch_tests.rs"]
+mod scratch_tests;
