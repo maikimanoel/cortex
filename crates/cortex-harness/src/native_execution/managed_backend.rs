@@ -1,7 +1,9 @@
 //! Canonical executable-domain composition with independently managed lifetime.
 //! No constructor call or source test constitutes permission for a host launch.
 use super::{
-    ExecutionError, ExecutionPlan, artifacts,
+    ExecutionError, ExecutionPlan,
+    accounting::{CpuCounterObservation, bracket_cpu_observation},
+    artifacts,
     backend::ExecutionObservation,
     bootstrap,
     cgroup::{Delegation, DelegationAuthorization, OwnedGroup},
@@ -15,6 +17,7 @@ use crate::{
 };
 use cortex_core::{
     program::{
+        OperationId,
         domain::*,
         operational::EffectOutcome,
         scheduling::Resource,
@@ -41,6 +44,56 @@ fn diagnostic(error: ExecutionError) -> DomainDiagnostic {
         },
     )
 }
+/// Result of an exact managed tree read around bounded CPU counter reads.
+/// A population snapshot does not establish quiescence, final CPU or settlement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ManagedEndReadback {
+    /// An exact tree or its continued correspondence could not be observed.
+    Unavailable(DomainDiagnostic),
+    /// One bounded readback from the held cgroup incarnation.
+    Observed {
+        /// Recursive population at the readback; false alone is no fence.
+        populated: bool,
+        /// Cumulative observation from the same held cgroup.
+        cpu: CpuCounterObservation,
+    },
+}
+
+impl ManagedEndReadback {
+    fn populated(&self) -> Option<bool> {
+        match self {
+            Self::Observed { populated, .. } => Some(*populated),
+            Self::Unavailable(_) => None,
+        }
+    }
+}
+
+/// In-memory managed end observation for one release. It neither enters the
+/// journal nor supplies an independently witnessed closure or resource receipt.
+pub struct ManagedEndObservation {
+    /// Exact canonical domain for this attempt.
+    pub domain: DomainId,
+    /// Exact durable release-request operation.
+    pub release: OperationId,
+    /// Incarnation retained in the canonical binding. An unavailable readback
+    /// does not establish that the incarnation was still present at observation.
+    pub binding_identity: DomainIdentity,
+    /// Monotonic cut at which the readback attempt returned.
+    pub observed_at: Instant,
+    /// Direct completion or interruption as recorded by the transport.
+    pub completion: ProcessCompletion,
+    /// Every input byte was accepted and both output streams reached bounded EOF.
+    pub transport_complete: bool,
+    /// Observed population/counter or the reason no exact readback was retained.
+    pub readback: ManagedEndReadback,
+}
+
+struct AccountedTree {
+    observation: ManagedObservation,
+    nodes: Vec<DomainCgroupObservation>,
+    cpu: CpuCounterObservation,
+}
+
 /// Manager owns service lifetime and reaping; held delegation independently
 /// establishes the permitted resource scope. Neither owns canonical authority.
 pub struct ManagedExecutionDomain {
@@ -53,6 +106,7 @@ pub struct ManagedExecutionDomain {
     group: Option<OwnedGroup>,
     scratch: Option<File>,
     observation: Option<ExecutionObservation>,
+    end_observation: Option<ManagedEndObservation>,
 }
 impl ManagedExecutionDomain {
     /// Read-only preparation of an explicitly authorized scope. None refuses
@@ -80,6 +134,7 @@ impl ManagedExecutionDomain {
             group: None,
             scratch: None,
             observation: None,
+            end_observation: None,
         })
     }
     /// Exact manager/policy/immutable source configuration for canonical intent.
@@ -104,6 +159,11 @@ impl ManagedExecutionDomain {
     pub(crate) fn take_observation(&mut self) -> Option<ExecutionObservation> {
         self.observation.take()
     }
+    /// Return the retained in-memory observation after a managed transport finishes.
+    /// Reading it does not contact the manager or refresh the observed cut.
+    pub fn end_observation(&self) -> Option<&ManagedEndObservation> {
+        self.end_observation.as_ref()
+    }
     /// Read-only exact-incarnation recovery. No channel, unit, release, stop or
     /// resource settlement is reconstructed. Caller supplies the recorded end.
     pub fn inspect_recovery(
@@ -116,6 +176,48 @@ impl ManagedExecutionDomain {
             return ManagerRecoveryState::Unavailable(error);
         }
         self.manager.recover_execution(intent, identity, end)
+    }
+    fn accounted_tree(
+        &mut self,
+        intent: &DomainIntent,
+        expected: &DomainIdentity,
+        end: Instant,
+    ) -> Result<AccountedTree, DomainDiagnostic> {
+        let end = end.min(
+            self.original_end
+                .ok_or_else(|| diagnostic(ExecutionError::Identity))?,
+        );
+        if Instant::now() >= end {
+            return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Deadline));
+        }
+        if self.intent.as_ref() != Some(intent) || self.bound_group.as_ref() != Some(expected) {
+            return Err(diagnostic(ExecutionError::Identity));
+        }
+        let group = self
+            .group
+            .as_ref()
+            .ok_or_else(|| diagnostic(ExecutionError::Identity))?;
+        let before = group.cpu_usage(expected).map_err(diagnostic)?;
+        if Instant::now() >= end {
+            return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Deadline));
+        }
+        let (actual, tree) = self.manager.observe_tree(intent, end)?;
+        if &actual.identity != expected {
+            return Err(diagnostic(ExecutionError::Identity));
+        }
+        if Instant::now() >= end {
+            return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Deadline));
+        }
+        let after = group.cpu_usage(expected).map_err(diagnostic)?;
+        if Instant::now() >= end {
+            return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Deadline));
+        }
+        let cpu = bracket_cpu_observation(before, after, actual.populated);
+        Ok(AccountedTree {
+            observation: actual,
+            nodes: tree,
+            cpu,
+        })
     }
     fn retain_scratch(&mut self, actual: &ManagedObservation) -> Result<(), DomainDiagnostic> {
         let stable = StableProcess::acquire(actual.main_pid, actual.start_ticks)
@@ -322,35 +424,16 @@ impl DomainManager for ManagedExecutionDomain {
     }
     fn observe_tree(
         &mut self,
-        i: &DomainIntent,
+        intent: &DomainIntent,
         end: Instant,
     ) -> Result<(ManagedObservation, Vec<DomainCgroupObservation>), DomainDiagnostic> {
-        let end = end.min(
-            self.original_end
-                .ok_or_else(|| diagnostic(ExecutionError::Identity))?,
-        );
-        if Instant::now() >= end || self.intent.as_ref() != Some(i) {
-            return Err(diagnostic(ExecutionError::Identity));
-        }
         let identity = self
             .bound_group
-            .as_ref()
+            .clone()
             .ok_or_else(|| diagnostic(ExecutionError::Identity))?;
-        let group = self
-            .group
-            .as_ref()
-            .ok_or_else(|| diagnostic(ExecutionError::Identity))?;
-        let before = group.cpu_usage(identity).map_err(diagnostic)?;
-        let (mut actual, tree) = self.manager.observe_tree(i, end)?;
-        if &actual.identity != identity || Instant::now() >= end {
-            return Err(diagnostic(ExecutionError::Identity));
-        }
-        let after = group.cpu_usage(identity).map_err(diagnostic)?;
-        if Instant::now() >= end {
-            return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Deadline));
-        }
-        actual.cpu_micros = super::accounting::bracketed_cpu_usage(before, after, actual.populated);
-        Ok((actual, tree))
+        let mut tree = self.accounted_tree(intent, &identity, end)?;
+        tree.observation.cpu_micros = tree.cpu.lower_bound_micros();
+        Ok((tree.observation, tree.nodes))
     }
     fn stop(
         &mut self,
@@ -413,11 +496,27 @@ impl DomainManager for ManagedExecutionDomain {
             self.plan.uses_json_lines(),
         )
         .map_err(diagnostic)?;
-        let populated = self
-            .manager
-            .observe_tree(context.intent, context.end)
-            .ok()
-            .and_then(|(a, _)| (a.identity == context.binding.identity).then_some(a.populated));
+        let readback =
+            match self.accounted_tree(context.intent, &context.binding.identity, context.end) {
+                Ok(tree) => ManagedEndReadback::Observed {
+                    populated: tree.observation.populated,
+                    cpu: tree.cpu,
+                },
+                Err(error) => ManagedEndReadback::Unavailable(error),
+            };
+        let populated = readback.populated();
+        let transport_complete =
+            streams.input_complete && streams.stdout_complete && streams.stderr_complete;
+        let succeeded = successful_managed_end(&streams.completion, transport_complete, &readback);
+        self.end_observation = Some(ManagedEndObservation {
+            domain: context.intent.id.clone(),
+            release: context.release.clone(),
+            binding_identity: context.binding.identity.clone(),
+            observed_at: Instant::now(),
+            completion: streams.completion.clone(),
+            transport_complete,
+            readback,
+        });
         let artifacts = if populated == Some(false) {
             artifacts::capture(
                 self.scratch
@@ -441,16 +540,6 @@ impl DomainManager for ManagedExecutionDomain {
             })
             .transpose()
             .map_err(|_| diagnostic(ExecutionError::Identity))?;
-        let succeeded = matches!(
-            streams.completion,
-            ProcessCompletion::Exited {
-                code: Some(0),
-                signal: None
-            }
-        ) && streams.input_complete
-            && streams.stdout_complete
-            && streams.stderr_complete
-            && populated == Some(false);
         self.observation = Some(ExecutionObservation {
             streams,
             artifacts,
@@ -465,5 +554,54 @@ impl DomainManager for ManagedExecutionDomain {
         } else {
             EffectOutcome::Interrupted
         })
+    }
+}
+
+// Delimit a process report. Neither a matching exit nor an empty readback
+// makes the observation a terminal closure or an accounting receipt.
+fn successful_managed_end(
+    completion: &ProcessCompletion,
+    transport_complete: bool,
+    readback: &ManagedEndReadback,
+) -> bool {
+    matches!(
+        completion,
+        ProcessCompletion::Exited {
+            code: Some(0),
+            signal: None
+        }
+    ) && transport_complete
+        && readback.populated() == Some(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn managed_exit_cannot_hide_population_missing_readback_or_incomplete_streams() {
+        let success = ProcessCompletion::Exited {
+            code: Some(0),
+            signal: None,
+        };
+        let evidence = |populated, cpu| ManagedEndReadback::Observed { populated, cpu };
+        let observed = evidence(false, CpuCounterObservation::LowerBoundMicros(1001));
+        assert!(successful_managed_end(&success, true, &observed));
+        assert!(!successful_managed_end(&success, false, &observed));
+
+        let still_populated = evidence(true, CpuCounterObservation::LowerBoundMicros(1001));
+        assert!(!successful_managed_end(&success, true, &still_populated));
+        let changed_epoch = ManagedEndReadback::Unavailable(issue(
+            DomainPhaseDiagnostic::Closure,
+            DomainCause::Correspondence,
+        ));
+        assert!(!successful_managed_end(&success, true, &changed_epoch));
+
+        let unknown_counter = evidence(false, CpuCounterObservation::Unavailable);
+        assert!(successful_managed_end(&success, true, &unknown_counter));
+        let cancelled = ProcessCompletion::Interrupted {
+            reason: InterruptionReason::Cancelled,
+        };
+        assert!(!successful_managed_end(&cancelled, true, &unknown_counter));
     }
 }

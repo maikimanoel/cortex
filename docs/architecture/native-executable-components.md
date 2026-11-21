@@ -228,3 +228,19 @@ E through those existing operations. F remains held when either final debit is
 missing, even when both artifact edges are accepted. After both final debits are
 admitted, fresh F reservation and its simulated lifecycle proceed. Native
 final-counter production and actual host execution remain unqualified.
+
+## Managed end observation
+
+The managed adapter brackets its bounded end-of-transport tree read with CPU
+usage reads through the held group. The readback must match the retained intent,
+binding, and cgroup incarnation within the original deadline. It separately
+retains direct completion, transport completeness, recursive population and
+the CPU observation. Unavailable readings and contradictory counters remain
+non-numeric. Even a stable empty readback with a numeric value supplies only a
+cumulative lower bound in microseconds.
+
+This in-memory observation is bound to one release request. Reading it does not
+refresh live state or authorize a write. It adds no retained journal event,
+snapshot-exclusion proof, independent whole-domain witness, final debit, or
+settlement. The existing post-cancel observer retains its prior partial event
+encoding and cancellation prerequisite.
