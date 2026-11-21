@@ -602,10 +602,7 @@ impl CoordinationKernel {
         &'a self,
         operation: &'a Operation,
     ) -> Result<AdmissionPreview<'a>, KernelError> {
-        if self.replaying {
-            return Err(ProgramError::EffectUnavailable.into());
-        }
-        let outcome = match self.check_admission(operation)? {
+        let outcome = match self.check_preview_admission(operation)? {
             Some(receipt) => receipt,
             None => {
                 let mut draft = self.clone();
@@ -623,6 +620,39 @@ impl CoordinationKernel {
             outcome,
         })
     }
+    /// Inspect a fresh PrepareExecutorInput operation using the same guarded draft
+    /// rules as admission preview. The exact retained transport input is returned
+    /// without appending an operation, writing a store, or granting execution.
+    /// A partial reconstruction or an already admitted identity is refused.
+    pub fn preview_executor_input(
+        &self,
+        operation: &Operation,
+    ) -> Result<PreparedInput, KernelError> {
+        if !matches!(&operation.command, Command::PrepareExecutorInput(_)) {
+            return Err(ProgramError::EffectUnavailable.into());
+        }
+        if self.check_preview_admission(operation)?.is_some() {
+            return Err(ProgramError::IdentityConflict.into());
+        }
+        let mut draft = self.clone();
+        draft.reduce(operation)?;
+        let (id, input) = draft.prepared_inputs.pop().ok_or(ProgramError::Missing)?;
+        if id != operation.id {
+            return Err(ProgramError::IdentityConflict.into());
+        }
+        Ok(input)
+    }
+
+    fn check_preview_admission(
+        &self,
+        operation: &Operation,
+    ) -> Result<Option<KernelReceipt>, KernelError> {
+        if self.replaying {
+            return Err(ProgramError::EffectUnavailable.into());
+        }
+        self.check_admission(operation)
+    }
+
     fn check_admission(&self, operation: &Operation) -> Result<Option<KernelReceipt>, KernelError> {
         if let Command::DomainMember { operation, .. } = &operation.command
             && matches!(

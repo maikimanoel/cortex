@@ -544,3 +544,32 @@ fn preparation_preserves_unknown_effect_and_retained_resource_accounting() {
         30
     );
 }
+
+#[test]
+fn executor_preparation_refuses_a_preparable_prefix_during_reconstruction() {
+    let (kernel, scope) = setup();
+    let mut operations = kernel.operations().iter().cloned();
+    let mut prefixes_with_package = 0;
+    let rebuilt = CoordinationKernel::new(kernel.initial().clone())
+        .unwrap()
+        .reconstruct::<KernelError>(|partial| {
+            if !partial.packages().is_empty() {
+                prefixes_with_package += 1;
+                let command = input(partial, &scope, "replay-input");
+                let result = prepare_input(partial, &scope, command);
+                assert_eq!(
+                    result.unwrap_err(),
+                    PreparationError::Kernel(KernelError::Core(ProgramError::EffectUnavailable)),
+                );
+                assert!(partial.prepared_inputs().is_empty());
+            }
+            Ok(operations.next())
+        })
+        .unwrap();
+    assert!(prefixes_with_package > 0);
+    assert!(rebuilt.operations() == kernel.operations());
+    let operation = input(&rebuilt, &scope, "current-input");
+    let prepared = prepare_input(&rebuilt, &scope, operation).unwrap();
+    assert_eq!(prepared.input().bytes(), rebuilt.packages()[0].bytes());
+    assert!(rebuilt.prepared_inputs().is_empty());
+}

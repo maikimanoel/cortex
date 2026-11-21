@@ -189,33 +189,18 @@ pub fn prepare_executor_input(
     if scope.context().contract().candidate() != candidate {
         return Err(ProgramError::Stale.into());
     }
-    // Existing state is already bounded. Move the untrusted operation into the
-    // authoritative reducer, rather than cloning it before its input admission.
-    let mut draft = kernel.clone();
-    draft.admit(operation)?;
-    let operation = draft
-        .operations()
-        .last()
-        .ok_or(ProgramError::Missing)?
-        .clone();
-    let (id, input) = draft
-        .prepared_inputs()
-        .last()
-        .ok_or(ProgramError::Missing)?;
-    if id != &operation.id {
-        return Err(ProgramError::IdentityConflict.into());
-    }
+    let input = kernel.preview_executor_input(&operation)?;
     Ok(ExecutorPreparation {
         revision: expected_revision,
         operation,
-        input: input.clone(),
+        input,
     })
 }
 impl fmt::Display for PreparationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Mapping => f.write_str("preparation: invalid task correspondence"),
-            Self::UnsupportedCommand => f.write_str("preparation: unsupported command pair"),
+            Self::UnsupportedCommand => f.write_str("preparation: unsupported command"),
             Self::Core(e) => write!(f, "preparation: {e}"),
             Self::Operational(e) => write!(f, "preparation: {e}"),
             Self::Kernel(e) => write!(f, "preparation: {e}"),
