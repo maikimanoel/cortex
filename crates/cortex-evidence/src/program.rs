@@ -275,6 +275,50 @@ pub struct KernelReceipt {
     /// Exact replay found an existing immutable input; nothing was changed.
     pub duplicate: bool,
 }
+/// Read-only admission result for one exact operation and borrowed baseline.
+///
+/// This is not a durable receipt, reservation or execution grant. Another writer
+/// may change a store after its snapshot was loaded. The durable caller must still
+/// submit the exact operation through `ProgramStore` and handle its actual result.
+#[derive(Clone, Copy)]
+#[must_use]
+pub struct AdmissionPreview<'a> {
+    operation: &'a Operation,
+    definition: &'a ProgramDefinition,
+    observed_revision: u64,
+    outcome: KernelReceipt,
+}
+impl AdmissionPreview<'_> {
+    /// Exact input examined, including grant and expected predecessor.
+    pub fn operation(&self) -> &Operation {
+        self.operation
+    }
+    /// Accepted program identity and complete baseline in the examined snapshot.
+    pub fn definition(&self) -> &ProgramDefinition {
+        self.definition
+    }
+    /// Observed journal revision, not a lock or a promise about a later admission.
+    pub fn observed_revision(&self) -> u64 {
+        self.observed_revision
+    }
+    /// Existing ordinal for an exact replay, or the proposed new ordinal.
+    pub fn resulting_ordinal(&self) -> u64 {
+        self.outcome.ordinal
+    }
+    /// Exact immutable input was already present in the examined snapshot.
+    pub fn is_duplicate(&self) -> bool {
+        self.outcome.duplicate
+    }
+}
+impl fmt::Debug for AdmissionPreview<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AdmissionPreview")
+            .field("observed_revision", &self.observed_revision)
+            .field("resulting_ordinal", &self.outcome.ordinal)
+            .field("duplicate", &self.outcome.duplicate)
+            .finish_non_exhaustive()
+    }
+}
 /// Result of a read-only draft examination; none of these fields grants authority.
 #[derive(Clone, PartialEq, Eq)]
 pub struct RecordInspection {
@@ -532,6 +576,54 @@ impl CoordinationKernel {
     /// Validate and admit an operation atomically in memory. A durable caller must
     /// reload under its transaction lock and commit the same complete input.
     pub fn admit(&mut self, operation: Operation) -> Result<KernelReceipt, KernelError> {
+        if let Some(receipt) = self.check_admission(&operation)? {
+            return Ok(receipt);
+        }
+        let mut draft = self.clone();
+        draft.reduce(&operation)?;
+        draft.operations.push(operation);
+        let ordinal = draft.revision();
+        *self = draft;
+        Ok(KernelReceipt {
+            ordinal,
+            duplicate: false,
+        })
+    }
+    /// Apply the same admission guards and reducer to one isolated in-memory draft.
+    ///
+    /// Original state, reservations and observations are unchanged. Exact duplicates
+    /// retain replay semantics, including their original predecessor and ordinal.
+    /// A new input clones the bounded kernel once; it performs no serialization,
+    /// filesystem I/O or dispatch. This checks neither store-specific location
+    /// constraints nor commit availability, and cannot replace durable admission.
+    /// An in-progress historical reconstruction is refused; its temporary replay
+    /// interpretation must not be presented as current admission eligibility.
+    pub fn preview_admission<'a>(
+        &'a self,
+        operation: &'a Operation,
+    ) -> Result<AdmissionPreview<'a>, KernelError> {
+        if self.replaying {
+            return Err(ProgramError::EffectUnavailable.into());
+        }
+        let outcome = match self.check_admission(operation)? {
+            Some(receipt) => receipt,
+            None => {
+                let mut draft = self.clone();
+                draft.reduce(operation)?;
+                KernelReceipt {
+                    ordinal: self.revision() + 1,
+                    duplicate: false,
+                }
+            }
+        };
+        Ok(AdmissionPreview {
+            operation,
+            definition: self.state.definition(),
+            observed_revision: self.revision(),
+            outcome,
+        })
+    }
+    fn check_admission(&self, operation: &Operation) -> Result<Option<KernelReceipt>, KernelError> {
         if let Command::DomainMember { operation, .. } = &operation.command
             && matches!(
                 operation.command,
@@ -548,11 +640,11 @@ impl CoordinationKernel {
             .enumerate()
             .find(|(_, o)| o.id == operation.id)
         {
-            return if old == &operation {
-                Ok(KernelReceipt {
+            return if old == operation {
+                Ok(Some(KernelReceipt {
                     ordinal: i as u64 + 1,
                     duplicate: true,
-                })
+                }))
             } else {
                 Err(ProgramError::IdentityConflict.into())
             };
@@ -584,15 +676,7 @@ impl CoordinationKernel {
                 }
             }
         }
-        let mut draft = self.clone();
-        draft.reduce(&operation)?;
-        draft.operations.push(operation);
-        let ordinal = draft.revision();
-        *self = draft;
-        Ok(KernelReceipt {
-            ordinal,
-            duplicate: false,
-        })
+        Ok(None)
     }
     fn check(
         &self,

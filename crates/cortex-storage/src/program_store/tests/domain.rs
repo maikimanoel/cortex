@@ -1013,3 +1013,148 @@ fn legacy_memory_replays_without_authorizing_a_new_create_or_erasing_bytes() {
         )
         .unwrap();
 }
+
+#[test]
+fn admission_preview_is_read_only_and_cannot_bypass_a_later_durable_writer() {
+    // Retain this new fixture even if an unexpected admission outcome panics.
+    let f = std::mem::ManuallyDrop::new(Temp::new());
+    eprintln!("Retained admission preview fixture: {}", f.0.display());
+    let (mut kernel, first) = domain_fixture::coordinator();
+    let second = domain_fixture::add_member(&mut kernel, "preview-neighbor");
+    let store = stored(&kernel, &f);
+    let loaded = store.load(&key(), Access::ReadOnly).unwrap();
+    let input = op(
+        &loaded,
+        "first-reservation",
+        DomainEvent::Reserve {
+            intent: first.clone(),
+            at: 1,
+        },
+    );
+    let before = snapshot(&f);
+    let preview = loaded.preview_admission(&input).unwrap();
+    assert_eq!(preview.observed_revision(), loaded.revision());
+    assert_eq!(preview.resulting_ordinal(), loaded.revision() + 1);
+    assert!(!preview.is_duplicate());
+    assert!(preview.operation() == &input);
+    assert_eq!(snapshot(&f), before);
+    assert!(
+        store
+            .load(&key(), Access::ReadOnly)
+            .unwrap()
+            .domains()
+            .unwrap()
+            .domains()
+            .is_empty()
+    );
+
+    let competing = op(
+        &loaded,
+        "neighbor-reservation",
+        DomainEvent::Reserve {
+            intent: second.clone(),
+            at: 1,
+        },
+    );
+    store.admit(&key(), competing).unwrap();
+    let committed = snapshot(&f);
+    let failure = store.admit(&key(), input).unwrap_err();
+    assert_eq!(failure.completion, Completion::Rejected);
+    assert!(matches!(
+        failure.error,
+        ProgramStoreError::Domain(KernelError::Core(ProgramError::Stale))
+    ));
+    assert_eq!(snapshot(&f), committed);
+    let current = store.load(&key(), Access::ReadOnly).unwrap();
+    let fresh = op(
+        &current,
+        "first-reservation",
+        DomainEvent::Reserve {
+            intent: first,
+            at: 2,
+        },
+    );
+    assert_eq!(
+        current.preview_admission(&fresh).unwrap_err(),
+        KernelError::Domain(DomainError::Capacity(Resource::WorkerSlots))
+    );
+    let failure = store.admit(&key(), fresh).unwrap_err();
+    assert_eq!(failure.completion, Completion::Rejected);
+    assert!(matches!(
+        failure.error,
+        ProgramStoreError::Domain(KernelError::Domain(DomainError::Capacity(
+            Resource::WorkerSlots
+        )))
+    ));
+    assert_eq!(snapshot(&f), committed);
+    assert_eq!(current.domains().unwrap().domains().len(), 1);
+    assert_eq!(
+        current.domains().unwrap().domain(&second.id).unwrap().phase,
+        DomainPhase::Reserved
+    );
+}
+
+#[test]
+fn admission_preview_matches_durable_debt_and_exact_duplicate_refusals() {
+    let f = std::mem::ManuallyDrop::new(Temp::new());
+    eprintln!("Retained admission preview fixture: {}", f.0.display());
+    let (mut kernel, intent) = domain_fixture::coordinator();
+    domain_fixture::bound(&mut kernel, &intent);
+    domain_fixture::event(
+        &mut kernel,
+        "close-without-final-usage",
+        DomainEvent::Closed {
+            receipt: domain_fixture::closure(&intent, None),
+            at: 4,
+        },
+    );
+    let next = domain_fixture::setup(&mut kernel, "D");
+    let store = stored(&kernel, &f);
+    let current = store.load(&key(), Access::ReadOnly).unwrap();
+    let input = op(
+        &current,
+        "debt-held-next",
+        DomainEvent::Reserve {
+            intent: next,
+            at: 5,
+        },
+    );
+    let before = snapshot(&f);
+    assert_eq!(
+        current.preview_admission(&input).unwrap_err(),
+        KernelError::Domain(DomainError::Debt(Consumption::CpuExecutionMillis))
+    );
+    let failure = store.admit(&key(), input).unwrap_err();
+    assert_eq!(failure.completion, Completion::Rejected);
+    assert!(matches!(
+        failure.error,
+        ProgramStoreError::Domain(KernelError::Domain(DomainError::Debt(
+            Consumption::CpuExecutionMillis
+        )))
+    ));
+    assert_eq!(snapshot(&f), before);
+    let duplicate = current.operations().last().unwrap();
+    let preview = current.preview_admission(duplicate).unwrap();
+    assert!(preview.is_duplicate());
+    let receipt = store.admit(&key(), duplicate.clone()).unwrap();
+    assert!(receipt.duplicate);
+    assert_eq!(receipt.ordinal, preview.resulting_ordinal());
+    assert_eq!(snapshot(&f), before);
+    let mut conflict = duplicate.clone();
+    conflict.expected += 1;
+    assert_eq!(
+        current.preview_admission(&conflict).unwrap_err(),
+        KernelError::Core(ProgramError::IdentityConflict)
+    );
+    let failure = store.admit(&key(), conflict).unwrap_err();
+    assert_eq!(failure.completion, Completion::Rejected);
+    assert!(matches!(
+        failure.error,
+        ProgramStoreError::Domain(KernelError::Core(ProgramError::IdentityConflict))
+    ));
+    assert_eq!(snapshot(&f), before);
+    let record = current.domains().unwrap().domain(&intent.id).unwrap();
+    assert_eq!(record.outcome, HistoricalOutcome::Unknown);
+    assert!(record.unresolved_consumption(Consumption::CpuExecutionMillis));
+    assert!(record.holds(Resource::DiskBytes));
+}
