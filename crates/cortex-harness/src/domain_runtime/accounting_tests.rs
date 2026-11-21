@@ -74,19 +74,20 @@ fn sample(store: &ProgramStore, i: &DomainIntent, label: &str, micros: Option<u6
 
 fn check_debt(store: &ProgramStore, f: &DomainIntent) {
     let k = load(store);
-    let refused = store
-        .admit(
-            &key(),
-            input(
-                &k,
-                "reserve-dependent",
-                DomainEvent::Reserve {
-                    intent: f.clone(),
-                    at: tick(&k),
-                },
-            ),
-        )
-        .unwrap_err();
+    let reserve = input(
+        &k,
+        "reserve-dependent",
+        DomainEvent::Reserve {
+            intent: f.clone(),
+            at: tick(&k),
+        },
+    );
+    assert!(matches!(
+        k.preview_admission(&reserve),
+        Err(KernelError::Domain(DomainError::Debt(CPU)))
+    ));
+    assert!(k.domains().unwrap().domain(&f.id).is_none());
+    let refused = store.admit(&key(), reserve).unwrap_err();
     assert_eq!(refused.completion, Completion::Rejected);
     assert!(matches!(
         refused.error,
@@ -244,6 +245,13 @@ pub(super) fn exercise_settlement(
             at: tick(&k),
         },
     );
+    let preview = k.preview_admission(&valid).unwrap();
+    assert_eq!(preview.observed_revision(), k.revision());
+    assert_eq!(preview.resulting_ordinal(), k.revision() + 1);
+    assert!(!preview.is_duplicate());
+    assert!(k.domains().unwrap().domain(&f.id).is_none());
+    assert_eq!(load(store).revision(), k.revision());
+
     let mut stale = valid.clone();
     stale.id = OperationId::new("stale-F").unwrap();
     let barrier = std::sync::Barrier::new(2);
