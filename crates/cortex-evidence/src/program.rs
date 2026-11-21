@@ -627,7 +627,7 @@ impl CoordinationKernel {
     pub fn preview_executor_input(
         &self,
         operation: &Operation,
-    ) -> Result<PreparedInput, KernelError> {
+    ) -> Result<cortex_core::program::executor::PreparedInput, KernelError> {
         if !matches!(&operation.command, Command::PrepareExecutorInput(_)) {
             return Err(ProgramError::EffectUnavailable.into());
         }
