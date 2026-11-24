@@ -506,9 +506,52 @@ fn lost_stop_acknowledgment_is_not_repeated_or_converted_to_closure_or_refund() 
         .unwrap();
     manager.lost_stop = true;
     let cancel = cancellation(&store, &ids);
-    let failure = cancel_prepared(&store, &key(), &mut manager, held, cancel.clone()).unwrap_err();
+    let failure = cancel_prepared_with_attempt(&store, &key(), &mut manager, held, cancel.clone())
+        .unwrap_err();
     manager.inner.finish();
-    assert_eq!(failure.cause, DomainCause::ManagerRefusal);
+    let DomainCancellationAttemptError::Stop {
+        receipt,
+        diagnostic,
+    } = failure
+    else {
+        panic!("expected the admitted cancellation and lost stop response");
+    };
+    assert_eq!(diagnostic.cause, DomainCause::ManagerRefusal);
+    assert_eq!(receipt.store, store.id());
+    assert!(!receipt.duplicate);
+    assert_eq!(receipt.ordinal, cancel.expected + 1);
+    let reopened = ProgramStore::open(
+        &root.0.join("store"),
+        &key(),
+        Access::ReadOnly,
+        store.read_limits(),
+    )
+    .unwrap();
+    let replay = reopened.load(&key(), Access::ReadOnly).unwrap();
+    assert_eq!(replay.revision(), receipt.ordinal);
+    assert_eq!(
+        reopened
+            .reconcile(&key(), replay.initial(), &cancel, Access::ReadOnly)
+            .unwrap(),
+        Reconciliation::Present(AdmissionReceipt {
+            duplicate: true,
+            ..receipt
+        }),
+    );
+    let mut conflict = cancel.clone();
+    conflict.expected -= 1;
+    let rejected =
+        cancel_domain_with_attempt(&store, &key(), &mut manager, conflict.clone()).unwrap_err();
+    let DomainCancellationAttemptError::Admission(attempt) = rejected else {
+        panic!("a conflicting offer must return a canonical admission failure");
+    };
+    assert!(attempt.operation == conflict);
+    assert_eq!(
+        attempt
+            .reconcile(&reopened, &key(), replay.initial())
+            .unwrap(),
+        Reconciliation::Conflict,
+    );
     assert_eq!(manager.inner.stopped, 1);
     assert!(
         cancel_domain(&store, &key(), &mut manager, cancel)

@@ -118,6 +118,49 @@ impl DomainAdmissionAttempt {
     }
 }
 
+impl fmt::Debug for DomainAdmissionAttempt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DomainAdmissionAttempt")
+            .field("store", &self.store)
+            .field("failure", &self.failure)
+            .finish_non_exhaustive()
+    }
+}
+
+/// A failed managed cancellation, keeping journal and manager cuts distinct.
+#[derive(Debug)]
+pub enum DomainCancellationAttemptError {
+    /// Refusal before a canonical cancellation input was submitted.
+    Refused(DomainDiagnostic),
+    /// The canonical cancellation was refused or its durable result is uncertain.
+    Admission(Box<DomainAdmissionAttempt>),
+    /// Cancellation committed. The manager stop outcome remains unresolved.
+    Stop {
+        /// Exact durable cancellation receipt.
+        receipt: AdmissionReceipt,
+        /// Original manager correspondence/stop failure.
+        diagnostic: DomainDiagnostic,
+    },
+}
+
+impl From<DomainDiagnostic> for DomainCancellationAttemptError {
+    fn from(error: DomainDiagnostic) -> Self {
+        Self::Refused(error)
+    }
+}
+
+impl DomainCancellationAttemptError {
+    fn diagnostic(self) -> DomainDiagnostic {
+        match self {
+            Self::Refused(error)
+            | Self::Stop {
+                diagnostic: error, ..
+            } => error,
+            Self::Admission(_) => issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal),
+        }
+    }
+}
+
 /// Live read-only observation, not a closure/fencing receipt. In particular the
 /// fixed service cannot prove snapshot exclusion, persistent scratch disposal
 /// or the historical outcome. Missing manager state remains a diagnostic.
@@ -1335,16 +1378,24 @@ fn cancel_prepared<M: DomainManager>(
     prepared: PreparedNonceDomain,
     operation: Operation,
 ) -> Result<AdmissionReceipt, DomainDiagnostic> {
+    cancel_prepared_with_attempt(store, key, manager, prepared, operation)
+        .map_err(DomainCancellationAttemptError::diagnostic)
+}
+
+fn cancel_prepared_with_attempt<M: DomainManager>(
+    store: &ProgramStore,
+    key: &StoreKey,
+    manager: &mut M,
+    prepared: PreparedNonceDomain,
+    operation: Operation,
+) -> Result<AdmissionReceipt, DomainCancellationAttemptError> {
     let Command::Domain(event) = &operation.command else {
-        return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Contract));
+        return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Contract).into());
     };
     if store.id() != prepared.store
         || !matches!(event.as_ref(), DomainEvent::Cancel { domain, .. } if domain == &prepared.ids.domain)
     {
-        return Err(issue(
-            DomainPhaseDiagnostic::Closure,
-            DomainCause::Correspondence,
-        ));
+        return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Correspondence).into());
     }
     let kernel = store
         .load(key, Access::ReadOnly)
@@ -1353,12 +1404,9 @@ fn cancel_prepared<M: DomainManager>(
     if domain.intent != prepared.intent
         || domain.binding_observation.as_ref() != Some(&prepared.observation)
     {
-        return Err(issue(
-            DomainPhaseDiagnostic::Closure,
-            DomainCause::Correspondence,
-        ));
+        return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Correspondence).into());
     }
-    let result = cancel_domain(store, key, manager, operation);
+    let result = cancel_domain_with_attempt(store, key, manager, operation);
     drop(prepared); // Only this owned channel; retained uncertainty is unchanged.
     result
 }
@@ -1379,15 +1427,25 @@ fn cancel_domain<M: DomainManager>(
     backend: &mut M,
     operation: Operation,
 ) -> Result<AdmissionReceipt, DomainDiagnostic> {
+    cancel_domain_with_attempt(store, key, backend, operation)
+        .map_err(DomainCancellationAttemptError::diagnostic)
+}
+
+fn cancel_domain_with_attempt<M: DomainManager>(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut M,
+    operation: Operation,
+) -> Result<AdmissionReceipt, DomainCancellationAttemptError> {
     let Command::Domain(event) = &operation.command else {
-        return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Contract));
+        return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Contract).into());
     };
     let DomainEvent::Cancel { domain, .. } = event.as_ref() else {
-        return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Contract));
+        return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Contract).into());
     };
     let id = domain.clone();
     let (receipt, result) = store
-        .dispatch_domain(key, operation, |kernel| {
+        .dispatch_domain(key, operation.clone(), |kernel| {
             let record = record(kernel, &id)?;
             if record.phase == DomainPhase::CancelledBeforeCreate {
                 return Ok(());
@@ -1401,9 +1459,18 @@ fn cancel_domain<M: DomainManager>(
                 Instant::now() + Duration::from_millis(1000),
             )
         })
-        .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))?;
-    if let Some(result) = result {
-        result?;
+        .map_err(|failure| {
+            DomainCancellationAttemptError::Admission(Box::new(DomainAdmissionAttempt {
+                store: store.id(),
+                operation,
+                failure,
+            }))
+        })?;
+    if let Some(Err(diagnostic)) = result {
+        return Err(DomainCancellationAttemptError::Stop {
+            receipt,
+            diagnostic,
+        });
     }
     Ok(receipt)
 }
@@ -1595,6 +1662,19 @@ pub fn cancel_managed_executable_domain(
     backend: &mut crate::native_execution::managed_backend::ManagedExecutionDomain,
     operation: Operation,
 ) -> Result<AdmissionReceipt, DomainDiagnostic> {
+    cancel_managed_executable_domain_with_attempt(store, key, backend, operation)
+        .map_err(DomainCancellationAttemptError::diagnostic)
+}
+
+/// Commit cancellation before the exact same-incarnation stop request and
+/// retain the original admission failure or the durable receipt on stop error.
+/// Neither receipt presence nor an observed stop establishes physical closure.
+pub fn cancel_managed_executable_domain_with_attempt(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut crate::native_execution::managed_backend::ManagedExecutionDomain,
+    operation: Operation,
+) -> Result<AdmissionReceipt, DomainCancellationAttemptError> {
     backend.check_bound_store(store.id())?;
-    cancel_domain(store, key, backend, operation)
+    cancel_domain_with_attempt(store, key, backend, operation)
 }
