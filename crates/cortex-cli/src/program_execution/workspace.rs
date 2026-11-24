@@ -266,7 +266,18 @@ pub fn run_workspace_fixture(
     request: PreparedFixtureRun<'_>,
     cancel: &AtomicBool,
 ) -> Result<WorkspaceFixtureRun, ExecutionError> {
-    let run = run_prepared_fixture_inner(store, key, request, Some(&workspace), None, cancel)?;
+    run_workspace_fixture_inner(store, key, workspace, request, None, cancel)
+}
+
+pub(crate) fn run_workspace_fixture_inner(
+    store: &ProgramStore,
+    key: &StoreKey,
+    workspace: FixtureWorkspace,
+    request: PreparedFixtureRun<'_>,
+    end: Option<std::time::Instant>,
+    cancel: &AtomicBool,
+) -> Result<WorkspaceFixtureRun, ExecutionError> {
+    let run = run_prepared_fixture_inner(store, key, request, Some(&workspace), end, cancel)?;
     Ok(WorkspaceFixtureRun { workspace, run })
 }
 
@@ -274,6 +285,11 @@ impl WorkspaceFixtureRun {
     /// The exact bounded direct-child run and canonical effect receipts.
     pub fn run(&self) -> &RunResult {
         &self.run.run
+    }
+
+    /// Actual compatible workspace and canonical process result.
+    pub fn fixture(&self) -> &FixtureRun {
+        &self.run
     }
 
     /// Preserved private attempt slot. Cleanup is an explicit operator action.

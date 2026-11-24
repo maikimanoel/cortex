@@ -7,13 +7,15 @@
 
 use crate::{
     program_execution::{
-        ExecutionError, FixtureRun, PreparedFixtureRun, run_prepared_fixture_before,
+        ExecutionError, FixtureRun, FixtureWorkspaceRequest, PreparedFixtureRun,
+        WorkspaceFixtureRun, prepare_fixture_workspace, run_prepared_fixture_before,
+        run_workspace_fixture_inner,
     },
     program_preparation::{PreparationError, prepare_executor_input},
 };
 use cortex_core::{
     TaskId,
-    binding::ObservationId,
+    binding::{ObservationId, RepositoryIdentity},
     parallel::Event,
     program::{
         Attempt, CoordinationGrant, OperationId,
@@ -36,6 +38,7 @@ use cortex_storage::{
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
@@ -77,6 +80,8 @@ pub struct FixtureWork {
     pub effect: EffectId,
     /// Exact process specification. The canonical input determines input_len.
     pub process: ProcessSpec,
+    /// Optional exact attempt output custody for the cooperative profile.
+    pub workspace: Option<FixtureWorkspaceSelection>,
     /// All operation identities, distinct across the selected population.
     pub operations: FixtureOperationIds,
     /// Separate process capture identities and append bounds.
@@ -85,6 +90,18 @@ pub struct FixtureWork {
     pub workspace_observation: ObservationId,
     /// Source basis for dispatch.
     pub dispatch_basis: SourceReference,
+}
+
+/// Selected private output parent and exact already-declared process argument.
+pub struct FixtureWorkspaceSelection {
+    /// Private parent outside protected source roots.
+    pub parent: PathBuf,
+    /// Additional protected source exclusions.
+    pub additional_sources: Vec<RepositoryIdentity>,
+    /// Index containing the fresh output slot's canonical path.
+    pub output_argument: usize,
+    /// Independent Git observation for slot preparation.
+    pub source_observation: ObservationId,
 }
 
 impl FixtureWork {
@@ -166,6 +183,8 @@ pub enum FixtureProgress {
     Budget,
     /// A competing call already retained the same canonical input.
     ConcurrentPrefix,
+    /// The retained reservation could not bind a fresh owned output slot.
+    Workspace(ExecutionError),
     /// The next journal input was refused or uncertain. Retain the exact input
     /// for explicit reconciliation. No later step in the attempt was invoked.
     Admission {
@@ -183,6 +202,8 @@ pub enum FixtureProgress {
     },
     /// Actual canonical dispatch and native process observations or uncertainty.
     Observed(Box<FixtureRun>),
+    /// Actual observed run associated with an exact private attempt output slot.
+    WorkspaceObserved(Box<WorkspaceFixtureRun>),
 }
 
 /// Result of one turn. At most one declaration can have a new durable prefix.
@@ -497,9 +518,29 @@ fn advance(
     receipts: &mut Vec<AdmissionReceipt>,
 ) -> FixtureProgress {
     let wait = store.read_limits().timeout();
+    let mut workspace = None;
     for op in staged.prefix {
         if !fits(deadline, wait, cancel) {
             return FixtureProgress::Budget;
+        }
+        if op.id == job.operations.process
+            && let Some(selected) = &job.workspace
+        {
+            let request = FixtureWorkspaceRequest {
+                effect: &job.effect,
+                expected_revision: op.expected,
+                parent: &selected.parent,
+                additional_sources: &selected.additional_sources,
+                output_argument: selected.output_argument,
+                source_observation: selected.source_observation.clone(),
+            };
+            match prepare_fixture_workspace(store, key, request) {
+                Ok(prepared) => workspace = Some(prepared),
+                Err(error) => return FixtureProgress::Workspace(error),
+            }
+            if !fits(deadline, wait, cancel) {
+                return FixtureProgress::Budget;
+            }
         }
         match store.admit(key, op.clone()) {
             Ok(receipt) => {
@@ -528,20 +569,23 @@ fn advance(
         return FixtureProgress::Budget;
     }
     let dispatch = staged.dispatch;
-    match run_prepared_fixture_before(
-        store,
-        key,
-        PreparedFixtureRun {
-            preparation: &staged.preparation,
-            dispatch: dispatch.clone(),
-            pin: &staged.pin,
-            captures: job.captures.clone(),
-            workspace_observation: job.workspace_observation.clone(),
-        },
-        deadline,
-        cancel,
-    ) {
-        Ok(run) => FixtureProgress::Observed(Box::new(run)),
+    let request = PreparedFixtureRun {
+        preparation: &staged.preparation,
+        dispatch: dispatch.clone(),
+        pin: &staged.pin,
+        captures: job.captures.clone(),
+        workspace_observation: job.workspace_observation.clone(),
+    };
+    let run = match workspace {
+        Some(slot) => {
+            run_workspace_fixture_inner(store, key, slot, request, Some(deadline), cancel)
+                .map(|run| FixtureProgress::WorkspaceObserved(Box::new(run)))
+        }
+        None => run_prepared_fixture_before(store, key, request, deadline, cancel)
+            .map(|run| FixtureProgress::Observed(Box::new(run))),
+    };
+    match run {
+        Ok(progress) => progress,
         Err(error) => FixtureProgress::Dispatch {
             operation: Box::new(dispatch),
             error,

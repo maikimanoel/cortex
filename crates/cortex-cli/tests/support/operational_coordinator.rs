@@ -1,7 +1,7 @@
 use super::*;
 use cortex_cli::program_coordinator::{
     FixtureHold, FixtureOperationIds, FixtureProgress, FixtureTurn, FixtureTurnError, FixtureWork,
-    run_fixture_turn,
+    FixtureWorkspaceSelection, run_fixture_turn,
 };
 use std::time::Instant;
 
@@ -51,6 +51,11 @@ fn work(
         stop_rules: "Stop on any unestablished outcome".into(),
     };
     let approval = source("selected-cooperative-coordinator");
+    let previous = current.context().capture().unwrap().id();
+    let producer_output = c
+        .output
+        .join(fixture_id("coordinator-A-effect"))
+        .join("output");
     FixtureWork {
         proposal: Proposal {
             task,
@@ -86,8 +91,20 @@ fn work(
         process: {
             let mut spec = fixture_process(c, name, name, 0, approval);
             spec.prepared_input = id("input");
+            if name == "A" {
+                spec.args[2] = producer_output.to_str().unwrap().into();
+            } else {
+                spec.args[3] = producer_output.to_str().unwrap().into();
+            }
             spec
         },
+        workspace: (name == "A").then(|| FixtureWorkspaceSelection {
+            parent: c.output.clone(),
+            additional_sources: vec![c.cortex.clone()],
+            output_argument: 2,
+            source_observation: ObservationId::new(previous.scope(), previous.sequence() + 1)
+                .unwrap(),
+        }),
         operations: FixtureOperationIds {
             claim: id("claim"),
             package: id("package"),
@@ -98,10 +115,8 @@ fn work(
             dispatch: id("dispatch"),
         },
         captures: capture_ids(&format!("coordinator-{name}")),
-        workspace_observation: {
-            let previous = current.context().capture().unwrap().id();
-            ObservationId::new(previous.scope(), previous.sequence() + 1).unwrap()
-        },
+        workspace_observation: ObservationId::new(previous.scope(), previous.sequence() + 2)
+            .unwrap(),
         dispatch_basis: source("finite-coordinator-turn"),
     }
 }
@@ -111,7 +126,9 @@ fn observed(turn: &FixtureTurn, job: &FixtureWork) {
     assert_eq!(turn.receipts.len(), 6);
     assert!(turn.receipts.iter().all(|receipt| !receipt.duplicate));
     let run = match &turn.progress {
-        Some(FixtureProgress::Observed(run)) => run,
+        Some(FixtureProgress::Observed(run)) => run.as_ref(),
+        Some(FixtureProgress::WorkspaceObserved(run)) => run.fixture(),
+        Some(FixtureProgress::Workspace(error)) => panic!("workspace refused: {error:?}"),
         Some(FixtureProgress::Dispatch { error, .. }) => panic!("dispatch refused: {error:?}"),
         Some(FixtureProgress::Admission { failure, .. }) => {
             panic!("admission stopped: {failure:?}")
@@ -185,6 +202,12 @@ fn canonical_turn_selects_and_dispatches_after_a_durable_edge_on_reopen() {
         Err(FixtureTurnError::Budget)
     ));
     assert_eq!(snapshot(&c.state), before);
+    let wrong_key = StoreKey::new(&[0x78; 32]).unwrap();
+    assert!(matches!(
+        run_fixture_turn(&store, &wrong_key, &work_set, None, deadline, &cancel),
+        Err(FixtureTurnError::Store(_))
+    ));
+    assert_eq!(snapshot(&c.state), before);
     c.launch_slot();
     let first = run_fixture_turn(&store, &c.key, &work_set, None, deadline, &cancel).unwrap();
     observed(&first, &work_set[0]);
@@ -193,16 +216,25 @@ fn canonical_turn_selects_and_dispatches_after_a_durable_edge_on_reopen() {
     )));
     assert!(!c.output.join("launched-B").exists());
     let retained = load(&c, &store);
-    let captured = capture_artifact(
-        &retained,
-        &work_set[0].effect,
-        &artifact,
-        &c.output,
-        &c.output.join("A"),
-        std::slice::from_ref(&c.cortex),
-        256,
-    )
-    .unwrap();
+    let Some(FixtureProgress::WorkspaceObserved(producer)) = &first.progress else {
+        panic!("producer was not observed in its fresh output slot");
+    };
+    assert!(!c.output.join("A").exists());
+    let captured = producer
+        .capture(
+            &store,
+            &c.key,
+            &artifact,
+            "a1a410bd6438bb73e09ee3220cf8a87470d1d6401757f68be666fd8399e78df0",
+            256,
+            ObservationId::new(
+                work_set[0].workspace_observation.scope(),
+                work_set[0].workspace_observation.sequence() + 1,
+            )
+            .unwrap(),
+        )
+        .unwrap()
+        .content;
     assert_eq!(captured.bytes(), ARTIFACT);
     settle(
         &c,
