@@ -153,6 +153,36 @@ fn observed(turn: &FixtureTurn, job: &FixtureWork) {
     assert!(!Path::new(&format!("/proc/{}", process.pid)).exists());
 }
 
+fn prepare_turn(c: &Campaign, store: &ProgramStore) {
+    for name in ["A", "B"] {
+        let scope = load(c, store)
+            .state()
+            .readiness()
+            .scope(&task(name))
+            .unwrap();
+        notify(
+            c,
+            store,
+            &format!("ready-{name}"),
+            Event::Preconditions {
+                scope,
+                ready: true,
+                source: source("cooperative-test-prerequisites"),
+            },
+        );
+    }
+    notify(
+        c,
+        store,
+        "capacity",
+        Event::Capacity {
+            available: 2,
+            source: source("bounded-fixture-slots"),
+        },
+    );
+    effect(c, store, "policy", EffectEvent::Policy(policy()));
+}
+
 #[test]
 fn canonical_turn_selects_and_dispatches_after_a_durable_edge_on_reopen() {
     if std::env::var_os("CORTEX_GPE_CAMPAIGN_ROOT").is_some() {
@@ -165,33 +195,7 @@ fn canonical_turn_selects_and_dispatches_after_a_durable_edge_on_reopen() {
     let artifact = initial.graph().edges()[0].requirement().artifact().clone();
     let store =
         ProgramStore::create_supervised_fixture(&c.state, &c.key, initial, read_limits()).unwrap();
-    for name in ["A", "B"] {
-        let scope = load(&c, &store)
-            .state()
-            .readiness()
-            .scope(&task(name))
-            .unwrap();
-        notify(
-            &c,
-            &store,
-            &format!("ready-{name}"),
-            Event::Preconditions {
-                scope,
-                ready: true,
-                source: source("cooperative-test-prerequisites"),
-            },
-        );
-    }
-    notify(
-        &c,
-        &store,
-        "capacity",
-        Event::Capacity {
-            available: 2,
-            source: source("bounded-fixture-slots"),
-        },
-    );
-    effect(&c, &store, "policy", EffectEvent::Policy(policy()));
+    prepare_turn(&c, &store);
     let kernel = load(&c, &store);
     let cancel = AtomicBool::new(false);
     let deadline = Instant::now() + Duration::from_secs(180);
@@ -363,4 +367,77 @@ fn canonical_turn_selects_and_dispatches_after_a_durable_edge_on_reopen() {
     )
     .unwrap();
     assert!(idle.progress.is_none() && idle.held.is_empty());
+}
+
+#[test]
+fn coordinator_retains_pre_dispatch_prefix_and_reopen_never_launches_it() {
+    if std::env::var_os("CORTEX_GPE_CAMPAIGN_ROOT").is_some() {
+        return;
+    }
+    let c = Campaign::new();
+    let store =
+        ProgramStore::create_supervised_fixture(&c.state, &c.key, definition(&c), read_limits())
+            .unwrap();
+    prepare_turn(&c, &store);
+    let before = load(&c, &store);
+    let jobs = [work(&c, &before, "A", None), work(&c, &before, "B", None)];
+    let cancel = AtomicBool::new(false);
+    // This envelope admits fixture metadata but can never include the 10 s
+    // worker wall budget. No payload is started before the durable cut.
+    let cut = run_fixture_turn(
+        &store,
+        &c.key,
+        &jobs,
+        None,
+        Instant::now() + Duration::from_secs(9),
+        &cancel,
+    )
+    .unwrap();
+    assert_eq!(cut.selected, Some(task("A")));
+    assert!(matches!(cut.progress, Some(FixtureProgress::Budget)));
+    assert_eq!(cut.receipts.len(), 6);
+    assert!(
+        cut.receipts
+            .iter()
+            .all(|r| r.store == store.id() && !r.duplicate)
+    );
+    let ordinal = cut.receipts.last().unwrap().ordinal;
+    assert_eq!(ordinal, before.revision() + 6);
+    drop(store);
+    let reopened = ProgramStore::open(&c.state, &c.key, Access::Recover, read_limits()).unwrap();
+    let saved = load(&c, &reopened);
+    assert_eq!(saved.revision(), ordinal);
+    let record = &saved.fixture_effects().effects()[0];
+    assert_eq!(record.intent.id, jobs[0].effect);
+    assert_eq!(record.status, EffectStatus::Reserved);
+    assert!(record.process_spec.is_some() && record.dispatch_at.is_none());
+    assert!(record.process_observations.is_empty());
+    assert!(
+        saved
+            .operations()
+            .iter()
+            .all(|op| op.id != jobs[0].operations.dispatch)
+    );
+    let current = snapshot(&c.state);
+    let again = run_fixture_turn(
+        &reopened,
+        &c.key,
+        &jobs,
+        None,
+        Instant::now() + Duration::from_secs(180),
+        &cancel,
+    )
+    .unwrap();
+    assert!(again.selected.is_none() && again.receipts.is_empty());
+    assert!(again.progress.is_none());
+    assert!(
+        again
+            .held
+            .iter()
+            .any(|h| matches!(h, FixtureHold::Retained(id) if *id == task("A")))
+    );
+    assert_eq!(snapshot(&c.state), current);
+    assert!(!c.output.join("launched-A").exists());
+    let output = c.output.join(jobs[0].effect.as_str()).join("output");
+    assert_eq!(fs::read_dir(output).unwrap().count(), 0);
 }
