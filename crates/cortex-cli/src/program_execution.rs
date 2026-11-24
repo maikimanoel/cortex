@@ -4,6 +4,9 @@
 //! The supported profile is cooperative development in an unchanged owned
 //! workspace. This is not a new containment backend or an acceptance authority.
 
+mod codex_cli;
+pub use codex_cli::{CodexCliHold, CodexCliInspection, inspect_codex_cli_invocation};
+
 use crate::{InspectionError, inspect_candidate, program_preparation::ExecutorPreparation};
 use cortex_core::{
     binding::{
@@ -12,7 +15,7 @@ use cortex_core::{
     },
     parallel::{ArtifactReference, TaskContext},
     program::{
-        executor::ObservationKind,
+        executor::{ExecutorError, ObservationKind},
         operational::{EffectEvent, EffectId, EffectScope},
     },
 };
@@ -37,6 +40,8 @@ pub enum ExecutionError {
     Dispatch,
     /// The original canonical preparation or its exact input is unavailable.
     PreparedInput,
+    /// Core rejected the exact retained input in the current state.
+    Input(ExecutorError),
     /// A canonical readout failed.
     Store(ProgramStoreError),
     /// A separate bounded Git observation failed.
@@ -61,6 +66,7 @@ impl fmt::Display for ExecutionError {
             Self::UnsupportedProfile => "program execution: unsupported fixture profile",
             Self::Dispatch => "program execution: current dispatch unavailable",
             Self::PreparedInput => "program execution: exact prepared input unavailable",
+            Self::Input(_) => "program execution: retained input refused by Core",
             Self::Store(_) => "program execution: canonical state unavailable",
             Self::Inspection(_) => "program execution: workspace inspection failed",
             Self::Binding(_) | Self::Workspace(_) => {
@@ -77,6 +83,7 @@ impl fmt::Display for ExecutionError {
 impl Error for ExecutionError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::Input(error) => Some(error),
             Self::Store(error) => Some(error),
             Self::Inspection(error) => Some(error),
             Self::Binding(error) => Some(error),
@@ -132,6 +139,14 @@ pub struct PreparedFixtureRun<'a> {
     pub workspace_observation: ObservationId,
 }
 
+/// Bounded candidate correspondence and canonical process outcome are separate.
+pub struct FixtureRun {
+    /// Actual pre-dispatch Git observation bound by Core.
+    pub workspace: Box<BoundCandidate>,
+    /// Original supervisor receipts and terminal process observations.
+    pub run: RunResult,
+}
+
 /// Execute one exact prepared cooperative fixture through the canonical store.
 ///
 /// Matching Git samples cover the existing binding contract. The local workspace
@@ -144,7 +159,7 @@ pub fn run_prepared_fixture(
     key: &StoreKey,
     request: PreparedFixtureRun<'_>,
     cancel: &AtomicBool,
-) -> Result<RunResult, ExecutionError> {
+) -> Result<FixtureRun, ExecutionError> {
     if store.profile() != ProgramProfile::SupervisedFixturesV3
         || request
             .preparation
@@ -204,7 +219,7 @@ pub fn run_prepared_fixture(
             prepared.requirements(),
             prepared.bytes(),
         )
-        .map_err(|_| ExecutionError::PreparedInput)?;
+        .map_err(ExecutionError::Input)?;
     let current = kernel
         .state()
         .readiness()
@@ -213,9 +228,9 @@ pub fn run_prepared_fixture(
     if current.context().contract().candidate() != &scope.candidate {
         return Err(ExecutionError::Dispatch);
     }
-    check_workspace(current.context(), request.workspace_observation)?;
+    let workspace = check_workspace(current.context(), request.workspace_observation)?;
     drop(kernel);
-    execute_fixture(
+    let run = execute_fixture(
         store,
         key,
         request.dispatch,
@@ -223,7 +238,8 @@ pub fn run_prepared_fixture(
         request.pin,
         cancel,
     )
-    .map_err(ExecutionError::Harness)
+    .map_err(ExecutionError::Harness)?;
+    Ok(FixtureRun { workspace, run })
 }
 
 /// The one exact declared output the caller will examine.
