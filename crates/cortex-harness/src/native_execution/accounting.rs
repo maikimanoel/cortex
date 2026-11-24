@@ -4,9 +4,11 @@ use cortex_core::program::domain::{
 };
 
 mod lifetime;
-pub(in crate::native_execution) use lifetime::monotonic_ns;
 pub use lifetime::{ManagedCpuCut, ManagedCpuObservations, ManagedCpuReadback};
+pub(in crate::native_execution) use lifetime::{clock_namespace, monotonic_ns};
 mod settlement;
+#[cfg(test)]
+pub(crate) use settlement::tests::source_cpu_attempt;
 pub use settlement::{
     CollectedCpuClosure, CollectedCpuClosureAction, CollectedCpuClosureCut,
     CollectedCpuClosureError,

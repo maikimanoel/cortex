@@ -106,6 +106,7 @@ impl Fixture {
             began_at: self.start + Duration::from_millis(offset),
             observed_at: self.start + Duration::from_millis(offset + 1),
             monotonic_ns: Some((offset * 100, offset * 100 + 50)),
+            clock_namespace: Some((4, 20)),
             populated: Some(false),
             counter: CpuCounterObservation::Unavailable,
         }
@@ -166,17 +167,82 @@ impl Drop for Fixture {
 
 fn report(history: &ManagedCpuObservations, request: &CollectedCpuClosure) -> Vec<u8> {
     let binding = challenge(history, request).unwrap();
+    let observer_scope = format!(
+        "controlled-cpu-{:x}",
+        Sha256::digest(history.domain().as_str().as_bytes())
+    );
     serde_json::to_vec(&json!([
         "whole-domain-cpu-fence-v1",
         binding,
+        [4, 20],
         100,
         0,
         300,
         450,
-        "controlled-cpu-observer",
+        observer_scope,
         1
     ]))
     .unwrap()
+}
+
+/// Repeatable controlled collector and observer input for the existing B/E/F
+/// managed source scenario. The resulting closure goes to the real store.
+pub(crate) fn source_cpu_attempt<'a>(
+    store: &'a ProgramStore,
+    key: &'a StoreKey,
+    intent: &'a DomainIntent,
+    request: CollectedCpuClosure,
+    micros: u64,
+) -> impl Fn() -> Result<AdmissionReceipt, CollectedCpuClosureError> + 'a {
+    let start = Instant::now();
+    let identity = fixture::identity(intent);
+    let mut history = ManagedCpuObservations::new(
+        store.id(),
+        intent.id.clone(),
+        identity.clone(),
+        start,
+        Some(0),
+        start + Duration::from_secs(60),
+        ManagedCpuReadback {
+            cut: ManagedCpuCut::FirstHeld,
+            began_at: start,
+            observed_at: start,
+            monotonic_ns: Some((200, 250)),
+            clock_namespace: Some((4, 20)),
+            populated: Some(true),
+            counter: CpuCounterObservation::LowerBoundMicros(micros.min(1)),
+        },
+    );
+    let cut = match request.cut {
+        CollectedCpuClosureCut::NormalEnd => ManagedCpuCut::EndOfTransport,
+        CollectedCpuClosureCut::AfterCancellation => ManagedCpuCut::AfterCancellation,
+    };
+    history.record_bracket(
+        &identity,
+        cut,
+        ManagedCpuReadback {
+            cut,
+            began_at: start,
+            observed_at: start,
+            monotonic_ns: Some((400, 450)),
+            clock_namespace: Some((4, 20)),
+            populated: Some(false),
+            counter: CpuCounterObservation::Unavailable,
+        },
+        (Some(micros), Some(micros)),
+    );
+    let bytes = report(&history, &request);
+    move || {
+        admit(
+            store,
+            key,
+            &history,
+            intent,
+            request.clone(),
+            &bytes,
+            || Ok(()),
+        )
+    }
 }
 
 #[test]
@@ -194,6 +260,15 @@ fn collected_cpu_survives_store_reopen_and_does_not_release_occupancy() {
     let request = f.request("collected-normal-close", Close, NormalEnd);
     let bytes = report(&history, &request);
     let ordinal = request.expected_revision;
+    let mut wrong_clock: Value = serde_json::from_slice(&bytes).unwrap();
+    wrong_clock[2] = json!([4, 21]);
+    assert!(matches!(
+        observer_report(
+            &select(&history, &request).unwrap(),
+            &serde_json::to_vec(&wrong_clock).unwrap(),
+        ),
+        Err(CollectedCpuClosureError::Observer)
+    ));
     assert!(matches!(
         admit(
             &f.store,
@@ -249,7 +324,15 @@ fn collected_cpu_survives_store_reopen_and_does_not_release_occupancy() {
         .unwrap()
         .duplicate
     );
-    let reopened = f.load();
+    let reopened_store = ProgramStore::open(
+        &f.temp.join("store"),
+        &f.key,
+        Access::ReadOnly,
+        f.store.read_limits(),
+    )
+    .unwrap();
+    assert_eq!(reopened_store.id(), confirmed.store);
+    let reopened = reopened_store.load(&f.key, Access::ReadOnly).unwrap();
     let record = reopened.domains().unwrap().domain(&f.intent.id).unwrap();
     assert_eq!(record.phase, DomainPhase::Closed);
     let retained = record.closure.as_ref().unwrap();
