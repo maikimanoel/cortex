@@ -350,7 +350,15 @@ impl CoordinationKernel {
         let MaterialSubject::Integration { scope, .. } = &observation.subject else {
             return Err(ProgramError::Structure.into());
         };
-        if scope != &acceptance.scope
+        let Some(fresh) = acceptance.examination.candidate.as_ref() else {
+            return Err(ProgramError::Stale.into());
+        };
+        let Some(assessed) = assessment.examination.candidate.as_ref() else {
+            return Err(ProgramError::Stale.into());
+        };
+        if fresh.id().scope() != assessed.id().scope()
+            || fresh.id().sequence() <= assessed.id().sequence()
+            || scope != &acceptance.scope
             || acceptance.examination.observation != assessment.examination.observation
             || acceptance.examination.contract != assessment.examination.contract
             || acceptance.examination.profile != assessment.examination.profile
@@ -449,6 +457,13 @@ impl CoordinationKernel {
                     || current.requirement() != scope.requirement()
                     || current.requirement().kind() != DependencyKind::Artifact
                     || reported.candidate() != contract.artifact_requirement()
+                    || contract.artifact_requirement().repository()
+                        != scope
+                            .producer()
+                            .context()
+                            .contract()
+                            .candidate()
+                            .repository()
                     || contract.artifact_requirement().worktree() != WorktreeRequirement::Clean
                     || !contract.correspondences().iter().any(|criterion| {
                         criterion.verification() == reported
