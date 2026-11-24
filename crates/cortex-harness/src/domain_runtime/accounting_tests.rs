@@ -2,7 +2,8 @@
 //! synthetic. Every durable decision is made by the canonical store.
 use super::*;
 use crate::native_execution::accounting::{
-    CpuClosureCheckError, check_cpu_closure_against_sample, parse_cpu_usage,
+    CollectedCpuClosure, CollectedCpuClosureAction, CollectedCpuClosureCut, CpuClosureCheckError,
+    check_cpu_closure_against_sample, parse_cpu_usage, source_cpu_attempt,
 };
 use cortex_evidence::program::KernelError;
 use cortex_storage::{history_store::Completion, program_store::ProgramStoreError};
@@ -108,6 +109,56 @@ fn close_assertion(intent: &DomainIntent, usage: Option<u64>) -> ClosureReceipt 
     receipt
 }
 
+fn collected_request(
+    k: &CoordinationKernel,
+    label: &str,
+    intent: &DomainIntent,
+    action: CollectedCpuClosureAction,
+    cut: CollectedCpuClosureCut,
+) -> CollectedCpuClosure {
+    let prototype = input(
+        k,
+        label,
+        DomainEvent::Unknown {
+            domain: intent.id.clone(),
+            at: tick(k),
+            basis: fixture::source("source-simulation"),
+        },
+    );
+    CollectedCpuClosure {
+        operation: prototype.id,
+        expected_revision: prototype.expected,
+        at: tick(k),
+        grant: prototype.grant,
+        action,
+        cut,
+    }
+}
+
+pub(super) fn exercise_dependent_cpu_closure(store: &ProgramStore, f: &DomainIntent) {
+    let k = load(store);
+    assert!(matches!(
+        k.domains().unwrap().consumed_or_reserved(CPU),
+        Err(DomainError::Debt(CPU))
+    ));
+    let request = collected_request(
+        &k,
+        "close-F-with-collected-cpu",
+        f,
+        CollectedCpuClosureAction::Close,
+        CollectedCpuClosureCut::NormalEnd,
+    );
+    let key = key();
+    let submit = source_cpu_attempt(store, &key, f, request, 1100);
+    submit().unwrap();
+    let replay = load(store);
+    let domain = replay.domains().unwrap().domain(&f.id).unwrap();
+    assert_eq!(domain.phase, DomainPhase::Closed);
+    assert_eq!(domain.measured_consumption(CPU), Some(2));
+    assert!(domain.holds(Resource::WorkerSlots));
+    assert_eq!(replay.domains().unwrap().consumed_or_reserved(CPU), Ok(14));
+}
+
 pub(super) fn exercise_settlement(
     store: &ProgramStore,
     b: &DomainIntent,
@@ -159,7 +210,7 @@ pub(super) fn exercise_settlement(
         &k,
         "close-B",
         DomainEvent::Closed {
-            receipt: close_assertion(b, Some(2)),
+            receipt: close_assertion(b, None),
             at: tick(&k),
         },
     );
@@ -183,6 +234,18 @@ pub(super) fn exercise_settlement(
         ))
     ));
     check_debt(store, f);
+
+    let k = load(store);
+    let settlement_key = key();
+    let b_cpu = collected_request(
+        &k,
+        "settle-B-with-collected-cpu",
+        b,
+        CollectedCpuClosureAction::Settle,
+        CollectedCpuClosureCut::AfterCancellation,
+    );
+    source_cpu_attempt(store, &settlement_key, b, b_cpu, 1001)().unwrap();
+    check_debt(store, f); // E still holds cumulative debt.
 
     let k = load(store);
     let mut debit = close_assertion(e, Some(10));
@@ -213,19 +276,19 @@ pub(super) fn exercise_settlement(
         .unwrap_err();
     assert_eq!(denied, KernelError::Domain(DomainError::Budget(CPU)));
 
-    let settle = input(
+    let settle = collected_request(
         &k,
-        "settle-E",
-        DomainEvent::Settle {
-            receipt: debit,
-            at: tick(&k),
-        },
+        "settle-E-with-collected-cpu",
+        e,
+        CollectedCpuClosureAction::Settle,
+        CollectedCpuClosureCut::AfterCancellation,
     );
+    let attempt = source_cpu_attempt(store, &settlement_key, e, settle, 9201);
     let barrier = std::sync::Barrier::new(2);
     let (one, two) = thread::scope(|scope| {
         let submit = || {
             barrier.wait();
-            store.admit(&key(), settle.clone()).unwrap()
+            attempt().unwrap()
         };
         let one = scope.spawn(submit);
         let two = scope.spawn(submit);

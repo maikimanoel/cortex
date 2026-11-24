@@ -7,6 +7,8 @@ mod lifetime;
 pub(in crate::native_execution) use lifetime::monotonic_ns;
 pub use lifetime::{ManagedCpuCut, ManagedCpuObservations, ManagedCpuReadback};
 mod settlement;
+#[cfg(test)]
+pub(crate) use settlement::tests::source_cpu_attempt;
 pub use settlement::{
     CollectedCpuClosure, CollectedCpuClosureAction, CollectedCpuClosureCut,
     CollectedCpuClosureError,

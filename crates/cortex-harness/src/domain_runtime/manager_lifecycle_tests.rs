@@ -1083,6 +1083,7 @@ fn source_graph_with_accounting(apply_accounting: bool) {
                 .unwrap()
                 .holds(Resource::WorkerSlots)
         );
+        accounting::exercise_dependent_cpu_closure(&store, &f);
     }
     let current = store.load(&key(), Access::ReadOnly).unwrap();
     let release_id = OperationId::new("release-EF").unwrap();

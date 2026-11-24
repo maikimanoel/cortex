@@ -43,6 +43,7 @@ pub enum CollectedCpuClosureCut {
 
 /// Selection of one existing canonical closure operation. The amount is derived
 /// from the controller's observation and receives no caller-supplied override.
+#[derive(Clone)]
 pub struct CollectedCpuClosure {
     /// Original durable operation ID proposed by the coordinator.
     pub operation: OperationId,
@@ -399,4 +400,4 @@ pub(in crate::native_execution) fn submit(
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
