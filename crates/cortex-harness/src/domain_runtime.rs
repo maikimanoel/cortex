@@ -961,6 +961,9 @@ pub fn observe_managed_executable_closure_tree(
     ids: &DomainOperations,
     observation_id: OperationId,
 ) -> Result<AdmissionReceipt, ManagedClosureObservationError> {
+    backend
+        .check_bound_store(store.id())
+        .map_err(ManagedClosureObservationError::Capture)?;
     let start = Instant::now();
     let end = backend.observation_end().ok_or_else(|| {
         ManagedClosureObservationError::Capture(issue(
@@ -1256,6 +1259,14 @@ pub(crate) fn prepare_managed_executable_domain_until(
     limit: Option<Instant>,
 ) -> DomainPreparation {
     let start = Instant::now();
+    if let Err(error) = backend.bind_cpu_store(store.id(), start) {
+        let mut run = DomainRun::empty();
+        run.diagnostic = Some(error);
+        return DomainPreparation {
+            run,
+            prepared: None,
+        };
+    }
     let end = start
         .checked_add(Duration::from_millis(backend.wall_ms()))
         .map(|end| limit.map_or(end, |limit| end.min(limit)))
@@ -1318,5 +1329,6 @@ pub fn cancel_managed_executable_domain(
     backend: &mut crate::native_execution::managed_backend::ManagedExecutionDomain,
     operation: Operation,
 ) -> Result<AdmissionReceipt, DomainDiagnostic> {
+    backend.check_bound_store(store.id())?;
     cancel_domain(store, key, backend, operation)
 }

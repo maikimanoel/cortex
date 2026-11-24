@@ -2,7 +2,11 @@
 //! No constructor call or source test constitutes permission for a host launch.
 use super::{
     ExecutionError, ExecutionPlan,
-    accounting::{CpuCounterObservation, bracket_cpu_observation},
+    accounting::{
+        CollectedCpuClosure, CollectedCpuClosureCut, CollectedCpuClosureError,
+        CpuCounterObservation, ManagedCpuCut, ManagedCpuObservations, ManagedCpuReadback,
+        challenge, monotonic_ns, submit,
+    },
     artifacts,
     backend::ExecutionObservation,
     bootstrap,
@@ -29,9 +33,16 @@ use cortex_core::{
     temporal::SourceReference,
 };
 use cortex_evidence::program::{CoordinationKernel, Operation};
+use cortex_storage::{
+    history_store::{StoreId, StoreKey},
+    program_store::{AdmissionReceipt, ProgramStore},
+};
 use std::{
     fs::File,
-    os::unix::{fs::MetadataExt, net::UnixStream},
+    os::{
+        fd::OwnedFd,
+        unix::{fs::MetadataExt, net::UnixStream},
+    },
     path::PathBuf,
     sync::atomic::Ordering,
     time::Instant,
@@ -97,6 +108,41 @@ struct AccountedTree {
     cpu: CpuCounterObservation,
 }
 
+struct AccountedTreeRead {
+    observation: ManagedObservation,
+    nodes: Vec<DomainCgroupObservation>,
+    reads: (Option<u64>, Option<u64>),
+}
+
+struct OpenCpuCapture {
+    began_at: Instant,
+    began_ns: Option<u64>,
+}
+impl OpenCpuCapture {
+    fn start() -> Self {
+        Self {
+            began_at: Instant::now(),
+            began_ns: monotonic_ns(),
+        }
+    }
+
+    fn finish(
+        self,
+        cut: ManagedCpuCut,
+        populated: Option<bool>,
+        counter: CpuCounterObservation,
+    ) -> ManagedCpuReadback {
+        ManagedCpuReadback {
+            cut,
+            began_at: self.began_at,
+            observed_at: Instant::now(),
+            monotonic_ns: self.began_ns.zip(monotonic_ns()),
+            populated,
+            counter,
+        }
+    }
+}
+
 /// Manager owns service lifetime and reaping; held delegation independently
 /// establishes the permitted resource scope. Neither owns canonical authority.
 pub struct ManagedExecutionDomain {
@@ -111,6 +157,8 @@ pub struct ManagedExecutionDomain {
     observation: Option<ExecutionObservation>,
     end_observation: Option<ManagedEndObservation>,
     end_started_at: Option<Instant>,
+    cpu_store: Option<(StoreId, OpenCpuCapture)>,
+    cpu_observations: Option<ManagedCpuObservations>,
 }
 impl ManagedExecutionDomain {
     /// Read-only preparation of an explicitly authorized scope. None refuses
@@ -140,6 +188,8 @@ impl ManagedExecutionDomain {
             observation: None,
             end_observation: None,
             end_started_at: None,
+            cpu_store: None,
+            cpu_observations: None,
         })
     }
     /// Exact manager/policy/immutable source configuration for canonical intent.
@@ -148,6 +198,33 @@ impl ManagedExecutionDomain {
     }
     pub(crate) fn observation_end(&self) -> Option<Instant> {
         self.original_end
+    }
+    pub(crate) fn bind_cpu_store(
+        &mut self,
+        store: StoreId,
+        started_at: Instant,
+    ) -> Result<(), DomainDiagnostic> {
+        self.check_bound_store(store)?;
+        if self.intent.is_none() {
+            self.cpu_store = Some((
+                store,
+                OpenCpuCapture {
+                    began_at: started_at,
+                    began_ns: monotonic_ns(),
+                },
+            ));
+        }
+        Ok(())
+    }
+    pub(crate) fn check_bound_store(&self, store: StoreId) -> Result<(), DomainDiagnostic> {
+        if self
+            .cpu_store
+            .as_ref()
+            .is_some_and(|(bound, _)| *bound != store)
+        {
+            return Err(diagnostic(ExecutionError::Identity));
+        }
+        Ok(())
     }
     pub(super) fn check_p1_selection(
         &self,
@@ -185,6 +262,66 @@ impl ManagedExecutionDomain {
     /// Reading it does not contact the manager or refresh the observed cut.
     pub fn end_observation(&self) -> Option<&ManagedEndObservation> {
         self.end_observation.as_ref()
+    }
+    /// Return the live held group's cumulative CPU observations. The first cut
+    /// occurs after bootstrap startup. Neither it nor an empty later tree proves
+    /// the initial population, complete attribution or terminal consumption.
+    pub fn cpu_observations(&self) -> Option<&ManagedCpuObservations> {
+        self.cpu_observations.as_ref()
+    }
+    /// Read the exact operation and collector-cut binding for the selected
+    /// whole-domain observer. This digest provides correspondence, not authority.
+    pub fn cpu_closure_challenge(
+        &self,
+        request: &CollectedCpuClosure,
+    ) -> Result<[u8; 32], CollectedCpuClosureError> {
+        challenge(self.cpu_closure_history(request.cut)?, request)
+    }
+
+    /// Offer the collector-derived CPU debit to the existing canonical store.
+    ///
+    /// The selected independent observer must send a complete fence report over a
+    /// connected Unix seqpacket socket. Linux peer/packet credentials and the
+    /// protected trust configuration determine the observer role. The report
+    /// authenticates coverage and the exact selected cut. The CPU amount comes
+    /// only from the held counter. No other dimension is released here.
+    pub fn admit_collected_cpu_closure(
+        &self,
+        store: &ProgramStore,
+        key: &StoreKey,
+        request: CollectedCpuClosure,
+        observer: OwnedFd,
+    ) -> Result<AdmissionReceipt, CollectedCpuClosureError> {
+        submit(
+            store,
+            key,
+            self.cpu_closure_history(request.cut)?,
+            self.intent
+                .as_ref()
+                .ok_or(CollectedCpuClosureError::Correspondence)?,
+            request,
+            observer,
+        )
+    }
+
+    fn cpu_closure_history(
+        &self,
+        cut: CollectedCpuClosureCut,
+    ) -> Result<&ManagedCpuObservations, CollectedCpuClosureError> {
+        if matches!(cut, CollectedCpuClosureCut::NormalEnd)
+            && !self.end_observation.as_ref().is_some_and(|observation| {
+                successful_managed_end(
+                    &observation.completion,
+                    observation.transport_complete,
+                    &observation.readback,
+                )
+            })
+        {
+            return Err(CollectedCpuClosureError::Counter);
+        }
+        self.cpu_observations
+            .as_ref()
+            .ok_or(CollectedCpuClosureError::Counter)
     }
     /// Screen an independently supplied normal-end Closed/Settle candidate.
     /// The return is the rounded cumulative CPU amount, subject to the actual
@@ -224,7 +361,34 @@ impl ManagedExecutionDomain {
         intent: &DomainIntent,
         expected: &DomainIdentity,
         end: Instant,
+        cut: ManagedCpuCut,
     ) -> Result<AccountedTree, DomainDiagnostic> {
+        let capture = OpenCpuCapture::start();
+        let result = self.read_accounted_tree(intent, expected, end);
+        let (populated, reads) = result.as_ref().map_or((None, (None, None)), |read| {
+            (Some(read.observation.populated), read.reads)
+        });
+        let cpu = match &mut self.cpu_observations {
+            Some(history) => history.record_bracket(
+                expected,
+                cut,
+                capture.finish(cut, populated, CpuCounterObservation::Unavailable),
+                reads,
+            ),
+            None => CpuCounterObservation::Unavailable,
+        };
+        result.map(|read| AccountedTree {
+            observation: read.observation,
+            nodes: read.nodes,
+            cpu,
+        })
+    }
+    fn read_accounted_tree(
+        &mut self,
+        intent: &DomainIntent,
+        expected: &DomainIdentity,
+        end: Instant,
+    ) -> Result<AccountedTreeRead, DomainDiagnostic> {
         let end = end.min(
             self.original_end
                 .ok_or_else(|| diagnostic(ExecutionError::Identity))?,
@@ -254,11 +418,10 @@ impl ManagedExecutionDomain {
         if Instant::now() >= end {
             return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Deadline));
         }
-        let cpu = bracket_cpu_observation(before, after, actual.populated);
-        Ok(AccountedTree {
+        Ok(AccountedTreeRead {
             observation: actual,
             nodes: tree,
-            cpu,
+            reads: (before, after),
         })
     }
     fn retain_scratch(&mut self, actual: &ManagedObservation) -> Result<(), DomainDiagnostic> {
@@ -407,6 +570,35 @@ impl DomainManager for ManagedExecutionDomain {
             .delegation
             .inspect_bound_group(&actual.identity, &self.plan.spec.controls)
             .map_err(diagnostic)?;
+        let (store, start) = self
+            .cpu_store
+            .as_ref()
+            .ok_or_else(|| diagnostic(ExecutionError::Identity))?;
+        let capture = OpenCpuCapture::start();
+        let held_counter = group.cpu_usage(&actual.identity).map_err(diagnostic)?;
+        let first_held = capture.finish(
+            ManagedCpuCut::FirstHeld,
+            Some(actual.populated),
+            held_counter.map_or(
+                CpuCounterObservation::Unavailable,
+                CpuCounterObservation::LowerBoundMicros,
+            ),
+        );
+        if first_held.observed_at >= end {
+            return Err(issue(
+                DomainPhaseDiagnostic::Preparation,
+                DomainCause::Deadline,
+            ));
+        }
+        self.cpu_observations = Some(ManagedCpuObservations::new(
+            *store,
+            intent.id.clone(),
+            actual.identity.clone(),
+            start.began_at,
+            start.began_ns,
+            end,
+            first_held,
+        ));
         self.group = Some(group);
         self.bound_group = Some(actual.identity.clone());
         let c = &self.plan.spec.controls;
@@ -473,7 +665,8 @@ impl DomainManager for ManagedExecutionDomain {
             .bound_group
             .clone()
             .ok_or_else(|| diagnostic(ExecutionError::Identity))?;
-        let mut tree = self.accounted_tree(intent, &identity, end)?;
+        let mut tree =
+            self.accounted_tree(intent, &identity, end, ManagedCpuCut::AfterCancellation)?;
         tree.observation.cpu_micros = tree.cpu.lower_bound_micros();
         Ok((tree.observation, tree.nodes))
     }
@@ -538,14 +731,18 @@ impl DomainManager for ManagedExecutionDomain {
             self.plan.uses_json_lines(),
         )
         .map_err(diagnostic)?;
-        let readback =
-            match self.accounted_tree(context.intent, &context.binding.identity, context.end) {
-                Ok(tree) => ManagedEndReadback::Observed {
-                    populated: tree.observation.populated,
-                    cpu: tree.cpu,
-                },
-                Err(error) => ManagedEndReadback::Unavailable(error),
-            };
+        let readback = match self.accounted_tree(
+            context.intent,
+            &context.binding.identity,
+            context.end,
+            ManagedCpuCut::EndOfTransport,
+        ) {
+            Ok(tree) => ManagedEndReadback::Observed {
+                populated: tree.observation.populated,
+                cpu: tree.cpu,
+            },
+            Err(error) => ManagedEndReadback::Unavailable(error),
+        };
         let populated = readback.populated();
         let transport_complete =
             streams.input_complete && streams.stdout_complete && streams.stderr_complete;

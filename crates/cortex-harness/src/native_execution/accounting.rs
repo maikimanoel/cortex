@@ -3,6 +3,16 @@ use cortex_core::program::domain::{
     ClosureReceipt, Consumption, DomainClosureTreeObservation, DomainRecord,
 };
 
+mod lifetime;
+pub(in crate::native_execution) use lifetime::monotonic_ns;
+pub use lifetime::{ManagedCpuCut, ManagedCpuObservations, ManagedCpuReadback};
+mod settlement;
+pub use settlement::{
+    CollectedCpuClosure, CollectedCpuClosureAction, CollectedCpuClosureCut,
+    CollectedCpuClosureError,
+};
+pub(in crate::native_execution) use settlement::{challenge, submit};
+
 const CPU_STAT_LIMIT: usize = 16_384;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
