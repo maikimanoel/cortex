@@ -132,7 +132,7 @@ fn candidate_revocation_reuse_and_staleness_refuse_before_managed_effects() {
         reservation_intent(&kernel, &binding),
         Err(P1Refusal::Correspondence)
     ));
-    let mut stale = operation;
+    let mut stale = operation.clone();
     stale.id = OperationId::new("p1-stale").unwrap();
     assert!(matches!(
         reservation_intent(&kernel, &bind(candidate, &delegation, &stale, &ids)),
@@ -158,6 +158,22 @@ fn expired_cancelled_and_unbounded_cases_are_refused() {
         Err(P1Refusal::DeadlineOrCancellation),
     ));
     assert!(live_budget(now + Duration::from_secs(10), &active).is_ok());
+    assert!(matches!(
+        check_store_budget(
+            Duration::from_secs(11),
+            now + Duration::from_secs(10),
+            &active
+        ),
+        Err(P1Refusal::StoreReadBudget)
+    ));
+    assert!(
+        check_store_budget(
+            Duration::from_secs(1),
+            now + Duration::from_secs(10),
+            &active
+        )
+        .is_ok()
+    );
     assert!(matches!(
         controller_digest(1, now + Duration::from_secs(10), &active),
         Err(P1Refusal::Controller),

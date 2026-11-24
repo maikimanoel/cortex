@@ -96,6 +96,8 @@ pub enum P1Refusal {
     MissingBinding,
     /// The original attempt ended or cancellation is currently requested.
     DeadlineOrCancellation,
+    /// The selected cooperative store deadline does not fit the remaining case time.
+    StoreReadBudget,
     /// The reserved inputs, configuration, operation identities or host differ.
     Correspondence,
     /// The journal is unavailable or its history cannot establish precedence.
@@ -141,14 +143,23 @@ pub enum RawCopyP1Run {
     },
 }
 
-fn live_budget(deadline: Instant, cancel: &AtomicBool) -> Result<(), P1Refusal> {
-    let now = Instant::now();
-    if cancel.load(Ordering::SeqCst)
-        || deadline
-            .checked_duration_since(now)
-            .is_none_or(|remaining| remaining.is_zero() || remaining > MAX_CASE_INTERVAL)
-    {
+fn live_budget(deadline: Instant, cancel: &AtomicBool) -> Result<Duration, P1Refusal> {
+    if cancel.load(Ordering::SeqCst) {
         return Err(P1Refusal::DeadlineOrCancellation);
+    }
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|remaining| !remaining.is_zero() && *remaining <= MAX_CASE_INTERVAL)
+        .ok_or(P1Refusal::DeadlineOrCancellation)
+}
+
+fn check_store_budget(
+    read_timeout: Duration,
+    deadline: Instant,
+    cancel: &AtomicBool,
+) -> Result<(), P1Refusal> {
+    if read_timeout >= live_budget(deadline, cancel)? {
+        return Err(P1Refusal::StoreReadBudget);
     }
     Ok(())
 }
@@ -267,7 +278,7 @@ pub fn inspect_raw_copy_attempt(
     if binding.store != store.id() {
         return Err(P1Refusal::Correspondence);
     }
-    live_budget(binding.deadline, cancel)?;
+    check_store_budget(store.read_limits().timeout(), binding.deadline, cancel)?;
     let mut kernel = store
         .load(key, Access::ReadOnly)
         .map_err(|_| P1Refusal::Journal)?;
@@ -354,7 +365,7 @@ fn execute_raw_copy_attempt(
     binding: &RawCopyP1Binding<'_>,
     cancel: &AtomicBool,
 ) -> Result<RawCopyP1Run, P1Refusal> {
-    live_budget(binding.deadline, cancel)?;
+    check_store_budget(store.read_limits().timeout(), binding.deadline, cancel)?;
     admit_one_and_attempt(store, key, binding.reservation, |reservation| {
         execute_reserved_raw_copy(store, key, backend, binding, cancel, reservation)
     })
