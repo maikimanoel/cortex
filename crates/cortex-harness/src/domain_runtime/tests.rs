@@ -1008,3 +1008,124 @@ mod manager_lifecycle_tests;
 
 #[path = "scratch_tests.rs"]
 mod scratch_tests;
+
+/// Controlled source fixture. No manager, cgroup or real trial authority is
+/// created by this test. Both hook phases use the production runtime/store path.
+#[test]
+fn p1_trial_guards_run_on_both_sides_of_the_durable_effect_cut() {
+    use std::cell::Cell;
+
+    struct Observer<'a> {
+        ids: &'a DomainOperations,
+        checks: Cell<usize>,
+        revoke_release: bool,
+    }
+
+    impl DomainTrialGuard for Observer<'_> {
+        fn authorize(
+            &self,
+            kernel: &CoordinationKernel,
+            intent: &DomainIntent,
+            operation: &Operation,
+            cut: TrialEffectCut<'_>,
+            _: Instant,
+        ) -> Result<(), DomainDiagnostic> {
+            let (id, phase, checks) = match cut {
+                TrialEffectCut::Create => (&self.ids.create, DomainPhase::Reserved, 0),
+                TrialEffectCut::Release(binding) => {
+                    assert_eq!(
+                        record(kernel, &intent.id).unwrap().identity.as_ref(),
+                        Some(&binding.identity),
+                    );
+                    (&self.ids.release, DomainPhase::Bound, 1)
+                }
+            };
+            assert_eq!(self.checks.get(), checks);
+            assert_eq!(&operation.id, id);
+            assert_eq!(operation.expected, kernel.revision());
+            assert!(!kernel.operations().iter().any(|op| &op.id == id));
+            assert_eq!(record(kernel, &intent.id).unwrap().phase, phase);
+            Ok(())
+        }
+
+        fn check(
+            &self,
+            kernel: &CoordinationKernel,
+            intent: &DomainIntent,
+            cut: TrialEffectCut<'_>,
+            _: Instant,
+        ) -> Result<(), DomainDiagnostic> {
+            let (id, phase) = match cut {
+                TrialEffectCut::Create => (&self.ids.create, DomainPhase::CreateUncertain),
+                TrialEffectCut::Release(_) => (&self.ids.release, DomainPhase::ReleaseUncertain),
+            };
+            assert_eq!(&kernel.operations().last().unwrap().id, id);
+            assert_eq!(record(kernel, &intent.id).unwrap().phase, phase);
+            self.checks.set(self.checks.get() + 1);
+            if matches!(cut, TrialEffectCut::Release(_)) && self.revoke_release {
+                return Err(issue(
+                    DomainPhaseDiagnostic::Publication,
+                    DomainCause::Authority,
+                ));
+            }
+            Ok(())
+        }
+    }
+
+    for revoke_release in [false, true] {
+        let root = Temp::new();
+        let (store, intent, ids) = stored(&root);
+        let mut manager = FakeManager::new(&root);
+        let endpoint = manager.endpoint.clone();
+        let cancel = AtomicBool::new(false);
+        let start = Instant::now();
+        let guard = Observer {
+            ids: &ids,
+            checks: Cell::new(0),
+            revoke_release,
+        };
+        let prepared = prepare_with_trial(
+            &store,
+            &key(),
+            &mut manager,
+            ExecutionRequest {
+                ids: &ids,
+                nonce: "public-nonce",
+                cancel: &cancel,
+                start,
+                end: start + Duration::from_secs(20),
+            },
+            || {
+                UnixListener::bind(endpoint)
+                    .map_err(|e| issue(DomainPhaseDiagnostic::Creation, DomainCause::Io(e.kind())))
+            },
+            Some(&guard),
+        );
+        assert_eq!(manager.created, 1);
+        let reported = release_with_trial(
+            &store,
+            &key(),
+            &mut manager,
+            prepared.prepared.expect("source fixture binds"),
+            &cancel,
+            Some(&guard),
+        );
+        manager.finish();
+        assert_eq!(guard.checks.get(), 2);
+        assert_eq!(reported.report.is_none(), revoke_release);
+        assert_eq!(reported.nonce.is_none(), revoke_release);
+        assert_eq!(
+            reported.diagnostic.as_ref().map(|value| value.cause),
+            revoke_release.then_some(DomainCause::Authority),
+        );
+        let replayed = store.load(&key(), Access::ReadOnly).unwrap();
+        let record = record(&replayed, &intent.id).unwrap();
+        assert_eq!(record.phase, DomainPhase::ReleaseUncertain);
+        if revoke_release {
+            assert_eq!(record.outcome, HistoricalOutcome::Unknown);
+        }
+        let repeated = run(&store, &mut manager, &ids, &cancel);
+        assert!(repeated.recovery_only);
+        assert_eq!(manager.created, 1);
+    }
+}

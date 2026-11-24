@@ -17,10 +17,7 @@ use std::{
     fs::File,
     io::{self, IoSliceMut, Read},
     mem::MaybeUninit,
-    os::{
-        fd::{AsFd, OwnedFd},
-        unix::fs::MetadataExt,
-    },
+    os::{fd::OwnedFd, unix::fs::MetadataExt},
     time::{Duration, Instant},
 };
 
@@ -205,7 +202,7 @@ impl TrustedChannel {
     fn wait(&self, flags: PollFlags, end: Instant) -> io::Result<()> {
         loop {
             let limit = Timespec::try_from(remaining(end)?).map_err(|_| denied())?;
-            let mut fds = [PollFd::new(self.socket.as_fd(), flags)];
+            let mut fds = [PollFd::new(&self.socket, flags)];
             match poll(&mut fds, Some(&limit)) {
                 Ok(0) => return Err(io::ErrorKind::TimedOut.into()),
                 Ok(_) if fds[0].revents() == flags => {
@@ -246,7 +243,7 @@ impl TrustedChannel {
     }
 
     pub(super) fn check_no_revocation(&self) -> io::Result<()> {
-        let mut fds = [PollFd::new(self.socket.as_fd(), PollFlags::IN)];
+        let mut fds = [PollFd::new(&self.socket, PollFlags::IN)];
         let zero = Timespec::try_from(Duration::ZERO).map_err(|_| denied())?;
         if poll(&mut fds, Some(&zero))? != 0 {
             // Extra messages, disconnect, or I/O errors revoke this case.
