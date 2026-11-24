@@ -8,6 +8,9 @@ use super::{
     bootstrap,
     cgroup::{Delegation, DelegationAuthorization, OwnedGroup},
     managed::ManagerRecoveryState,
+    normal_end::{
+        NormalEndClosureError, NormalEndContext, NormalEndCpuWitness, check_normal_end_cpu_closure,
+    },
     transport,
 };
 use crate::{
@@ -25,7 +28,7 @@ use cortex_core::{
     },
     temporal::SourceReference,
 };
-use cortex_evidence::program::CoordinationKernel;
+use cortex_evidence::program::{CoordinationKernel, Operation};
 use std::{
     fs::File,
     os::unix::{fs::MetadataExt, net::UnixStream},
@@ -107,6 +110,7 @@ pub struct ManagedExecutionDomain {
     scratch: Option<File>,
     observation: Option<ExecutionObservation>,
     end_observation: Option<ManagedEndObservation>,
+    end_started_at: Option<Instant>,
 }
 impl ManagedExecutionDomain {
     /// Read-only preparation of an explicitly authorized scope. None refuses
@@ -135,6 +139,7 @@ impl ManagedExecutionDomain {
             scratch: None,
             observation: None,
             end_observation: None,
+            end_started_at: None,
         })
     }
     /// Exact manager/policy/immutable source configuration for canonical intent.
@@ -164,6 +169,26 @@ impl ManagedExecutionDomain {
     pub fn end_observation(&self) -> Option<&ManagedEndObservation> {
         self.end_observation.as_ref()
     }
+    /// Screen an independently supplied normal-end Closed/Settle candidate.
+    /// The return is the rounded cumulative CPU amount, subject to the actual
+    /// journal's current admission and separate witness authentication. This
+    /// does not commit the operation or establish any physical terminal fact.
+    pub fn check_normal_end_cpu_closure(
+        &self,
+        kernel: &CoordinationKernel,
+        witness: Option<&NormalEndCpuWitness>,
+        operation: &Operation,
+    ) -> Result<u64, NormalEndClosureError> {
+        let missing = NormalEndClosureError::MissingContext;
+        let context = NormalEndContext {
+            intent: self.intent.as_ref().ok_or(missing.clone())?,
+            observation: self.end_observation.as_ref().ok_or(missing.clone())?,
+            start: self.end_started_at.ok_or(missing.clone())?,
+            end: self.original_end.ok_or(missing)?,
+        };
+        check_normal_end_cpu_closure(kernel, context, witness, operation)
+    }
+
     /// Read-only exact-incarnation recovery. No channel, unit, release, stop or
     /// resource settlement is reconstructed. Caller supplies the recorded end.
     pub fn inspect_recovery(
@@ -508,6 +533,7 @@ impl DomainManager for ManagedExecutionDomain {
         let transport_complete =
             streams.input_complete && streams.stdout_complete && streams.stderr_complete;
         let succeeded = successful_managed_end(&streams.completion, transport_complete, &readback);
+        self.end_started_at = Some(context.start);
         self.end_observation = Some(ManagedEndObservation {
             domain: context.intent.id.clone(),
             release: context.release.clone(),
@@ -559,7 +585,7 @@ impl DomainManager for ManagedExecutionDomain {
 
 // Delimit a process report. Neither a matching exit nor an empty readback
 // makes the observation a terminal closure or an accounting receipt.
-fn successful_managed_end(
+pub(super) fn successful_managed_end(
     completion: &ProcessCompletion,
     transport_complete: bool,
     readback: &ManagedEndReadback,
