@@ -16,7 +16,7 @@ use cortex_evidence::{
     unified::{Applicability, AssessmentId, AssessmentResult},
 };
 use cortex_storage::program_store::{ProgramProfile, Reconciliation};
-use std::time::SystemTime;
+use std::{io::Write, time::SystemTime};
 
 const REVIEWER: &str = "independent-fixture-reviewer";
 const LIMIT: usize = 512;
@@ -274,6 +274,49 @@ fn claim_integrator(store: &ProgramStore, key: &StoreKey) {
         .unwrap();
 }
 
+fn assert_read_only_program_projection(path: &Path, artifact: &CandidateRequirement) {
+    let mut child = process::Command::new(env!("CARGO_BIN_EXE_cortex"))
+        .args(["program", "inspect", "--store"])
+        .arg(path)
+        .args([
+            "--program",
+            "fixture-program",
+            "--key-fd",
+            "0",
+            "--max-bytes",
+            "8000000",
+            "--read-timeout-ms",
+            "10000",
+            "--json",
+        ])
+        .stdin(process::Stdio::piped())
+        .stdout(process::Stdio::piped())
+        .stderr(process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(&[0x38; 32]).unwrap();
+    let result = child.wait_with_output().unwrap();
+    assert!(
+        result.status.success(),
+        "{:?}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let inspected: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    let decisions = inspected["support_decisions"].as_array().unwrap();
+    let protected = decisions
+        .iter()
+        .find(|d| d["operation"] == "release-typed-BF")
+        .unwrap();
+    assert_eq!(
+        protected["witnesses"][0]["artifact_candidate"],
+        artifact.commit().as_str()
+    );
+    assert_eq!(
+        protected["witnesses"][0]["observation_scope"],
+        "material-evidence-BF"
+    );
+}
+
 #[test]
 fn protected_material_requires_exact_approved_paths_and_separate_current_judgment() {
     let root = OwnedTestRoot(
@@ -504,6 +547,11 @@ fn protected_material_requires_exact_approved_paths_and_separate_current_judgmen
                 duplicate: true,
                 ..receipt
             })
+        );
+        assert_read_only_program_projection(&path, &left);
+        assert_eq!(
+            opened.load(&key, Access::ReadOnly).unwrap().revision(),
+            replayed.revision()
         );
         let MaterialSubject::Integration {
             scope,

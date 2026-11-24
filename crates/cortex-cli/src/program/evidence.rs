@@ -53,7 +53,8 @@ pub(super) fn project(kernel: &CoordinationKernel, value: &mut Value) {
                     return None;
                 }
                 match &operation.command {
-                    Command::Release(release) => Some(release),
+                    Command::Release(release) => Some(release.as_ref()),
+                    Command::ReleaseMaterial(material) => Some(&material.release),
                     _ => None,
                 }
             })
