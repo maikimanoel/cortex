@@ -298,20 +298,50 @@ fn protected_material_requires_exact_approved_paths_and_separate_current_judgmen
         ],
         None,
     );
+    let alias = candidate(
+        &root.0.join("E-aliased"),
+        &[("part.txt", b"2\n"), ("spare.txt", b"2\n")],
+        None,
+    );
+    assert_eq!(left.commit(), alias.commit());
+    assert_ne!(left.repository().root(), alias.repository().root());
+    let aliased_integration = candidate(
+        &root.0.join("F-aliased"),
+        &[
+            ("left.txt", b"2\n"),
+            ("right.txt", b"2\n"),
+            ("summary.txt", b"sum:5\n"),
+        ],
+        None,
+    );
+    let changed_mode = candidate(
+        &root.0.join("F-changed-mode"),
+        &[
+            ("left.txt", b"2\n"),
+            ("right.txt", b"3\n"),
+            ("summary.txt", b"sum:5\n"),
+        ],
+        Some("right.txt"),
+    );
     let key = StoreKey::new(&[0x38; 32]).unwrap();
     let limits = ReadLimits::new(8_000_000, Duration::from_secs(10)).unwrap();
-    for legacy in [true, false] {
-        let path = root.0.join(if legacy { "legacy" } else { "protected" });
+    for (name, worker, integrated, expected_b) in [
+        ("legacy", &right, &integrated, &b"3\n"[..]),
+        ("alias", &alias, &aliased_integration, &b"2\n"[..]),
+        ("wrong-mode", &right, &changed_mode, &b"3\n"[..]),
+        ("protected", &right, &integrated, &b"3\n"[..]),
+    ] {
+        let path = root.0.join(name);
         let store = ProgramStore::create_protected_material(
             &path,
             &key,
-            definition(&left, &right, &integrated),
+            definition(&left, worker, integrated),
             limits,
         )
         .unwrap();
         assert_eq!(store.profile(), ProgramProfile::ProtectedMaterialV5);
-        let a = release_bytes(&store, &key, "BF", "left.txt", b"2\n", legacy);
-        let b = release_bytes(&store, &key, "EF", "right.txt", b"3\n", false);
+        let a = release_bytes(&store, &key, "BF", "left.txt", b"2\n", name == "legacy");
+        let b = release_bytes(&store, &key, "EF", "right.txt", expected_b, false);
         claim_integrator(&store, &key);
         let part = SourcePath::new(b"part.txt").unwrap();
         let substitute = SourcePath::new(b"spare.txt").unwrap();
@@ -352,14 +382,15 @@ fn protected_material_requires_exact_approved_paths_and_separate_current_judgmen
             observation: ObservationId::new(&format!("integration-evidence-{suffix}"), 1).unwrap(),
             review: fixture::grant(1, actor),
         };
-        if legacy {
-            assert!(before.accepted_material(&a).is_err());
+        if name != "protected" {
+            assert_eq!(before.accepted_material(&a).is_err(), name == "legacy");
+            assert!(before.accepted_material(&b).is_ok());
             assert!(matches!(
                 observe_protected_integration(
                     &store,
                     &key,
                     request(&part, b"sum:5\n", revision),
-                    observation("legacy", REVIEWER)
+                    observation(name, REVIEWER)
                 ),
                 Err(IntegrationError::Release)
             ));
@@ -441,6 +472,25 @@ fn protected_material_requires_exact_approved_paths_and_separate_current_judgmen
             accept_protected_integration(&store, &key, acceptance("author-F", after_pass)),
             Err(IntegrationError::Admission { .. })
         ));
+        let dirty = integrated.repository().root().join("unreviewed.txt");
+        fs::write(&dirty, b"cooperative fixture drift").unwrap();
+        assert!(matches!(
+            accept_protected_integration(&store, &key, acceptance(REVIEWER, after_pass)),
+            Err(IntegrationError::Workspace(_))
+        ));
+        fs::remove_file(&dirty).unwrap();
+        let mut changed_profile = acceptance(REVIEWER, after_pass);
+        changed_profile.profile = cortex_evidence::unified::VerificationProfile::new(
+            fixture::profile().provenance().clone(),
+            "2",
+            "synthetic-test",
+            &[("fixture", "1")],
+        )
+        .unwrap();
+        assert!(matches!(
+            accept_protected_integration(&store, &key, changed_profile),
+            Err(IntegrationError::Admission { .. })
+        ));
         let (accept, receipt) =
             accept_protected_integration(&store, &key, acceptance(REVIEWER, after_pass)).unwrap();
         drop(store);
@@ -463,7 +513,7 @@ fn protected_material_requires_exact_approved_paths_and_separate_current_judgmen
         else {
             unreachable!()
         };
-        assert_eq!(scope.context().contract().candidate(), &integrated);
+        assert_eq!(scope.context().contract().candidate(), integrated);
         assert_eq!(retained.path(), &output);
         let withdrawal = record(
             &opened,
