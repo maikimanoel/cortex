@@ -13,8 +13,9 @@ pub use codex_cli::{
 pub use integration::{
     AcceptedMaterialObservation, IntegrationConstituent, IntegrationError, IntegrationInspection,
     IntegrationObservation, IntegrationObservationRequest, IntegrationOracle, IntegrationRequest,
-    MaterialReleaseRequest, ProtectedIntegrationRequest, inspect_integrated_candidate,
-    observe_integrated_candidate, observe_protected_integration, observe_release_material,
+    MaterialReleaseRequest, ProtectedAcceptanceRequest, ProtectedIntegrationRequest,
+    accept_protected_integration, inspect_integrated_candidate, observe_integrated_candidate,
+    observe_protected_integration, observe_release_material,
 };
 pub use workspace::{
     FixtureWorkspace, FixtureWorkspaceRequest, WorkspaceError, WorkspaceFixtureRun,
