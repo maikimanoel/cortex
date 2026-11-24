@@ -5,10 +5,14 @@ use crate::inspect_candidate;
 use cortex_core::parallel::{NotificationId, PredicateId};
 use cortex_evidence::{
     ExecutionObservation,
-    program::material::{
-        MaterialFile, MaterialMapping, MaterialMode, MaterialObservation, MaterialSubject,
+    program::{
+        Examination,
+        material::{
+            IntegrationAcceptance, MaterialFile, MaterialMapping, MaterialMode,
+            MaterialObservation, MaterialSubject,
+        },
     },
-    readiness::{EdgeEvidenceContract, EdgeScopeSnapshot},
+    readiness::{EdgeEvidenceContract, EdgeScopeSnapshot, EvidenceReference},
     unified::{OracleConclusion, OracleEvaluation, VerificationOutcome},
 };
 use cortex_harness::artifact::artifact_digest;
@@ -207,6 +211,71 @@ pub fn observe_protected_integration(
     };
     drop(kernel);
     admit_material_observation(store, key, operation, satisfied)
+}
+
+/// Explicit separately authorized decision on a current assessed integration observation.
+pub struct ProtectedAcceptanceRequest<'a> {
+    /// Integration task selected by the owner.
+    pub task: &'a TaskId,
+    /// Exact journal predecessor to protect against intervening review or invalidation.
+    pub expected_revision: u64,
+    /// Exact typed observation and terminal assessment to consume.
+    pub evidence: EvidenceReference,
+    /// Exact verification profile expected by the approver.
+    pub profile: VerificationProfile,
+    /// New Git candidate capture identity for this acceptance cut.
+    pub candidate_observation: ObservationId,
+    /// Fresh approval operation identity.
+    pub operation: OperationId,
+    /// Explicit scoped review grant and its approval basis.
+    pub review: CoordinationGrant,
+}
+
+/// Reobserve Git candidate correspondence and submit a separate protected decision.
+///
+/// ProgramStore guards the exact predecessor. The canonical reducer checks the
+/// typed observation, current conjunctive releases, semantic PASS, roles and scope.
+/// The retained operation preserves the exact attempted input for reconciliation.
+pub fn accept_protected_integration(
+    store: &ProgramStore,
+    key: &StoreKey,
+    request: ProtectedAcceptanceRequest<'_>,
+) -> Result<(Operation, AdmissionReceipt), IntegrationError> {
+    let kernel = current_material_kernel(store, key, request.expected_revision)?;
+    let scope = kernel
+        .state()
+        .readiness()
+        .scope(request.task)
+        .map_err(|_| IntegrationError::Context)?;
+    let context = scope.context();
+    let captured = check_workspace(context, request.candidate_observation)
+        .map_err(IntegrationError::Workspace)?;
+    let examination = Examination {
+        observation: request.evidence.observation().clone(),
+        contract: context.contract().clone(),
+        candidate: Some(captured.observation().clone()),
+        profile: Some(request.profile),
+    };
+    let approval = request.review.basis.clone();
+    let operation = Operation {
+        id: request.operation,
+        expected: request.expected_revision,
+        grant: request.review,
+        command: Command::AcceptIntegration(Box::new(IntegrationAcceptance {
+            observation: request.evidence,
+            scope: Box::new(scope),
+            approval,
+            examination,
+        })),
+    };
+    drop(kernel);
+    match store.admit(key, operation.clone()) {
+        Ok(receipt) => Ok((operation, receipt)),
+        Err(failure) => Err(IntegrationError::Admission {
+            operation: Box::new(operation),
+            failure,
+        }),
+    }
 }
 
 fn current_material_kernel(

@@ -2,8 +2,9 @@
 
 mod protected;
 pub use protected::{
-    AcceptedMaterialObservation, MaterialReleaseRequest, ProtectedIntegrationRequest,
-    observe_protected_integration, observe_release_material,
+    AcceptedMaterialObservation, MaterialReleaseRequest, ProtectedAcceptanceRequest,
+    ProtectedIntegrationRequest, accept_protected_integration, observe_protected_integration,
+    observe_release_material,
 };
 
 use super::{ExecutionError, check_workspace};

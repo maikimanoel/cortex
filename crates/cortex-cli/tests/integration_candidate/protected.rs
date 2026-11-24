@@ -2,14 +2,15 @@
 
 use super::*;
 use cortex_cli::program_execution::{
-    AcceptedMaterialObservation, MaterialReleaseRequest, ProtectedIntegrationRequest,
-    observe_protected_integration, observe_release_material,
+    AcceptedMaterialObservation, MaterialReleaseRequest, ProtectedAcceptanceRequest,
+    ProtectedIntegrationRequest, accept_protected_integration, observe_protected_integration,
+    observe_release_material,
 };
 use cortex_core::temporal::SourceReference;
 use cortex_evidence::{
     program::{
         AssessmentInput, Examination, Operation, ReleaseInput,
-        material::{IntegrationAcceptance, MaterialMode, MaterialRelease, MaterialSubject},
+        material::{MaterialMode, MaterialRelease, MaterialSubject},
     },
     readiness::{EvidenceReference, WitnessBinding},
     unified::{Applicability, AssessmentId, AssessmentResult},
@@ -416,23 +417,28 @@ fn protected_material_requires_exact_approved_paths_and_separate_current_judgmen
         assert!(good.satisfied);
         let (self_review, _, _) = assess_operation(&store, &key, &good, "author-F", "self-assess");
         assert!(store.admit(&key, self_review).is_err());
-        let (pass, witness, assessment) =
-            assess_operation(&store, &key, &good, REVIEWER, "actual-pass");
+        let (pass, witness, _) = assess_operation(&store, &key, &good, REVIEWER, "actual-pass");
         store.admit(&key, pass).unwrap();
-        let scope = before.state().readiness().scope(&f).unwrap();
-        let accept = record(
-            &store,
-            &key,
-            "accept-integrated-candidate",
-            REVIEWER,
-            Command::AcceptIntegration(Box::new(IntegrationAcceptance {
-                observation: witness.clone(),
-                scope: Box::new(scope),
-                approval: fixture::grant(1, REVIEWER).basis,
-                examination: assessment,
-            })),
-        );
-        let receipt = store.admit(&key, accept.clone()).unwrap();
+        let after_pass = store.load(&key, Access::ReadOnly).unwrap().revision();
+        let acceptance = |actor, expected_revision| ProtectedAcceptanceRequest {
+            task: &f,
+            expected_revision,
+            evidence: witness.clone(),
+            profile: fixture::profile(),
+            candidate_observation: ObservationId::new("F", 5).unwrap(),
+            operation: OperationId::new("accept-integrated-candidate").unwrap(),
+            review: fixture::grant(1, actor),
+        };
+        assert!(matches!(
+            accept_protected_integration(&store, &key, acceptance(REVIEWER, after_pass - 1)),
+            Err(IntegrationError::Context)
+        ));
+        assert!(matches!(
+            accept_protected_integration(&store, &key, acceptance("author-F", after_pass)),
+            Err(IntegrationError::Admission { .. })
+        ));
+        let (accept, receipt) =
+            accept_protected_integration(&store, &key, acceptance(REVIEWER, after_pass)).unwrap();
         drop(store);
         let opened = ProgramStore::open(&path, &key, Access::Recover, limits).unwrap();
         let replayed = opened.load(&key, Access::ReadOnly).unwrap();
