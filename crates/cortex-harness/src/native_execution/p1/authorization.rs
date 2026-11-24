@@ -1,4 +1,5 @@
 //! Exact, finite local trial admission over the selected protected trust path.
+use super::super::accounting::clock_namespace;
 use super::{
     P1Refusal, RawCopyP1Binding, live_budget,
     trust::{Role, TrialTrust, TrustedChannel},
@@ -45,7 +46,9 @@ pub struct RawCopyP1Authority {
 pub struct RawCopyP1AuthorityScope {
     /// Exact Git tree reviewed independently for this trial.
     pub tree: CandidateId,
-    /// Original Linux CLOCK_MONOTONIC deadline in microseconds on this boot.
+    /// Exact time-namespace device and inode independently checked by the peers.
+    pub clock_namespace: (u64, u64),
+    /// Original Linux CLOCK_MONOTONIC deadline in that namespace, in microseconds.
     pub expires_before_micros: u64,
     /// Exact independent outer containment context to be checked by both peers.
     pub containment_sha256: [u8; 32],
@@ -61,6 +64,7 @@ pub(super) struct AuthorizedTrial<'a> {
     binding: &'a RawCopyP1Binding<'a>,
     cancel: &'a AtomicBool,
     expires_before_micros: u64,
+    clock_namespace: (u64, u64),
     context: [u8; 32],
     pending: Cell<Option<[u8; 32]>>,
 }
@@ -89,6 +93,14 @@ fn reference(value: &SourceReference) -> Value {
         SourceOrigin::ObservationReference(id) => json!(["observation", id.scope(), id.sequence()]),
     };
     json!([origin, value.source(), value.version()])
+}
+
+/// Observe the caller's Linux clock namespace device and inode.
+///
+/// Both separate peers must check their own namespace before relying on the
+/// shared absolute deadline. This is metadata, without authority or execution.
+pub fn raw_copy_clock_namespace() -> Option<(u64, u64)> {
+    clock_namespace()
 }
 
 /// Derive the pre-effect correspondence digest used by both peers.
@@ -140,6 +152,7 @@ pub fn raw_copy_authority_fingerprint(
         ],
         reference(binding.approval),
         reference(binding.observer),
+        scope.clock_namespace,
         scope.expires_before_micros,
         scope.containment_sha256,
         scope.stop_plan_sha256,
@@ -189,6 +202,7 @@ impl<'a> AuthorizedTrial<'a> {
             || scope.tree.as_str().len() != binding.candidate.commit().as_str().len()
             || scope.containment_sha256 == [0; 32]
             || scope.stop_plan_sha256 == [0; 32]
+            || clock_namespace() != Some(scope.clock_namespace)
         {
             return Err(P1Refusal::Correspondence);
         }
@@ -209,6 +223,7 @@ impl<'a> AuthorizedTrial<'a> {
             binding,
             cancel,
             expires_before_micros,
+            clock_namespace: scope.clock_namespace,
             context,
             pending: Cell::new(None),
         })
@@ -240,12 +255,7 @@ impl<'a> AuthorizedTrial<'a> {
     }
 
     pub(super) fn check_live(&self, end: Instant) -> Result<(), DomainDiagnostic> {
-        live_budget(end, self.cancel).map_err(|_| failed(DomainCause::Deadline))?;
-        if end > self.binding.deadline
-            || now_micros().is_none_or(|now| now >= self.expires_before_micros)
-        {
-            return Err(failed(DomainCause::Deadline));
-        }
+        self.check_clock(end)?;
         self.trust
             .check_current()
             .map_err(|_| failed(DomainCause::Authority))?;
@@ -255,6 +265,17 @@ impl<'a> AuthorizedTrial<'a> {
         self.observer
             .check_no_revocation()
             .map_err(|_| failed(DomainCause::Authority))?;
+        self.check_clock(end)
+    }
+
+    fn check_clock(&self, end: Instant) -> Result<(), DomainDiagnostic> {
+        live_budget(end, self.cancel).map_err(|_| failed(DomainCause::Deadline))?;
+        if end > self.binding.deadline
+            || now_micros().is_none_or(|now| now >= self.expires_before_micros)
+            || clock_namespace() != Some(self.clock_namespace)
+        {
+            return Err(failed(DomainCause::Deadline));
+        }
         Ok(())
     }
 
