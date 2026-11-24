@@ -343,25 +343,102 @@ fn canonical_turn_selects_and_dispatches_after_a_durable_edge_on_reopen() {
     assert_eq!(fs::read(c.output.join("B.consumed")).unwrap(), ARTIFACT);
     let product = fs::read(c.output.join("B")).unwrap();
     assert_eq!(product, CONSUMED);
+    // The sender saw success. The recovering controller below receives no
+    // RunResult, cursor or generated append input from that delivery.
+    drop(second);
+    let original_store = store.id();
+    drop(store);
+    let store = ProgramStore::open(&c.state, &c.key, Access::ReadOnly, read_limits()).unwrap();
+    let recovered = load(&c, &store);
+    assert_eq!(store.id(), original_store);
+    let work = &work_set[1];
+    let terminal = recovered
+        .operations()
+        .iter()
+        .find(|operation| operation.id == work.captures.finished_operation)
+        .expect("the preassigned terminal operation must survive caller delivery loss");
+    assert!(terminal.grant == work.authority);
+    let Input::SupervisedEffect(event) = &terminal.command else {
+        panic!("expected a canonical process observation");
+    };
+    let EffectEvent::ProcessObserved {
+        effect,
+        scope,
+        observation,
+        ..
+    } = event.as_ref()
+    else {
+        panic!("expected a canonical process observation");
+    };
+    assert_eq!(effect, &work.effect);
+    assert!(scope == &work.grant.scope);
+    assert_eq!(observation.id, work.captures.finished_observation);
+    let record = recovered
+        .fixture_effects()
+        .effects()
+        .iter()
+        .find(|entry| entry.intent.id == work.effect)
+        .unwrap();
+    assert!(record.pending());
+    assert!(record.reconciliation.is_none());
+    assert!(record.process_observations.last() == Some(observation));
+    let spec = record.process_spec.as_ref().unwrap();
+    assert!(observation.quiescent(spec));
+    assert_eq!(observation.outcome(spec), Some(EffectOutcome::Succeeded));
+    let process = observation.process.as_ref().unwrap();
+    assert!(!Path::new(&format!("/proc/{}", process.pid)).exists());
+    let receipt = cortex_storage::program_store::AdmissionReceipt {
+        store: original_store,
+        ordinal: terminal.expected + 1,
+        duplicate: true,
+    };
+    assert_eq!(
+        store
+            .reconcile(&c.key, recovered.initial(), terminal, Access::ReadOnly)
+            .unwrap(),
+        cortex_storage::program_store::Reconciliation::Present(receipt)
+    );
+    let mut conflict = terminal.clone();
+    conflict.expected -= 1;
+    assert_eq!(
+        store
+            .reconcile(&c.key, recovered.initial(), &conflict, Access::ReadOnly)
+            .unwrap(),
+        cortex_storage::program_store::Reconciliation::Conflict
+    );
+    let count = recovered.revision();
+    let store_before = snapshot(&c.state);
+    let repeated = run_fixture_turn(&store, &c.key, &work_set, None, deadline, &cancel).unwrap();
+    assert!(repeated.progress.is_none() && repeated.receipts.is_empty());
+    assert_eq!(repeated.cursor.store_id(), original_store);
+    assert!(
+        repeated
+            .held
+            .iter()
+            .any(|hold| matches!(hold, FixtureHold::Retained(task) if task == &work.proposal.task))
+    );
+    assert_eq!(load(&c, &store).revision(), count);
+    assert_eq!(snapshot(&c.state), store_before);
+    assert_eq!(
+        fs::read(c.output.join("launched-B")).unwrap(),
+        b"launched\n"
+    );
     let independent_b = observe(&c, &store, "B", &product, CONSUMED, None);
     assess(&c, &store, &independent_b, "B");
-    let count = load(&c, &store).revision();
-    let repeated = run_fixture_turn(
-        &store,
-        &c.key,
-        &work_set,
-        Some(&second.cursor),
-        deadline,
-        &cancel,
-    )
-    .unwrap();
-    assert!(repeated.progress.is_none());
-    assert_eq!(load(&c, &store).revision(), count);
     let idle = run_fixture_turn(
         &store,
         &c.key,
         &work_set,
         Some(&repeated.cursor),
+        deadline,
+        &cancel,
+    )
+    .unwrap();
+    let idle = run_fixture_turn(
+        &store,
+        &c.key,
+        &work_set,
+        Some(&idle.cursor),
         deadline,
         &cancel,
     )
