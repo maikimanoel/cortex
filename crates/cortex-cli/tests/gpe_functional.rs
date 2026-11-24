@@ -1329,9 +1329,7 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
     let captured = capture_fixture_output(
         &store,
         &c.key,
-        output(Some(
-            "a1a410bd6438bb73e09ee3220cf8a87470d1d6401757f68be666fd8399e78df0",
-        )),
+        output("a1a410bd6438bb73e09ee3220cf8a87470d1d6401757f68be666fd8399e78df0"),
     )
     .unwrap();
     assert_eq!(captured.revision, k.revision());
@@ -1341,7 +1339,7 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
     );
     let captured = captured.content;
     assert!(matches!(
-        capture_fixture_output(&store, &c.key, output(Some("different-output-digest"))),
+        capture_fixture_output(&store, &c.key, output("different-output-digest")),
         Err(ExecutionError::ArtifactDigest)
     ));
     assert_eq!(captured.bytes(), ARTIFACT);
