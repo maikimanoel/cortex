@@ -77,10 +77,11 @@ pub fn observe_release_material(
 ) -> Result<AcceptedMaterialObservation, IntegrationError> {
     let kernel = current_material_kernel(store, key, request.expected_revision)?;
     let state = kernel.state();
-    if &EdgeScopeSnapshot::capture(state.readiness(), request.contract.scope().edge())
-        .map_err(|_| IntegrationError::Context)?
-        != request.contract.scope()
-    {
+    let declared = request.contract.scope();
+    let current = EdgeScopeSnapshot::capture(state.readiness(), declared.edge())
+        .and_then(|scope| scope.with_historical_cursor(declared.notification_cursor()))
+        .map_err(|_| IntegrationError::Context)?;
+    if &current != declared {
         return Err(IntegrationError::Context);
     }
     let predicate = request
@@ -164,10 +165,23 @@ pub fn observe_protected_integration(
     {
         return Err(IntegrationError::Context);
     }
-    for selected in &selection.constituents {
-        let (release, mapping) = kernel
-            .accepted_material(selected.release)
-            .map_err(|_| IntegrationError::Release)?;
+    let retained_left = kernel
+        .accepted_material(left.release)
+        .map_err(|_| IntegrationError::Release)?;
+    let retained_right = kernel
+        .accepted_material(right.release)
+        .map_err(|_| IntegrationError::Release)?;
+    if retained_left.0.contract.artifact_requirement().commit()
+        == retained_right.0.contract.artifact_requirement().commit()
+        && retained_left.1.source.path() == retained_right.1.source.path()
+    {
+        return Err(IntegrationError::Release);
+    }
+    for (selected, (release, mapping)) in selection
+        .constituents
+        .iter()
+        .zip([retained_left, retained_right])
+    {
         let worker = release.contract.artifact_requirement();
         if release.contract.scope().consumer() != &scope
             || worker.commit() == candidate.commit()
