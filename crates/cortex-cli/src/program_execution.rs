@@ -5,8 +5,13 @@
 //! workspace. This is not a new containment backend or an acceptance authority.
 
 mod codex_cli;
+mod integration;
 mod workspace;
 pub use codex_cli::{CodexCliHold, CodexCliInspection, inspect_codex_cli_invocation};
+pub use integration::{
+    IntegrationConstituent, IntegrationError, IntegrationInspection, IntegrationOracle,
+    IntegrationRequest, inspect_integrated_candidate,
+};
 pub use workspace::{
     FixtureWorkspace, FixtureWorkspaceRequest, WorkspaceError, WorkspaceFixtureRun,
     prepare_fixture_workspace, run_workspace_fixture,

@@ -375,6 +375,20 @@ pub(crate) fn committed_blob(
     commit: &cortex_core::CandidateId,
     path: &cortex_core::knowledge::SourcePath,
 ) -> Result<Vec<u8>, InspectionError> {
+    committed_blob_bounded(
+        repository,
+        commit,
+        path,
+        cortex_core::knowledge::MAX_SOURCE_BYTES,
+    )
+}
+
+pub(crate) fn committed_blob_bounded(
+    repository: &RepositoryIdentity,
+    commit: &cortex_core::CandidateId,
+    path: &cortex_core::knowledge::SourcePath,
+    max_bytes: usize,
+) -> Result<Vec<u8>, InspectionError> {
     let mut git = Git {
         directory: repository.root().to_owned(),
         deadline: Instant::now() + Duration::from_secs(15),
@@ -424,7 +438,7 @@ pub(crate) fn committed_blob(
         .ok()
         .and_then(|s| s.trim_end_matches('\n').parse::<usize>().ok())
         .ok_or(InspectionError::Malformed)?;
-    if size > cortex_core::knowledge::MAX_SOURCE_BYTES {
+    if size > max_bytes.min(cortex_core::knowledge::MAX_SOURCE_BYTES) {
         return Err(InspectionError::Limit("knowledge source bytes"));
     }
     let bytes = git.output(&["cat-file", "blob", oid], "committed knowledge source")?;
