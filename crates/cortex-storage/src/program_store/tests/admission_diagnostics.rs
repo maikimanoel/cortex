@@ -724,7 +724,6 @@ fn fixture_reservation_readback_refuses_conflict_and_later_disposition() {
 #[test]
 fn native_sql_insert_and_commit_failures_preserve_fixture_effect_boundaries() {
     use cortex_core::program::supervision::{ProcessCompletion, Quiescence};
-    use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
 
     #[derive(Clone, Copy)]
     enum Cut {
@@ -776,47 +775,14 @@ fn native_sql_insert_and_commit_failures_preserve_fixture_effect_boundaries() {
                 .admit_diagnostic_observed(
                     &key(),
                     input.clone(),
-                    |stage, connection| {
-                        let selected = match cut {
-                            Cut::Commit => Stage::BeforeCommit,
-                            _ => Stage::BeforeWrite,
-                        };
-                        if stage == selected {
-                            connection
-                                .authorizer(Some(move |context: AuthContext<'_>| {
-                                    let denied = match (cut, context.action) {
-                                        (
-                                            Cut::Insert | Cut::InsertAndRollback,
-                                            AuthAction::Insert { table_name },
-                                        ) => table_name == "program_inputs",
-                                        (
-                                            Cut::InsertAndRollback,
-                                            AuthAction::Transaction {
-                                                operation: TransactionOperation::Rollback,
-                                            },
-                                        )
-                                        | (
-                                            Cut::Commit,
-                                            AuthAction::Transaction {
-                                                // In the locked rusqlite version COMMIT is Unknown.
-                                                // The callback is installed only at BeforeCommit.
-                                                operation: TransactionOperation::Unknown,
-                                            },
-                                        ) => true,
-                                        _ => false,
-                                    };
-                                    if denied {
-                                        Authorization::Deny
-                                    } else {
-                                        Authorization::Allow
-                                    }
-                                }))
-                                .unwrap();
-                        }
-                    },
+                    |_, _| {},
                     |_| panic!("failed or uncertain SQL operation called its effect callback"),
                     &mut diagnostics,
-                    None,
+                    Some(match cut {
+                        Cut::Insert => AdmissionFault::InsertDenied,
+                        Cut::InsertAndRollback => AdmissionFault::InsertAndRollbackDenied,
+                        Cut::Commit => AdmissionFault::CommitDenied,
+                    }),
                 )
                 .unwrap_err();
             let expected = match cut {

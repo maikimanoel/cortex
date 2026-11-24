@@ -811,21 +811,38 @@ impl ProgramStore {
         let mut conn = history_store::connect(&self.location, key, Access::Recover)
             .map_err(|error| diagnostic_rejection(diagnostics, error.into()))?;
         #[cfg(test)]
-        if fault == Some(AdmissionFault::RollbackDenied) {
+        if let Some(fault) = fault
+            && !matches!(fault, AdmissionFault::Deadline(_))
+        {
             use rusqlite::hooks::{AuthAction, Authorization, TransactionOperation};
-            conn.authorizer(Some(|context: rusqlite::hooks::AuthContext<'_>| {
-                if matches!(
-                    context.action,
-                    AuthAction::Transaction {
-                        operation: TransactionOperation::Rollback
-                    }
-                ) {
+            conn.authorizer(Some(move |context: rusqlite::hooks::AuthContext<'_>| {
+                let denied = matches!(
+                    (fault, context.action),
+                    (
+                        AdmissionFault::InsertDenied | AdmissionFault::InsertAndRollbackDenied,
+                        AuthAction::Insert {
+                            table_name: "program_inputs"
+                        }
+                    ) | (
+                        AdmissionFault::RollbackDenied | AdmissionFault::InsertAndRollbackDenied,
+                        AuthAction::Transaction {
+                            operation: TransactionOperation::Rollback
+                        }
+                    ) | (
+                        AdmissionFault::CommitDenied,
+                        // Locked rusqlite maps the literal SQL COMMIT to Unknown.
+                        AuthAction::Transaction {
+                            operation: TransactionOperation::Unknown
+                        }
+                    )
+                );
+                if denied {
                     Authorization::Deny
                 } else {
                     Authorization::Allow
                 }
             }))
-            .expect("install controlled rollback denial");
+            .expect("install controlled statement denial");
         }
         diagnostics.record(AdmissionStage::BeginTransaction);
         let tx = conn
@@ -1079,6 +1096,9 @@ impl ProgramStore {
 enum AdmissionFault {
     Deadline(Stage),
     RollbackDenied,
+    InsertDenied,
+    InsertAndRollbackDenied,
+    CommitDenied,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Stage {
