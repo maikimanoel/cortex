@@ -578,6 +578,8 @@ fn executor_preparation_refuses_a_preparable_prefix_during_reconstruction() {
 #[test]
 fn codex_cli_lowers_exact_input_but_retains_the_live_and_executable_holds() {
     use cortex_cli::program_execution::{CodexCliHold, inspect_codex_cli_invocation};
+    use cortex_harness::native_execution::{FileRole, FileSpec};
+    use std::{fs, io::Write, os::unix::fs::DirBuilderExt};
     let (kernel, scope) = setup();
     let identity = ExecutorIdentity::new(
         "codex-cli",
@@ -623,6 +625,59 @@ fn codex_cli_lowers_exact_input_but_retains_the_live_and_executable_holds() {
     let shape = lower(900_000).unwrap();
     assert!(shape.executable_hold().is_none());
     assert_eq!(shape.live_hold(), CodexCliHold::LiveProviderUnavailable);
+    // The controlled preparation fixture compares the actual sealed bytes.
+    // Text stands in for the executable bytes and is never run.
+    let root = std::env::temp_dir()
+        .canonicalize()
+        .unwrap()
+        .join(format!("cortex-codex-pin-test-{}", std::process::id()));
+    fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
+    let source_path = root.join("selected.bin");
+    let supplied = b"fixture sealed bytes";
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&source_path)
+        .unwrap()
+        .write_all(supplied)
+        .unwrap();
+    let mut spec = FileSpec {
+        source: source_path.clone(),
+        destination: "/test-executor".into(),
+        sha256: [
+            0xa0, 0x3b, 0xbf, 0xba, 0xd9, 0x13, 0x86, 0x03, 0xd4, 0x4c, 0xf9, 0x5b, 0x6c, 0x87,
+            0x0e, 0xfb, 0x2a, 0x1f, 0x5a, 0xe3, 0x01, 0x03, 0x32, 0x55, 0x77, 0xe4, 0xa8, 0xb9,
+            0xfa, 0x23, 0x7c, 0x8f,
+        ],
+        max_bytes: supplied.len() as u64,
+        role: FileRole::Executable,
+    };
+    let size = supplied.len() as u64;
+    let compatible = lower(size).unwrap();
+    assert!(matches!(
+        lower(320_575_976).unwrap().pin_executable(&spec),
+        Err(CodexCliHold::ExecutableBytes)
+    ));
+    assert!(matches!(
+        lower(size - 1).unwrap().pin_executable(&spec),
+        Err(CodexCliHold::ExecutableIntegrity(_))
+    ));
+    let pin = compatible.pin_executable(&spec).unwrap();
+    assert_eq!(pin.len(), size);
+    spec.max_bytes = 64 * 1024 * 1024 + 1;
+    assert!(matches!(
+        compatible.pin_executable(&spec),
+        Err(CodexCliHold::ExecutableBytes)
+    ));
+    spec.max_bytes = size;
+    fs::write(&source_path, b"changed sealed bytes").unwrap();
+    assert!(matches!(
+        compatible.pin_executable(&spec),
+        Err(CodexCliHold::ExecutableIntegrity(_))
+    ));
+    pin.verify().unwrap();
+    fs::remove_dir_all(&root).unwrap();
+
     let changed_identity = ExecutorIdentity::new(
         "codex-cli",
         "0.167.0",

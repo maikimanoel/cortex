@@ -19,7 +19,7 @@ use cortex_storage::{
     history_store::{Access, StoreKey},
     program_store::{ProgramStore, ReadLimits},
 };
-use fixture::{operation, prepare_release, rev, source, task};
+use fixture::{operation, prepare_release, rev, task};
 use std::{
     fs,
     os::unix::fs::DirBuilderExt,
