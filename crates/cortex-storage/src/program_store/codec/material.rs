@@ -198,11 +198,25 @@ mod tests {
         );
         let parsed = parsed(GOLDEN, 1000).unwrap();
         assert!(MaterialFile::read(&parsed).unwrap() == file);
+        assert!(
+            MaterialFile::read(&json!([
+                b"a/b",
+                "100755",
+                cortex_core::knowledge::MAX_SOURCE_BYTES,
+                digest
+            ]))
+            .is_ok()
+        );
         for invalid in [
             json!([b"a/b", "120000", 3, digest]),
             json!([b"../b", "100755", 3, digest]),
             json!([b"a/b", "100755", 3, vec![0; 31]]),
-            json!([b"a/b", "100755", 64 * 1024 * 1024 + 1, digest]),
+            json!([
+                b"a/b",
+                "100755",
+                cortex_core::knowledge::MAX_SOURCE_BYTES + 1,
+                digest
+            ]),
         ] {
             assert!(MaterialFile::read(&invalid).is_err());
         }

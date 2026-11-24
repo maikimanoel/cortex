@@ -30,12 +30,13 @@ fn material_release(store: &ProgramStore) -> Operation {
     let reviewer = grant(1, "material-reviewer");
     let approval =
         SourceReference::operator_reported(reviewer.actor.as_str(), "scoped review", "1").unwrap();
+    let selected_report = NotificationId::new("material-ab-second-report").unwrap();
     release.review = Notification::new(
         release.review.id().clone(),
         release.review.graph().clone(),
         Event::Review(Box::new(EdgeReview::new(
             review.edge().clone(),
-            review.report().clone(),
+            selected_report.clone(),
             review.scopes()[0].clone(),
             review.scopes()[1].clone(),
             ReviewRole::Coordinator,
@@ -49,21 +50,39 @@ fn material_release(store: &ProgramStore) -> Operation {
     report.expected = prefix as u64;
     report.grant = grant(1, "material-author");
     store.admit(&key(), report.clone()).unwrap();
-
-    let mut observe = observed.clone();
-    observe.expected = prefix as u64 + 1;
-    observe.grant = reviewer.clone();
     let Input::Notify(notification) = &report.command else {
         panic!("expected artifact report notification");
     };
     assert!(matches!(notification.event(), Event::Artifact(_)));
+    store
+        .admit(
+            &key(),
+            Operation {
+                id: OperationId::new("typed-material-secondary-author").unwrap(),
+                expected: prefix as u64 + 1,
+                grant: grant(1, "material-secondary-author"),
+                command: Input::Notify(
+                    Notification::new(
+                        selected_report.clone(),
+                        notification.graph().clone(),
+                        notification.event().clone(),
+                    )
+                    .unwrap(),
+                ),
+            },
+        )
+        .unwrap();
+
+    let mut observe = observed.clone();
+    observe.expected = prefix as u64 + 2;
+    observe.grant = reviewer.clone();
     observe.command = Input::ObserveMaterial(Box::new(MaterialObservation {
         report: observation,
         subject: MaterialSubject::Release {
             contract: Box::new(release.contract.clone()),
             release: op_id.clone(),
             review: release.review.id().clone(),
-            artifact_report: notification.id().clone(),
+            artifact_report: selected_report,
             mapping: MaterialMapping {
                 source: MaterialFile::new(
                     SourcePath::new(b"worker-file").unwrap(),
@@ -133,6 +152,8 @@ fn material_release(store: &ProgramStore) -> Operation {
     ));
 
     let mut self_report = observe.clone();
+    // The original producer cannot become independent merely by selecting a
+    // different operator's duplicate declaration with a distinct report ID.
     self_report.grant = report.grant;
     let fail = store.admit(&key(), self_report).unwrap_err();
     assert!(matches!(
@@ -142,7 +163,7 @@ fn material_release(store: &ProgramStore) -> Operation {
     store.admit(&key(), observe).unwrap();
 
     let mut unaccepted = assessed.clone();
-    unaccepted.expected = prefix as u64 + 2;
+    unaccepted.expected = prefix as u64 + 3;
     unaccepted.grant = grant(1, "material-author");
     let err = store.admit(&key(), unaccepted).unwrap_err();
     assert!(matches!(
@@ -150,12 +171,12 @@ fn material_release(store: &ProgramStore) -> Operation {
         ProgramStoreError::Domain(KernelError::Core(ProgramError::Authority))
     ));
     let mut assessed = assessed.clone();
-    assessed.expected = prefix as u64 + 2;
+    assessed.expected = prefix as u64 + 3;
     assessed.grant = reviewer.clone();
     store.admit(&key(), assessed).unwrap();
     Operation {
         id: op_id,
-        expected: prefix as u64 + 3,
+        expected: prefix as u64 + 4,
         grant: reviewer,
         command: Input::ReleaseMaterial(Box::new(MaterialRelease {
             material: cortex_evidence::readiness::EvidenceReference::new(
@@ -226,19 +247,27 @@ fn material_release_uncertain_commit_reconciles_and_invalidation_survives_reopen
     let Input::ReleaseMaterial(material) = &release.command else {
         panic!("expected a material release");
     };
-    store
-        .admit(
-            &key(),
-            operation(
-                &current,
-                "invalidate-protected-input",
-                Input::InvalidateEvidence {
-                    observation: material.material.observation().clone(),
-                    reason: "scoped verification changed".into(),
-                },
-            ),
-        )
-        .unwrap();
+    let invalidation = operation(
+        &current,
+        "invalidate-protected-input",
+        Input::InvalidateEvidence {
+            observation: material.material.observation().clone(),
+            reason: "scoped verification changed".into(),
+        },
+    );
+    let mut outside = invalidation.clone();
+    outside.grant = grant(1, "unrelated-reviewer");
+    outside.grant.tasks = vec![task("C")];
+    let failure = store.admit(&key(), outside).unwrap_err();
+    assert!(matches!(
+        failure.error,
+        ProgramStoreError::Domain(KernelError::Core(ProgramError::Authority))
+    ));
+    assert_eq!(
+        reopened.load(&key(), Access::ReadOnly).unwrap().revision(),
+        current.revision()
+    );
+    store.admit(&key(), invalidation).unwrap();
     let recovered = reopened.load(&key(), Access::ReadOnly).unwrap();
     assert!(recovered.accepted_material(&release.id).is_err());
     assert_eq!(recovered.revision(), current.revision() + 1);
