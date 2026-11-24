@@ -51,6 +51,8 @@ pub enum ProgramProfile {
     SupervisedFixturesV3,
     /// One shared-pool coordinator with recoverable provider-free domain records.
     RecoverableDomainsV4,
+    /// Explicit metadata journal for typed independently accepted Git material.
+    ProtectedMaterialV5,
 }
 impl ProgramProfile {
     fn format(self) -> i64 {
@@ -59,6 +61,7 @@ impl ProgramProfile {
             Self::FixturesV2 => 2,
             Self::SupervisedFixturesV3 => 3,
             Self::RecoverableDomainsV4 => 4,
+            Self::ProtectedMaterialV5 => 5,
         }
     }
     fn policy(self) -> &'static str {
@@ -67,16 +70,30 @@ impl ProgramProfile {
             Self::FixturesV2 => "local-operator-program-fixtures-v2",
             Self::SupervisedFixturesV3 => "local-operator-program-supervised-fixtures-v3",
             Self::RecoverableDomainsV4 => "local-operator-recoverable-domains-v4",
+            Self::ProtectedMaterialV5 => "local-operator-protected-material-v5",
         }
     }
     fn check(self, input: &Operation) -> Result<(), ProgramStoreError> {
         use cortex_evidence::program::Command;
+        if self != Self::ProtectedMaterialV5
+            && matches!(
+                &input.command,
+                Command::ObserveMaterial(_)
+                    | Command::ReleaseMaterial(_)
+                    | Command::AcceptIntegration(_)
+            )
+        {
+            return Err(ProgramStoreError::Unsupported);
+        }
         if let Command::DomainMember { operation, .. } = &input.command
             && matches!(
                 operation.command,
                 Command::Domain(_)
                     | Command::DomainMember { .. }
                     | Command::RegisterDomainMember(_)
+                    | Command::ObserveMaterial(_)
+                    | Command::ReleaseMaterial(_)
+                    | Command::AcceptIntegration(_)
             )
         {
             return Err(ProgramStoreError::Unsupported);
@@ -101,7 +118,7 @@ impl ProgramProfile {
         {
             return Err(ProgramStoreError::Unsupported);
         }
-        if self == Self::MetadataV1
+        if matches!(self, Self::MetadataV1 | Self::ProtectedMaterialV5)
             && matches!(
                 input.command,
                 cortex_evidence::program::Command::FixtureEffect(_)
@@ -117,6 +134,7 @@ impl ProgramProfile {
         match self {
             Self::SupervisedFixturesV3 => CoordinationKernel::new_supervised_fixture(initial),
             Self::RecoverableDomainsV4 => CoordinationKernel::new_domain_fixture(initial),
+            Self::ProtectedMaterialV5 => CoordinationKernel::new_protected_material(initial),
             _ => CoordinationKernel::new(initial),
         }
     }
@@ -406,6 +424,23 @@ impl ProgramStore {
             initial,
             limits,
             ProgramProfile::RecoverableDomainsV4,
+        )
+    }
+    /// Create a new metadata-only journal for protected material.
+    /// Existing stores are never migrated; neither this profile nor its receipts
+    /// grant fixture dispatch, managed launch or publication.
+    pub fn create_protected_material(
+        path: &Path,
+        key: &StoreKey,
+        initial: ProgramDefinition,
+        limits: ReadLimits,
+    ) -> Result<Self, ProgramStoreError> {
+        Self::create_profile(
+            path,
+            key,
+            initial,
+            limits,
+            ProgramProfile::ProtectedMaterialV5,
         )
     }
     fn create_profile(
@@ -1161,6 +1196,7 @@ fn identity(
         ProgramProfile::FixturesV2,
         ProgramProfile::SupervisedFixturesV3,
         ProgramProfile::RecoverableDomainsV4,
+        ProgramProfile::ProtectedMaterialV5,
     ]
     .into_iter()
     .find(|p| p.format() == format && p.policy() == policy)

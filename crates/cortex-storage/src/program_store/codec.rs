@@ -887,7 +887,12 @@ fn command_write(c: &Command) -> Result<V, ProgramStoreError> {
     if let Command::DomainMember { operation, .. } = c
         && matches!(
             operation.command,
-            Command::Domain(_) | Command::DomainMember { .. } | Command::RegisterDomainMember(_)
+            Command::Domain(_)
+                | Command::DomainMember { .. }
+                | Command::RegisterDomainMember(_)
+                | Command::ObserveMaterial(_)
+                | Command::ReleaseMaterial(_)
+                | Command::AcceptIntegration(_)
         )
     {
         return Err(ProgramStoreError::Unsupported);
@@ -931,6 +936,14 @@ fn command_write(c: &Command) -> Result<V, ProgramStoreError> {
             reason,
         } => json!(["invalidate-evidence", observation.write()?, reason]),
         Command::Release(r) => json!(["release", release_write(r)?]),
+        Command::ObserveMaterial(input) => {
+            json!(["observe-material-v1", material::observe_write(input)?])
+        }
+        Command::ReleaseMaterial(input) => json!([
+            "release-material-v1",
+            material::release_material_write(input)?
+        ]),
+        Command::AcceptIntegration(input) => json!(["accept-integration-v1", input.write()?]),
         Command::OrderingPlan(p) => json!(["plan", p.write()?]),
         Command::Claim(a) => json!(["claim", a.write()?]),
         Command::Attempt {
@@ -970,6 +983,9 @@ fn command_read(v: &V, k: &CoordinationKernel) -> Result<Command, ProgramStoreEr
                     | "domain-closure-tree-v1"
                     | "domain-member-v1"
                     | "domain-member-input-v1"
+                    | "observe-material-v1"
+                    | "release-material-v1"
+                    | "accept-integration-v1"
             )
         }) {
             return Err(bad());
@@ -1001,6 +1017,9 @@ fn command_read(v: &V, k: &CoordinationKernel) -> Result<Command, ProgramStoreEr
         "fixture-effect-v1",
         "supervised-effect-v1",
         "executor-input-v1",
+        "observe-material-v1",
+        "release-material-v1",
+        "accept-integration-v1",
     ]
     .contains(&tag)
     {
@@ -1037,6 +1056,13 @@ fn command_read(v: &V, k: &CoordinationKernel) -> Result<Command, ProgramStoreEr
             "assess" => Command::Assess(read(&a[1])?),
             "examine" => Command::Examine(read(&a[1])?),
             "release" => Command::Release(Box::new(release_read(&a[1], k)?)),
+            "observe-material-v1" => {
+                Command::ObserveMaterial(Box::new(material::observe_read(&a[1], k)?))
+            }
+            "release-material-v1" => {
+                Command::ReleaseMaterial(Box::new(material::release_material_read(&a[1], k)?))
+            }
+            "accept-integration-v1" => Command::AcceptIntegration(read(&a[1])?),
             "plan" => Command::OrderingPlan(read(&a[1])?),
             "claim" => Command::Claim(read(&a[1])?),
             "package" => Command::Package(read(&a[1])?),
@@ -1154,6 +1180,7 @@ pub(super) fn decode_operation(
 }
 
 mod domain;
+mod material;
 mod operational;
 
 mod executor;
