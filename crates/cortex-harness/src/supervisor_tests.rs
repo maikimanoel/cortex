@@ -1037,10 +1037,20 @@ fn canonical_public_dispatch_captures_identity_and_replay_never_relaunches() {
 }
 #[test]
 fn canonical_revocation_is_observed_without_an_atomic_cancellation_request() {
+    observe_stop_during_owned_fixture(false);
+}
+
+#[test]
+fn cancellation_of_active_owned_child_preserves_hold_after_reopen() {
+    observe_stop_during_owned_fixture(true);
+}
+
+fn observe_stop_during_owned_fixture(cancel_instead_of_revoke: bool) {
     let f = durable("revocation-ready");
     let listener =
         std::os::unix::net::UnixListener::bind(f.root.0.join("revocation-ready")).unwrap();
     listener.set_nonblocking(true).unwrap();
+    let cancel = AtomicBool::new(false);
     thread::scope(|scope| {
         let revoker = scope.spawn(|| {
             let deadline = Instant::now() + Duration::from_secs(2);
@@ -1074,18 +1084,26 @@ fn canonical_revocation_is_observed_without_an_atomic_cancellation_request() {
                             .is_some_and(|process| u64::from(process.pid) == pid
                                 && process.start_ticks == start_ticks))
             );
-            let event = EffectEvent::Revoke {
-                grant: support::proposed_grant(&f.scope).id,
-                at: kernel.fixture_effects().last_tick() + 1,
-                basis: source("explicit-revocation"),
-            };
-            let op = support::operation(
-                &kernel,
-                "revoke-during-process",
-                WorkflowCommand::SupervisedEffect(Box::new(event)),
-            );
-            let receipt = f.store.admit(&f.key, op).unwrap();
-            assert!(!receipt.duplicate);
+            if cancel_instead_of_revoke {
+                let competing =
+                    execute_fixture(&f.store, &f.key, f.dispatch.clone(), ids(), &f.pin, &cancel)
+                        .unwrap();
+                assert!(competing.dispatch.duplicate && competing.observation.is_none());
+                cancel.store(true, Ordering::Release);
+            } else {
+                let event = EffectEvent::Revoke {
+                    grant: support::proposed_grant(&f.scope).id,
+                    at: kernel.fixture_effects().last_tick() + 1,
+                    basis: source("explicit-revocation"),
+                };
+                let op = support::operation(
+                    &kernel,
+                    "revoke-during-process",
+                    WorkflowCommand::SupervisedEffect(Box::new(event)),
+                );
+                let receipt = f.store.admit(&f.key, op).unwrap();
+                assert!(!receipt.duplicate);
+            }
             channel
                 .set_read_timeout(Some(deadline.saturating_duration_since(Instant::now())))
                 .unwrap();
@@ -1093,15 +1111,8 @@ fn canonical_revocation_is_observed_without_an_atomic_cancellation_request() {
             // merely dropping this channel would allow a normal child exit.
             assert_eq!(channel.read(&mut [0]).unwrap(), 0);
         });
-        let result = execute_fixture(
-            &f.store,
-            &f.key,
-            f.dispatch.clone(),
-            ids(),
-            &f.pin,
-            &AtomicBool::new(false),
-        )
-        .unwrap();
+        let result =
+            execute_fixture(&f.store, &f.key, f.dispatch.clone(), ids(), &f.pin, &cancel).unwrap();
         revoker.join().unwrap();
         assert!(result.recorded.is_some(), "{:?}", result.recording_failure);
         let observation = result.observation.unwrap();
@@ -1109,7 +1120,11 @@ fn canonical_revocation_is_observed_without_an_atomic_cancellation_request() {
         assert_eq!(
             observation.completion,
             ProcessCompletion::Interrupted {
-                reason: InterruptionReason::AuthorityLost
+                reason: if cancel_instead_of_revoke {
+                    InterruptionReason::Cancelled
+                } else {
+                    InterruptionReason::AuthorityLost
+                }
             }
         );
         assert_eq!(
@@ -1117,9 +1132,24 @@ fn canonical_revocation_is_observed_without_an_atomic_cancellation_request() {
             Quiescence::DirectChildReapedStreamsClosed
         );
     });
-    let kernel = f.store.load(&f.key, Access::ReadOnly).unwrap();
-    assert!(kernel.fixture_effects().effects()[0].pending());
-    assert_eq!(kernel.fixture_effects().revoked().len(), 1);
+    let reopened = reopen_fixture(&f);
+    let kernel = reopened.load(&f.key, Access::ReadOnly).unwrap();
+    let effect = &kernel.fixture_effects().effects()[0];
+    assert!(effect.pending());
+    assert_eq!(effect.process_observations.len(), 2);
+    assert_eq!(
+        kernel.fixture_effects().revoked().len(),
+        usize::from(!cancel_instead_of_revoke)
+    );
+    let pid = effect
+        .process_observations
+        .last()
+        .unwrap()
+        .process
+        .as_ref()
+        .unwrap()
+        .pid;
+    assert!(!Path::new(&format!("/proc/{pid}")).exists());
 }
 #[test]
 fn changed_pinned_target_refuses_before_durable_dispatch() {
@@ -1659,4 +1689,430 @@ fn acquisition_cancellation_revocation_and_slow_authority_precede_publication() 
             }
         );
     }
+}
+
+fn recovery_fixture_run(
+    f: &DurableFixture,
+    test_cuts: FixtureTestCuts<'_>,
+    cancel: &AtomicBool,
+) -> Result<RunResult, HarnessError> {
+    execute_fixture_inner(
+        (&f.store, &f.key),
+        f.dispatch.clone(),
+        ids(),
+        None,
+        &f.pin,
+        FixtureCut { cancel, end: None },
+        test_cuts,
+    )
+}
+
+fn lost_reply() -> AdmissionFailure {
+    AdmissionFailure {
+        completion: Completion::Indeterminate,
+        error: ProgramStoreError::Deadline,
+    }
+}
+
+fn reopen_fixture(f: &DurableFixture) -> ProgramStore {
+    ProgramStore::open(
+        &f.root.0.join("store"),
+        &f.key,
+        Access::ReadOnly,
+        f.store.read_limits(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn lost_dispatch_delivery_retains_exact_intent_with_zero_starts() {
+    let f = durable("count");
+    let kernel = f.store.load(&f.key, Access::ReadOnly).unwrap();
+    let cancel = AtomicBool::new(false);
+    let handed = recovery_fixture_run(
+        &f,
+        FixtureTestCuts {
+            withhold_dispatch_reply: true,
+            ..FixtureTestCuts::default()
+        },
+        &cancel,
+    );
+    assert!(matches!(
+        handed,
+        Err(HarnessError::Admission(AdmissionFailure {
+            completion: Completion::Indeterminate,
+            error: ProgramStoreError::Deadline,
+        }))
+    ));
+    let reopened = reopen_fixture(&f);
+    let image = reopened.load(&f.key, Access::ReadOnly).unwrap();
+    assert!(image.operations().last() == Some(&f.dispatch));
+    let effect = &image.fixture_effects().effects()[0];
+    assert_eq!(
+        effect.status,
+        cortex_core::program::operational::EffectStatus::DispatchUncertain
+    );
+    assert!(effect.pending() && effect.process_observations.is_empty());
+
+    let ordinal = f.dispatch.expected + 1;
+    let receipt = AdmissionReceipt {
+        store: f.store.id(),
+        ordinal,
+        duplicate: true,
+    };
+    let start = std::sync::Barrier::new(2);
+    thread::scope(|threads| {
+        let observer = threads.spawn(|| {
+            start.wait();
+            assert_eq!(
+                reopened
+                    .reconcile(&f.key, kernel.initial(), &f.dispatch, Access::ReadOnly)
+                    .unwrap(),
+                Reconciliation::Present(receipt),
+            );
+            let mut conflict = f.dispatch.clone();
+            conflict.expected -= 1;
+            assert_eq!(
+                reopened
+                    .reconcile(&f.key, kernel.initial(), &conflict, Access::ReadOnly)
+                    .unwrap(),
+                Reconciliation::Conflict
+            );
+        });
+        start.wait();
+        // A late identical offer is read-only. The process callback must never run.
+        let replay = recovery_fixture_run(&f, FixtureTestCuts::default(), &cancel).unwrap();
+        assert_eq!(replay.dispatch, receipt);
+        assert!(replay.observation.is_none());
+        observer.join().unwrap();
+    });
+    assert!(!f.root.0.join("launch-count").exists());
+    assert_eq!(
+        reopened.load(&f.key, Access::ReadOnly).unwrap().revision(),
+        ordinal
+    );
+}
+
+#[test]
+fn lost_committed_start_and_terminal_receipts_reconcile_after_one_actual_child() {
+    for missed in [RecordingStage::Started, RecordingStage::Terminal] {
+        let f = durable("count");
+        let before = f.store.load(&f.key, Access::ReadOnly).unwrap();
+        let submitted = std::cell::RefCell::new(Vec::new());
+        let commit = |stage, operation: &Operation| {
+            submitted.borrow_mut().push(stage);
+            let receipt = f.store.admit(&f.key, operation.clone())?;
+            assert!(!receipt.duplicate);
+            if stage == missed {
+                Err(lost_reply())
+            } else {
+                Ok(receipt)
+            }
+        };
+        let cancel = AtomicBool::new(false);
+        let run = recovery_fixture_run(
+            &f,
+            FixtureTestCuts {
+                record: Some(&commit),
+                ..FixtureTestCuts::default()
+            },
+            &cancel,
+        )
+        .unwrap();
+        assert_eq!(
+            submitted.into_inner(),
+            [RecordingStage::Started, RecordingStage::Terminal]
+        );
+        assert!(run.recording_failure.is_none() && run.recording_recovery.is_none());
+        let [resolved] = run.reconciled_receipt_failures.as_slice() else {
+            panic!("the original lost reply was not retained");
+        };
+        assert_eq!(resolved.failure.completion, Completion::Indeterminate);
+        assert!(matches!(
+            resolved.failure.error,
+            ProgramStoreError::Deadline
+        ));
+        let result_receipt = if missed == RecordingStage::Started {
+            run.started
+        } else {
+            run.recorded
+        };
+        assert_eq!(result_receipt, Some(resolved.receipt));
+        assert_eq!(resolved.receipt.store, f.store.id());
+        assert_eq!(resolved.receipt.ordinal, resolved.operation.expected + 1);
+        assert!(resolved.receipt.duplicate);
+        let observation = run.observation.unwrap();
+        let child = observation.process.unwrap();
+        assert_eq!(
+            observation.quiescence,
+            Quiescence::DirectChildReapedStreamsClosed
+        );
+        assert!(!Path::new(&format!("/proc/{}", child.pid)).exists());
+        assert_eq!(
+            fs::read(f.root.0.join("launch-count")).unwrap(),
+            b"started\n"
+        );
+
+        // Simulate loss of the final caller response too. A different observer
+        // resolves the immutable inputs from the independently reopened image.
+        let reopened = reopen_fixture(&f);
+        let image = reopened.load(&f.key, Access::ReadOnly).unwrap();
+        assert_eq!(image.revision(), before.revision() + 3);
+        assert_eq!(
+            image.fixture_effects().effects()[0]
+                .process_observations
+                .len(),
+            2
+        );
+        assert!(image.fixture_effects().effects()[0].pending());
+        assert_eq!(
+            reopened
+                .reconcile(
+                    &f.key,
+                    before.initial(),
+                    &resolved.operation,
+                    Access::ReadOnly
+                )
+                .unwrap(),
+            Reconciliation::Present(resolved.receipt),
+        );
+        assert!(
+            reopened
+                .reconcile(
+                    &StoreKey::new(&[74; 32]).unwrap(),
+                    before.initial(),
+                    &resolved.operation,
+                    Access::ReadOnly
+                )
+                .is_err()
+        );
+        let mut changed = resolved.operation.clone();
+        changed.expected += 1;
+        assert_eq!(
+            reopened
+                .reconcile(&f.key, before.initial(), &changed, Access::ReadOnly)
+                .unwrap(),
+            Reconciliation::Conflict,
+        );
+        let duplicate = recovery_fixture_run(&f, FixtureTestCuts::default(), &cancel).unwrap();
+        assert!(duplicate.dispatch.duplicate && duplicate.recorded.is_none());
+        assert_eq!(duplicate.dispatch.store, f.store.id());
+        assert_eq!(
+            fs::read(f.root.0.join("launch-count")).unwrap(),
+            b"started\n"
+        );
+        assert_eq!(
+            reopened.load(&f.key, Access::ReadOnly).unwrap().revision(),
+            image.revision()
+        );
+    }
+}
+
+#[test]
+fn unresolved_terminal_append_retains_exact_input_and_readback() {
+    let f = durable("count");
+    let before = f.store.load(&f.key, Access::ReadOnly).unwrap();
+    let terminal = std::cell::RefCell::new(None);
+    let deliver = |stage, operation: &Operation| {
+        if stage == RecordingStage::Terminal {
+            assert!(terminal.replace(Some(operation.clone())).is_none());
+            // No witness of the storage outcome is passed to the caller.
+            // The independent exact read below establishes absence at this cut.
+            Err(lost_reply())
+        } else {
+            f.store.admit(&f.key, operation.clone())
+        }
+    };
+    let cancel = AtomicBool::new(false);
+    let run = recovery_fixture_run(
+        &f,
+        FixtureTestCuts {
+            record: Some(&deliver),
+            ..FixtureTestCuts::default()
+        },
+        &cancel,
+    )
+    .unwrap();
+    assert!(run.started.is_some() && run.recorded.is_none());
+    let failure = run.recording_failure.unwrap();
+    assert_eq!(failure.completion, Completion::Indeterminate);
+    let recovery = run.recording_recovery.unwrap();
+    assert_eq!(recovery.stage, RecordingStage::Terminal);
+    assert_eq!(recovery.store, f.store.id());
+    assert!(recovery.operation == terminal.into_inner());
+    assert!(matches!(
+        recovery.readback,
+        Some(Ok(Reconciliation::Absent))
+    ));
+    let observation = run.observation.unwrap();
+    assert_eq!(
+        observation.quiescence,
+        Quiescence::DirectChildReapedStreamsClosed
+    );
+    assert_eq!(
+        fs::read(f.root.0.join("launch-count")).unwrap(),
+        b"started\n"
+    );
+    let reopened = reopen_fixture(&f);
+    let read = recovery
+        .reconcile(&reopened, &f.key, before.initial())
+        .unwrap();
+    assert_eq!(read, Some(Reconciliation::Absent));
+    let unrelated = durable("count");
+    assert!(matches!(
+        recovery.reconcile(&unrelated.store, &unrelated.key, before.initial()),
+        Err(ProgramStoreError::TargetChanged)
+    ));
+    let wrong = StoreKey::new(&[74; 32]).unwrap();
+    assert!(
+        recovery
+            .reconcile(&reopened, &wrong, before.initial())
+            .is_err()
+    );
+    let image = reopened.load(&f.key, Access::ReadOnly).unwrap();
+    let effect = &image.fixture_effects().effects()[0];
+    assert!(effect.pending());
+    assert_eq!(effect.process_observations.len(), 1);
+    assert_eq!(image.revision(), before.revision() + 2);
+    assert!(
+        recovery_fixture_run(&f, FixtureTestCuts::default(), &cancel)
+            .unwrap()
+            .dispatch
+            .duplicate
+    );
+    assert_eq!(
+        fs::read(f.root.0.join("launch-count")).unwrap(),
+        b"started\n"
+    );
+}
+
+#[test]
+fn competing_canonical_cancel_rejects_stale_dispatch_before_launch() {
+    use cortex_core::program::operational::EffectStatus;
+    let f = durable("count");
+    let before = f.store.load(&f.key, Access::ReadOnly).unwrap();
+    let cancel = || {
+        let effect = &before.fixture_effects().effects()[0];
+        let operation = support::operation(
+            &before,
+            "controller-cancel-before-dispatch",
+            WorkflowCommand::SupervisedEffect(Box::new(EffectEvent::Cancel {
+                effect: effect.intent.id.clone(),
+                scope: effect.intent.scope.clone(),
+                at: before.fixture_effects().last_tick() + 1,
+                basis: source("competing-canonical-cancel"),
+            })),
+        );
+        let receipt = f.store.admit(&f.key, operation).unwrap();
+        assert_eq!(receipt.ordinal, f.dispatch.expected + 1);
+    };
+    let stopping = AtomicBool::new(false);
+    assert!(matches!(
+        recovery_fixture_run(
+            &f,
+            FixtureTestCuts {
+                before_dispatch: Some(&cancel),
+                ..FixtureTestCuts::default()
+            },
+            &stopping
+        ),
+        Err(HarnessError::Admission(AdmissionFailure {
+            completion: Completion::Rejected,
+            ..
+        }))
+    ));
+    let reopened = reopen_fixture(&f);
+    let after = reopened.load(&f.key, Access::ReadOnly).unwrap();
+    let effect = &after.fixture_effects().effects()[0];
+    assert_eq!(effect.status, EffectStatus::CancelledBeforeDispatch);
+    assert!(effect.dispatch_at.is_none());
+    assert!(after.operations().iter().all(|op| op.id != f.dispatch.id));
+    assert_eq!(
+        reopened
+            .reconcile(&f.key, before.initial(), &f.dispatch, Access::ReadOnly)
+            .unwrap(),
+        Reconciliation::Conflict,
+    );
+    assert!(!f.root.0.join("launch-count").exists());
+}
+
+#[test]
+fn unknown_start_receipt_stops_owned_process_without_releasing_input() {
+    let f = durable("count");
+    let marker = f.root.0.join("launch-count");
+    let expected = std::cell::RefCell::new(None);
+    let deliver = |stage, operation: &Operation| {
+        assert_eq!(stage, RecordingStage::Started);
+        let WorkflowCommand::SupervisedEffect(event) = &operation.command else {
+            panic!("expected actual process observation");
+        };
+        let EffectEvent::ProcessObserved { observation, .. } = event.as_ref() else {
+            panic!("expected actual process observation");
+        };
+        let child = observation.process.as_ref().unwrap();
+        assert_eq!(start_ticks(child.pid).unwrap(), child.start_ticks);
+        // The child writes this marker and then blocks on input. A byte witness,
+        // rather than an elapsed delay, establishes which side of spawn ran.
+        let limit = Instant::now() + Duration::from_millis(300);
+        loop {
+            if fs::read(&marker).is_ok_and(|bytes| bytes == b"started\n") {
+                break;
+            }
+            assert!(
+                Instant::now() < limit,
+                "owned payload did not announce startup"
+            );
+            thread::sleep(POLL);
+        }
+        assert!(expected.replace(Some(operation.clone())).is_none());
+        Err(lost_reply())
+    };
+    let cancel = AtomicBool::new(false);
+    let run = recovery_fixture_run(
+        &f,
+        FixtureTestCuts {
+            record: Some(&deliver),
+            ..FixtureTestCuts::default()
+        },
+        &cancel,
+    )
+    .unwrap();
+    assert!(run.started.is_none() && run.recorded.is_none());
+    assert_eq!(
+        run.recording_failure.unwrap().completion,
+        Completion::Indeterminate
+    );
+    let failure = run.recording_recovery.unwrap();
+    assert_eq!(failure.stage, RecordingStage::Started);
+    assert!(failure.operation == expected.into_inner());
+    assert!(matches!(failure.readback, Some(Ok(Reconciliation::Absent))));
+    let observation = run.observation.unwrap();
+    assert_eq!(
+        observation.completion,
+        ProcessCompletion::Interrupted {
+            reason: InterruptionReason::AuthorityUnknown,
+        }
+    );
+    assert_eq!(observation.input_bytes, 0);
+    assert_eq!(
+        observation.quiescence,
+        Quiescence::DirectChildReapedStreamsClosed
+    );
+    let child = observation.process.unwrap();
+    assert!(!Path::new(&format!("/proc/{}", child.pid)).exists());
+    let reopened = reopen_fixture(&f);
+    let image = reopened.load(&f.key, Access::ReadOnly).unwrap();
+    assert!(image.fixture_effects().effects()[0].pending());
+    assert!(
+        image.fixture_effects().effects()[0]
+            .process_observations
+            .is_empty()
+    );
+    assert!(
+        recovery_fixture_run(&f, FixtureTestCuts::default(), &cancel)
+            .unwrap()
+            .dispatch
+            .duplicate
+    );
+    assert_eq!(fs::read(marker).unwrap(), b"started\n");
 }
