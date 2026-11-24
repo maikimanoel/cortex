@@ -576,6 +576,18 @@ fn fixture_reservation_readback_refuses_conflict_and_later_disposition() {
 
     let first = store.admit(&key(), input.clone()).unwrap();
     assert!(!first.duplicate);
+    let direct = gpe_admission::confirm_synthetic_reservation(
+        Ok(first),
+        &input,
+        store.id(),
+        &before,
+        &store,
+        &key(),
+    )
+    .unwrap();
+    assert!(
+        matches!(direct, gpe_admission::ObservedAdmission::Admitted(receipt) if receipt == first)
+    );
     let retained = snapshot(&f);
     let wrong_key = StoreKey::new(&[36; 32]).unwrap();
     assert!(matches!(
