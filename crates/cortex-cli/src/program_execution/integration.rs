@@ -2,7 +2,7 @@
 
 mod protected;
 pub use protected::{
-    AcceptedMaterialObservation, MaterialReleaseRequest, ProtectedAcceptanceRequest,
+    MaterialObservationReceipt, MaterialReleaseRequest, ProtectedAcceptanceRequest,
     ProtectedIntegrationRequest, accept_protected_integration, observe_protected_integration,
     observe_release_material,
 };

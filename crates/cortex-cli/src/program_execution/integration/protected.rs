@@ -56,7 +56,7 @@ pub struct ProtectedIntegrationRequest<'a> {
 }
 
 /// Retained observation input, actual oracle result and original store receipt.
-pub struct AcceptedMaterialObservation {
+pub struct MaterialObservationReceipt {
     /// Exact operation for read-only reconciliation or inspection.
     pub operation: Operation,
     /// Original admission receipt. This supplies no assessment.
@@ -74,7 +74,7 @@ pub fn observe_release_material(
     key: &StoreKey,
     request: MaterialReleaseRequest<'_>,
     observation: IntegrationObservationRequest,
-) -> Result<AcceptedMaterialObservation, IntegrationError> {
+) -> Result<MaterialObservationReceipt, IntegrationError> {
     let kernel = current_material_kernel(store, key, request.expected_revision)?;
     let state = kernel.state();
     let declared = request.contract.scope();
@@ -141,7 +141,7 @@ pub fn observe_protected_integration(
     key: &StoreKey,
     request: ProtectedIntegrationRequest<'_>,
     observation: IntegrationObservationRequest,
-) -> Result<AcceptedMaterialObservation, IntegrationError> {
+) -> Result<MaterialObservationReceipt, IntegrationError> {
     let selection = request.integration;
     let kernel = current_material_kernel(store, key, selection.expected_revision)?;
     let scope = kernel
@@ -373,7 +373,7 @@ fn admit_material_observation(
     key: &StoreKey,
     operation: Operation,
     satisfied: bool,
-) -> Result<AcceptedMaterialObservation, IntegrationError> {
+) -> Result<MaterialObservationReceipt, IntegrationError> {
     let receipt =
         store
             .admit(key, operation.clone())
@@ -381,7 +381,7 @@ fn admit_material_observation(
                 operation: Box::new(operation.clone()),
                 failure,
             })?;
-    Ok(AcceptedMaterialObservation {
+    Ok(MaterialObservationReceipt {
         operation,
         receipt,
         satisfied,

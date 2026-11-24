@@ -327,11 +327,26 @@ fresh affected verification. Reuse unaffected evidence only with original identi
 and justified non-impact; do not assign worker results to new integrated bytes.
 
 The cooperative source integration comparison reads selected regular files
-from the exact retained Git commits and compares bytes and Git modes. The
-release binds the artifact identity and candidate. The selected paths and the
-combined-result oracle are supplied separately. The comparison produces a
-scoped inference for review. Protected acceptance still requires an approved
-binding from each released artifact to its reviewed path and contents.
+from exact retained Git commits and compares bytes and Git modes. Its
+legacy observation remains an inference. Explicit selection of the
+`ProtectedMaterialV5` metadata profile enables typed protected material
+review in the existing encrypted program journal:
+
+- A material observation binds the prospective release, artifact report,
+  reviewed edge scopes, exact criterion and verification profile to a literal
+  producer path, Git mode, length, SHA-256 digest and destination path.
+  Canonical release needs the current independently assessed evidence and an
+  explicit scoped review. Historical releases retain their legacy semantics.
+- The bounded Git consumer checks each current released mapping against the
+  actual immutable source and destination files in the recorded repositories.
+  A distinct semantic output oracle checks the separate integrated candidate.
+  A subsequent explicit integration decision requires the exact current
+  supported assessment and a fresh candidate capture at its journal revision.
+- The local operator controls the store key and supplies the existing
+  authority assertions. The reducer checks roles, grants and recorded
+  authors against those assertions. Authenticated deployment, independent
+  organizational judgment, actual containment and remote publication each
+  retain separate requirements.
 
 Integration review may hold/reject one consumer edge while preserving another.
 No global wave barrier or successful branch merge completes a program. Required

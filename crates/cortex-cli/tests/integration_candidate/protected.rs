@@ -2,7 +2,7 @@
 
 use super::*;
 use cortex_cli::program_execution::{
-    AcceptedMaterialObservation, MaterialReleaseRequest, ProtectedAcceptanceRequest,
+    MaterialObservationReceipt, MaterialReleaseRequest, ProtectedAcceptanceRequest,
     ProtectedIntegrationRequest, accept_protected_integration, observe_protected_integration,
     observe_release_material,
 };
@@ -89,7 +89,7 @@ fn proposed_release(store: &ProgramStore, key: &StoreKey, edge: &str) -> Release
 fn assess_operation(
     store: &ProgramStore,
     key: &StoreKey,
-    observed: &AcceptedMaterialObservation,
+    observed: &MaterialObservationReceipt,
     actor: &str,
     id: &str,
 ) -> (Operation, EvidenceReference, Examination) {

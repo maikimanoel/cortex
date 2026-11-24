@@ -383,6 +383,19 @@ No full SemVer registry, persisted format, transport, new knowledge index or sta
 API commitment is selected. Existing Core/Evidence/G1/A-1 contracts remain unchanged.
 Broader DEC-007 stays OPEN.
 
+**TD-11 protected material scoped resolution.** The owner approved an
+explicit versioned association for independently assessed accepted material
+and the integrated candidate using the existing encrypted program journal.
+`ProtectedMaterialV5` is an explicitly created metadata profile. It retains
+exact observations, scoped releases and a separate integration decision.
+The new command family is restricted to V5. Existing profiles, record
+interpretations, replay and dispatch controls remain in force. Older readers
+refuse the unsupported profile. Opening a legacy store creates no material
+association or conversion. This is limited to the local operator source
+profile and the exact Git material checks in
+[NGE-R12](../architecture/governed-parallel-engineering.md#nge-r12--rolling-integration-and-protected-acceptance).
+DEC-007 and [DEC-012](#dec-012) remain open overall.
+
 ## DEC-008
 
 **Evaluation cases, baselines, and comparison-publication policy.** Select
