@@ -270,6 +270,15 @@ impl Delegation {
         {
             return Err(ExecutionError::Identity);
         }
+        let current = fs::symlink_metadata(&selected.root)?;
+        if !current.is_dir()
+            || fs::canonicalize(&selected.root)? != selected.root
+            || current.dev() != self.device
+            || current.ino() != self.inode
+            || current.uid() != rustix::process::getuid().as_raw()
+        {
+            return Err(ExecutionError::Identity);
+        }
         self.check()
     }
 

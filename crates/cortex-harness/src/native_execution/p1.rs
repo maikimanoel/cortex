@@ -22,7 +22,7 @@ use cortex_core::{
 };
 use cortex_evidence::program::{Command, CoordinationKernel, KernelError, Operation};
 use cortex_storage::{
-    history_store::{Access, StoreKey},
+    history_store::{Access, StoreId, StoreKey},
     program_store::{AdmissionReceipt, ProgramStore},
 };
 use sha2::{Digest, Sha256};
@@ -54,6 +54,8 @@ pub struct ManagedP1Target<'a> {
 /// Supplied binding of one proposed P1-01 nominal attempt. This is a description
 /// of approval to check with the selected authority, not a qualified grant.
 pub struct RawCopyP1Binding<'a> {
+    /// Exact selected encrypted ProgramStore incarnation.
+    pub store: StoreId,
     /// Exact owner decision receipt for this one fixed managed attempt.
     pub approval: &'a SourceReference,
     /// Exact independent observer selected for controls, FD roles and cleanup.
@@ -262,6 +264,9 @@ pub fn inspect_raw_copy_attempt(
 ) -> Result<RawCopyP1Preflight, P1Refusal> {
     let binding = binding.ok_or(P1Refusal::MissingBinding)?;
     check_binding(binding)?;
+    if binding.store != store.id() {
+        return Err(P1Refusal::Correspondence);
+    }
     live_budget(binding.deadline, cancel)?;
     let mut kernel = store
         .load(key, Access::ReadOnly)
@@ -271,6 +276,10 @@ pub fn inspect_raw_copy_attempt(
     if intent.configuration != *backend.configuration()
         || plan.digest() != binding.plan_digest
         || plan.uses_json_lines()
+        || !plan.spec.arguments.is_empty()
+        || !plan.spec.environment.is_empty()
+        || !plan.spec.artifacts.is_empty()
+        || plan.input().len() > 65_536
         || !plan
             .spec
             .files
@@ -346,17 +355,34 @@ fn execute_raw_copy_attempt(
     cancel: &AtomicBool,
 ) -> Result<RawCopyP1Run, P1Refusal> {
     live_budget(binding.deadline, cancel)?;
-    let mut decisions = admit_domain_reservations(
-        store,
-        key,
-        vec![binding.reservation.clone()],
-        NonZeroUsize::MIN,
-    )
-    .map_err(P1Refusal::ReservationSelection)?;
-    let decision = decisions.pop().ok_or(P1Refusal::Journal)?;
-    let ReservationDecision::Reserved(reservation) = decision else {
-        return Ok(RawCopyP1Run::Reservation(decision));
-    };
+    admit_one_and_attempt(store, key, binding.reservation, |reservation| {
+        execute_reserved_raw_copy(store, key, backend, binding, cancel, reservation)
+    })
+}
+
+fn admit_one_and_attempt(
+    store: &ProgramStore,
+    key: &StoreKey,
+    operation: &Operation,
+    attempt: impl FnOnce(AdmissionReceipt) -> RawCopyP1Run,
+) -> Result<RawCopyP1Run, P1Refusal> {
+    let mut decisions =
+        admit_domain_reservations(store, key, vec![operation.clone()], NonZeroUsize::MIN)
+            .map_err(P1Refusal::ReservationSelection)?;
+    match decisions.pop().ok_or(P1Refusal::Journal)? {
+        ReservationDecision::Reserved(receipt) => Ok(attempt(receipt)),
+        other => Ok(RawCopyP1Run::Reservation(other)),
+    }
+}
+
+fn execute_reserved_raw_copy(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut ManagedExecutionDomain,
+    binding: &RawCopyP1Binding<'_>,
+    cancel: &AtomicBool,
+    reservation: AdmissionReceipt,
+) -> RawCopyP1Run {
     let preparation = prepare_managed_executable_domain_until(
         store,
         key,
@@ -366,19 +392,19 @@ fn execute_raw_copy_attempt(
         Some(binding.deadline),
     );
     let Some(prepared) = preparation.prepared else {
-        return Ok(RawCopyP1Run::Observed {
+        return RawCopyP1Run::Observed {
             reservation,
             lifecycle: Box::new(preparation.run),
             copy: RawCopyP1Observation::Unresolved,
-        });
+        };
     };
     let run = release_managed_executable_domain(store, key, backend, prepared, cancel);
     let copy = assess_copy(&run, backend.plan().input());
-    Ok(RawCopyP1Run::Observed {
+    RawCopyP1Run::Observed {
         reservation,
         lifecycle: Box::new(run.domain),
         copy,
-    })
+    }
 }
 
 fn assess_copy(run: &ExecutableDomainRun, input: &[u8]) -> RawCopyP1Observation {

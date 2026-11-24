@@ -44,11 +44,13 @@ fn candidate_revocation_reuse_and_staleness_refuse_before_managed_effects() {
     };
     let wrong_candidate = CandidateRequirement::new(
         intent.effect.scope.candidate.repository().clone(),
-        cortex_core::CandidateId::new("1111111111111111111111111111111111111111").unwrap(),
+        cortex_core::CandidateId::from_git_commit("1111111111111111111111111111111111111111")
+            .unwrap(),
         intent.effect.scope.candidate.worktree(),
     );
     let deadline = Instant::now() + Duration::from_secs(2);
     let bind = |candidate, delegation, reservation, operations| RawCopyP1Binding {
+        store: StoreId::from_bytes([1; 16]),
         approval: &approval,
         observer: &observer,
         candidate,
@@ -101,6 +103,18 @@ fn candidate_revocation_reuse_and_staleness_refuse_before_managed_effects() {
     ));
     let binding = bind(candidate, &delegation, &operation, &ids);
     assert!(reservation_intent(&kernel, &binding).is_ok());
+    let alias = SourceReference::observation_reference(
+        ObservationId::new("controlled-observer", 1).unwrap(),
+        "another label for the same observation",
+        "version 2",
+    )
+    .unwrap();
+    let mut alias_binding = bind(candidate, &delegation, &operation, &ids);
+    alias_binding.approval = &alias;
+    assert!(matches!(
+        check_binding(&alias_binding),
+        Err(P1Refusal::MissingBinding)
+    ));
     let original = kernel.revision();
     assert!(matches!(
         after_independent_qualification(
@@ -211,6 +225,90 @@ fn copy_oracle_requires_durable_report_and_eof_in_addition_to_matching_bytes() {
     assert_eq!(
         assess_copy(&run, b"expected"),
         RawCopyP1Observation::Unresolved
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn canonical_duplicate_reservation_cannot_reach_the_attempt_again() {
+    let (mut kernel, intent) = fixture::coordinator();
+    let root = std::env::temp_dir().join(format!("cortex-p1-once-{}", std::process::id()));
+    fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
+    let key = StoreKey::new(&[17; 32]).unwrap();
+    let store = ProgramStore::create_domain_fixture(
+        &root.join("store"),
+        &key,
+        kernel.initial().clone(),
+        ReadLimits::new(16_000_000, Duration::from_secs(5)).unwrap(),
+    )
+    .unwrap();
+    for operation in kernel.operations() {
+        store.admit(&key, operation.clone()).unwrap();
+    }
+    let operation = fixture::domain_operation(
+        &kernel,
+        "strict-reservation",
+        Command::Domain(Box::new(DomainEvent::Reserve {
+            intent: intent.clone(),
+            at: 1,
+        })),
+    );
+    let mut offered = 0;
+    let first = admit_one_and_attempt(&store, &key, &operation, |receipt| {
+        offered += 1;
+        // A source simulation of the exact durable cut. No Local manager or
+        // process starts, stops or acknowledgments are manufactured.
+        kernel = store.load(&key, Access::ReadOnly).unwrap();
+        assert_eq!(receipt.ordinal, kernel.revision());
+        assert!(!receipt.duplicate);
+        let request = fixture::domain_operation(
+            &kernel,
+            "strict-create-request",
+            Command::Domain(Box::new(DomainEvent::CreateRequested {
+                domain: intent.id.clone(),
+                at: 2,
+            })),
+        );
+        let creation = store.admit(&key, request).unwrap();
+        RawCopyP1Run::Observed {
+            reservation: receipt,
+            lifecycle: Box::new(DomainRun {
+                creation: Some(creation),
+                binding: None,
+                release: None,
+                nonce: None,
+                report: None,
+                diagnostic: None,
+                recovery_only: false,
+            }),
+            copy: RawCopyP1Observation::Unresolved,
+        }
+    })
+    .unwrap();
+    assert!(matches!(
+        first,
+        RawCopyP1Run::Observed {
+            copy: RawCopyP1Observation::Unresolved,
+            ..
+        }
+    ));
+    let current = store.load(&key, Access::ReadOnly).unwrap();
+    assert_eq!(
+        current.domains().unwrap().domain(&intent.id).unwrap().phase,
+        cortex_core::program::domain::DomainPhase::CreateUncertain,
+    );
+    let second = admit_one_and_attempt(&store, &key, &operation, |_| {
+        panic!("duplicate reservation cannot attempt a fresh managed create")
+    })
+    .unwrap();
+    assert!(matches!(
+        second,
+        RawCopyP1Run::Reservation(ReservationDecision::AlreadyRetained(_))
+    ));
+    assert_eq!(offered, 1);
+    assert_eq!(
+        store.load(&key, Access::ReadOnly).unwrap().revision(),
+        current.revision()
     );
     fs::remove_dir_all(root).unwrap();
 }
