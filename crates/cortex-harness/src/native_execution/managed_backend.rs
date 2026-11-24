@@ -149,6 +149,23 @@ impl ManagedExecutionDomain {
     pub(crate) fn observation_end(&self) -> Option<Instant> {
         self.original_end
     }
+    pub(super) fn check_p1_selection(
+        &self,
+        root: &DelegationAuthorization,
+        manager: &str,
+        version: &str,
+        end: Instant,
+    ) -> Result<(), DomainDiagnostic> {
+        self.delegation
+            .check_selected_root(root)
+            .map_err(diagnostic)?;
+        self.manager.check_p1_manager(manager, version, end)
+    }
+
+    pub(super) fn plan(&self) -> &ExecutionPlan {
+        &self.plan
+    }
+
     pub(crate) fn wall_ms(&self) -> u64 {
         self.plan.spec.limits.wall_ms
     }

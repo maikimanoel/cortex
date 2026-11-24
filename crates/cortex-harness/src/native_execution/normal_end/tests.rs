@@ -34,6 +34,8 @@ impl Fixture {
     fn new(case: &str, terminal_micros: u64) -> Self {
         let (mut kernel, intent) = fixture::coordinator();
         let identity = fixture::identity(&intent);
+        let mut binding = fixture::binding(&intent);
+        binding.basis = source(5);
         for (id, event) in [
             (
                 "reserve",
@@ -53,7 +55,7 @@ impl Fixture {
                 "bind",
                 DomainEvent::BoundObserved {
                     domain: intent.id.clone(),
-                    observation: fixture::binding(&intent),
+                    observation: binding,
                     at: 3,
                 },
             ),
@@ -209,6 +211,16 @@ fn normal_end_keeps_cpu_debt_without_exact_independent_inputs() {
         f.check(&kernel, &op, Some(&f.witness)),
         Err(WitnessRequired)
     );
+    f.witness.terminal_fence = SourceReference::observation_reference(
+        ObservationId::new("independent-source-simulation", 5).unwrap(),
+        "changed label for original binding observation",
+        "2",
+    )
+    .unwrap();
+    assert_eq!(
+        f.check(&kernel, &op, Some(&f.witness)),
+        Err(WitnessRequired)
+    );
     f.witness.terminal_fence = source(3);
 
     f.end.transport_complete = false;
@@ -254,6 +266,10 @@ fn normal_end_witness_screens_existing_closed_and_settle_without_changing_journa
         Err(NormalEndClosureError::Canonical(_))
     ));
     let first = f.store.admit(&f.key, op.clone()).unwrap();
+    assert_eq!(
+        f.check(&f.load(), &op, Some(&f.witness)),
+        Err(NormalEndClosureError::AlreadyRecorded)
+    );
     let duplicate = f.store.admit(&f.key, op).unwrap();
     assert!(duplicate.duplicate);
     assert_eq!(duplicate.ordinal, first.ordinal);

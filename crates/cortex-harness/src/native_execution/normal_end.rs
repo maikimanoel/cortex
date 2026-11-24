@@ -61,6 +61,8 @@ pub enum NormalEndClosureError {
     CounterContinuity,
     /// The claimed final CPU debit is absent, nonunique, or numerically inconsistent.
     CpuDebit,
+    /// The exact operation was already retained and needs no new submission.
+    AlreadyRecorded,
     /// The submitted current Closed/Settle operation failed canonical admission.
     Canonical(KernelError),
 }
@@ -143,7 +145,7 @@ pub(super) fn check_normal_end_cpu_closure(
     ]
     .into_iter()
     .any(|reference| {
-        reference == &binding.basis
+        reference.origin() == binding.basis.origin()
             || !matches!(reference.origin(), SourceOrigin::ObservationReference(_))
     }) {
         return Err(WitnessRequired);
@@ -170,7 +172,13 @@ pub(super) fn check_normal_end_cpu_closure(
     {
         return Err(CpuDebit);
     }
-    kernel.preview_admission(operation).map_err(Canonical)?;
+    if kernel
+        .preview_admission(operation)
+        .map_err(Canonical)?
+        .is_duplicate()
+    {
+        return Err(AlreadyRecorded);
+    }
     Ok(amount)
 }
 

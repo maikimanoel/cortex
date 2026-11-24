@@ -667,6 +667,49 @@ impl SystemdNonceDomain {
             .map_err(|_| issue(DomainPhaseDiagnostic::Creation, DomainCause::Protocol))?;
         Ok(())
     }
+    pub(crate) fn check_p1_manager(
+        &self,
+        identity: &str,
+        version: &str,
+        end: Instant,
+    ) -> Result<(), DomainDiagnostic> {
+        let phase = DomainPhaseDiagnostic::Identity;
+        if identity != format!("{}|{}", self.connection.server_guid(), self.manager)
+            || self.current_manager_owner(end)? != self.manager
+        {
+            return Err(issue(phase, DomainCause::Correspondence));
+        }
+        let path = OwnedObjectPath::try_from(MANAGER_PATH)
+            .map_err(|_| issue(phase, DomainCause::Contract))?;
+        let actual = as_string(self.property(&path, MANAGER_INTERFACE, "Version", end)?)?;
+        if actual != version || self.current_manager_owner(end)? != self.manager {
+            return Err(issue(phase, DomainCause::Correspondence));
+        }
+        Ok(())
+    }
+
+    fn current_manager_owner(&self, end: Instant) -> Result<String, DomainDiagnostic> {
+        let phase = DomainPhaseDiagnostic::Identity;
+        let reply = bounded(
+            self.connection.call_method(
+                Some("org.freedesktop.DBus"),
+                "/org/freedesktop/DBus",
+                Some("org.freedesktop.DBus"),
+                "GetNameOwner",
+                &("org.freedesktop.systemd1",),
+            ),
+            phase,
+            end,
+        )?;
+        if reply.data().len() > 65_536 {
+            return Err(issue(phase, DomainCause::Capacity));
+        }
+        reply
+            .body()
+            .deserialize::<String>()
+            .map_err(|_| issue(phase, DomainCause::Protocol))
+    }
+
     fn property(
         &self,
         object: &OwnedObjectPath,
@@ -1138,23 +1181,7 @@ impl SystemdNonceDomain {
         {
             return ManagerRecoveryState::ChangedIncarnation;
         }
-        let owner = bounded(
-            self.connection.call_method(
-                Some("org.freedesktop.DBus"),
-                "/org/freedesktop/DBus",
-                Some("org.freedesktop.DBus"),
-                "GetNameOwner",
-                &("org.freedesktop.systemd1",),
-            ),
-            DomainPhaseDiagnostic::Identity,
-            end,
-        );
-        match owner.and_then(|reply| {
-            reply
-                .body()
-                .deserialize::<String>()
-                .map_err(|_| issue(DomainPhaseDiagnostic::Identity, DomainCause::Protocol))
-        }) {
+        match self.current_manager_owner(end) {
             Ok(actual) if actual != self.manager => {
                 return ManagerRecoveryState::ChangedIncarnation;
             }
