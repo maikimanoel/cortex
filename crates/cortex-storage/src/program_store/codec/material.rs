@@ -175,3 +175,91 @@ pub(super) fn release_material_read(
 }
 
 fields!(IntegrationAcceptance; observation, scope, approval, examination);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::program_store::tests::fixture;
+
+    #[test]
+    fn material_file_has_exact_literal_path_mode_digest_and_length_encoding() {
+        const GOLDEN: &[u8] = br#"[[97,47,98],"100755",3,[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]]"#;
+        let digest = std::array::from_fn(|index| index as u8);
+        let file = MaterialFile::new(
+            SourcePath::new(b"a/b").unwrap(),
+            MaterialMode::Executable,
+            3,
+            digest,
+        )
+        .unwrap();
+        assert_eq!(
+            encoded(&file.write().unwrap(), 1000).unwrap().as_slice(),
+            GOLDEN
+        );
+        let parsed = parsed(GOLDEN, 1000).unwrap();
+        assert!(MaterialFile::read(&parsed).unwrap() == file);
+        for invalid in [
+            json!([b"a/b", "120000", 3, digest]),
+            json!([b"../b", "100755", 3, digest]),
+            json!([b"a/b", "100755", 3, vec![0; 31]]),
+            json!([b"a/b", "100755", 64 * 1024 * 1024 + 1, digest]),
+        ] {
+            assert!(MaterialFile::read(&invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn exact_material_tag_is_canonical_and_unknown_versions_refuse() {
+        let initial = fixture::definition();
+        let kernel = CoordinationKernel::new_protected_material(initial.clone()).unwrap();
+        let scope = kernel
+            .state()
+            .readiness()
+            .scope(&fixture::task("B"))
+            .unwrap();
+        let contract = scope.context().contract().clone();
+        let observation = ObservationId::new("typed-comparison", 1).unwrap();
+        let operation = fixture::operation(
+            &kernel,
+            "typed-acceptance",
+            Command::AcceptIntegration(Box::new(IntegrationAcceptance {
+                observation: EvidenceReference::new(
+                    observation.clone(),
+                    Some(AssessmentId::new("typed-judgment").unwrap()),
+                ),
+                scope: Box::new(scope),
+                approval: fixture::source("scoped-approval"),
+                examination: Examination {
+                    observation,
+                    contract,
+                    candidate: None,
+                    profile: Some(fixture::profile()),
+                },
+            })),
+        );
+        let bytes = super::operation(&operation, 1_000_000).unwrap();
+        assert!(decode_operation(&bytes, &kernel).unwrap() == operation);
+        let mut noncanonical = bytes.to_vec();
+        noncanonical.push(b' ');
+        assert!(matches!(
+            decode_operation(&noncanonical, &kernel),
+            Err(ProgramStoreError::Corrupt)
+        ));
+        let unknown = std::str::from_utf8(&bytes)
+            .unwrap()
+            .replace("accept-integration-v1", "accept-integration-v2");
+        assert!(matches!(
+            decode_operation(unknown.as_bytes(), &kernel),
+            Err(ProgramStoreError::Corrupt)
+        ));
+
+        // Decodable input never migrates a legacy profile or confers acceptance.
+        let mut legacy = CoordinationKernel::new(initial).unwrap();
+        assert!(matches!(
+            legacy.admit(operation.clone()),
+            Err(KernelError::Core(ProgramError::EffectUnavailable))
+        ));
+        assert_eq!(legacy.revision(), 0);
+        assert!(kernel.accepted_integration(&operation.id).is_err());
+    }
+}

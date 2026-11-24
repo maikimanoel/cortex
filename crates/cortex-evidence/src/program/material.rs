@@ -188,6 +188,7 @@ impl CoordinationKernel {
         material: &MaterialRelease,
     ) -> Result<(), KernelError> {
         let mapping = self.check_material_release(operation, material)?;
+        self.check_material_identity(&material.release, mapping)?;
         let limits = material.release.limits;
         let material_remaining = limits
             .get(SupportLimitKind::MaterialBytes)
@@ -207,6 +208,44 @@ impl CoordinationKernel {
             .is_some_and(|decision| decision.released)
         {
             return Err(ProgramError::Transition.into());
+        }
+        Ok(())
+    }
+
+    fn check_material_identity(
+        &self,
+        current: &ReleaseInput,
+        mapping: &MaterialMapping,
+    ) -> Result<(), KernelError> {
+        let contract = &current.contract;
+        for operation in &self.operations {
+            let Command::ReleaseMaterial(material) = &operation.command else {
+                continue;
+            };
+            let past = &material.release.contract;
+            if past.scope().graph().id() != contract.scope().graph().id()
+                || past.scope().edge() != contract.scope().edge()
+                || past.revision() != contract.revision()
+            {
+                continue;
+            }
+            let (_, assessed) = self
+                .material_observation(material.material.observation())
+                .ok_or(ProgramError::Structure)?;
+            let MaterialSubject::Release {
+                mapping: retained, ..
+            } = &assessed.subject
+            else {
+                return Err(ProgramError::Structure.into());
+            };
+            if past.scope().requirement() != contract.scope().requirement()
+                || past.artifact_requirement() != contract.artifact_requirement()
+                || past.correspondences() != contract.correspondences()
+                || past.basis() != contract.basis()
+                || retained != mapping
+            {
+                return Err(ProgramError::IdentityConflict.into());
+            }
         }
         Ok(())
     }
@@ -461,8 +500,8 @@ impl CoordinationKernel {
                     || left.contract.scope().producer().task()
                         == right.contract.scope().producer().task()
                     || left_mapping.destination == right_mapping.destination
-                    || (left.contract.artifact_requirement()
-                        == right.contract.artifact_requirement()
+                    || (left.contract.artifact_requirement().commit()
+                        == right.contract.artifact_requirement().commit()
                         && left_mapping.source.path() == right_mapping.source.path())
                 {
                     return Err(ProgramError::Structure.into());
