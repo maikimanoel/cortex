@@ -8,7 +8,7 @@ use crate::{
     domain_coordination::{ReservationBatchError, ReservationDecision, admit_domain_reservations},
     domain_manager::DomainDiagnostic,
     domain_runtime::{
-        DomainManager, DomainOperations, DomainRun, ExecutableDomainRun,
+        DomainManager, DomainOperations, ExecutableDomainRun,
         prepare_managed_executable_domain_until, release_managed_executable_domain,
     },
 };
@@ -136,8 +136,8 @@ pub enum RawCopyP1Run {
     Observed {
         /// Fresh reservation receipt.
         reservation: AdmissionReceipt,
-        /// Actual commit-before-create/bind/release/report prefix.
-        lifecycle: Box<DomainRun>,
+        /// Actual durable lifecycle prefix and retained bounded execution evidence.
+        run: Box<ExecutableDomainRun>,
         /// Bounded preliminary raw-copy comparison.
         copy: RawCopyP1Observation,
     },
@@ -168,7 +168,7 @@ fn check_binding(binding: &RawCopyP1Binding<'_>) -> Result<(), P1Refusal> {
     if !matches!(
         binding.observer.origin(),
         SourceOrigin::ObservationReference(_)
-    ) || binding.observer == binding.approval
+    ) || binding.observer.origin() == binding.approval.origin()
     {
         return Err(P1Refusal::MissingBinding);
     }
@@ -405,7 +405,10 @@ fn execute_reserved_raw_copy(
     let Some(prepared) = preparation.prepared else {
         return RawCopyP1Run::Observed {
             reservation,
-            lifecycle: Box::new(preparation.run),
+            run: Box::new(ExecutableDomainRun {
+                domain: preparation.run,
+                execution: None,
+            }),
             copy: RawCopyP1Observation::Unresolved,
         };
     };
@@ -413,7 +416,7 @@ fn execute_reserved_raw_copy(
     let copy = assess_copy(&run, backend.plan().input());
     RawCopyP1Run::Observed {
         reservation,
-        lifecycle: Box::new(run.domain),
+        run: Box::new(run),
         copy,
     }
 }
