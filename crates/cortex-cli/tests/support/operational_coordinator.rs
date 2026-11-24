@@ -107,8 +107,15 @@ fn observed(turn: &FixtureTurn, job: &FixtureWork) {
     assert_eq!(turn.selected.as_ref(), Some(&job.proposal.task));
     assert_eq!(turn.receipts.len(), 6);
     assert!(turn.receipts.iter().all(|receipt| !receipt.duplicate));
-    let Some(FixtureProgress::Observed(run)) = &turn.progress else {
-        panic!("coordinator did not reach the canonical fixture supervisor");
+    let run = match &turn.progress {
+        Some(FixtureProgress::Observed(run)) => run,
+        Some(FixtureProgress::Dispatch { error, .. }) => panic!("dispatch refused: {error:?}"),
+        Some(FixtureProgress::Admission { failure, .. }) => {
+            panic!("admission stopped: {failure:?}")
+        }
+        Some(FixtureProgress::Budget) => panic!("coordinator exhausted its cut"),
+        Some(FixtureProgress::ConcurrentPrefix) => panic!("unexpected concurrent prefix"),
+        None => panic!("no selection: {:?}", turn.held),
     };
     assert!(run.run.recording_failure.is_none());
     assert!(run.run.started.is_some() && run.run.recorded.is_some());
