@@ -62,7 +62,7 @@ use std::{
     os::unix::fs::{MetadataExt, PermissionsExt, symlink},
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
-    sync::atomic::AtomicBool,
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
     time::{Duration, SystemTime},
 };
 use zeroize::Zeroize;
@@ -139,15 +139,26 @@ struct Campaign {
 impl Campaign {
     fn new() -> Self {
         let namespace = fixture_namespace();
-        let retained = std::env::var_os("CORTEX_GPE_CAMPAIGN_ROOT").is_some();
-        let root = std::env::var_os("CORTEX_GPE_CAMPAIGN_ROOT")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                std::env::temp_dir().join(format!("cortex-gpe-func-2t-{}", std::process::id()))
-            });
-        if !root.exists() {
-            private_dir(&root);
-        }
+        let configured = std::env::var_os("CORTEX_GPE_CAMPAIGN_ROOT").map(PathBuf::from);
+        let retained = configured.is_some();
+        let root = match configured {
+            Some(root) => {
+                if !root.exists() {
+                    private_dir(&root);
+                }
+                root
+            }
+            None => {
+                static NEXT: AtomicU64 = AtomicU64::new(0);
+                let root = std::env::temp_dir().join(format!(
+                    "cortex-gpe-func-2t-{}-{}",
+                    std::process::id(),
+                    NEXT.fetch_add(1, Ordering::Relaxed)
+                ));
+                private_dir(&root);
+                root
+            }
+        };
         let root = root.canonicalize().unwrap();
         if let Some(namespace) = namespace {
             namespace
