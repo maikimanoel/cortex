@@ -172,10 +172,14 @@ fn release_bytes(
         observation: ObservationId::new(&format!("material-evidence-{edge}"), 1).unwrap(),
     };
     let author = format!("author-{}", review.scopes()[0].task().as_str());
-    assert!(matches!(
-        observe_release_material(store, key, request(), observe(&author)),
-        Err(IntegrationError::Admission { .. })
-    ));
+    let refusal = observe_release_material(store, key, request(), observe(&author))
+        .err()
+        .expect("the producer cannot review its material");
+    assert!(
+        matches!(refusal, IntegrationError::Admission { .. }),
+        "{refusal:?}"
+    );
+
     assert_eq!(
         store.load(key, Access::ReadOnly).unwrap().revision(),
         revision
