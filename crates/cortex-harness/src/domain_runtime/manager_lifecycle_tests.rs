@@ -4,7 +4,8 @@
 use super::*;
 use crate::ServiceLimits;
 use crate::domain_coordination::{
-    ReservationBatchError, ReservationDecision, admit_domain_reservations,
+    EdgeReservationError, ReservationBatchError, ReservationDecision, admit_after_edge_release,
+    admit_domain_reservations,
 };
 use crate::native_execution::managed::{ManagerLifecycleReadback, ManagerObservationError};
 use cortex_core::program::scheduling::Resource;
@@ -802,17 +803,12 @@ fn source_graph_with_accounting(apply_accounting: bool) {
         unreachable!();
     };
     intent.effect.grant = cortex_core::program::GrantId::new("missing-grant").unwrap();
-    let decisions = admit_domain_reservations(
-        &store,
-        &key(),
-        vec![wrong, reservations[0].clone(), reservations[1].clone()],
-        NonZeroUsize::new(3).unwrap(),
-    )
-    .unwrap();
+    let decisions =
+        admit_domain_reservations(&store, &key(), vec![wrong, reservations[0].clone()], two)
+            .unwrap();
     let [
         ReservationDecision::Held(failure),
         ReservationDecision::Reserved(reserved_b),
-        ReservationDecision::Reserved(reserved_e),
     ] = decisions.as_slice()
     else {
         panic!("wrong decisions: {decisions:?}");
@@ -828,6 +824,27 @@ fn source_graph_with_accounting(apply_accounting: bool) {
         )
     ));
     assert_eq!(reserved_b.ordinal, before.revision() + 1);
+    let accepted_from_d = OperationId::new("release-DE").unwrap();
+    let accepted_from_a = OperationId::new("release-AB").unwrap();
+    let absent = OperationId::new("unpublished-release").unwrap();
+    assert!(matches!(
+        admit_after_edge_release(&store, &key(), &absent, reservations[1].clone()),
+        Err(EdgeReservationError::ReleaseUnavailable)
+    ));
+    assert!(matches!(
+        admit_after_edge_release(&store, &key(), &accepted_from_a, reservations[1].clone()),
+        Err(EdgeReservationError::DifferentConsumer)
+    ));
+    assert!(matches!(
+        admit_after_edge_release(&store, &key(), &accepted_from_d, reservations[0].clone()),
+        Err(EdgeReservationError::Revision { observed }) if observed == reserved_b.ordinal
+    ));
+    let decision =
+        admit_after_edge_release(&store, &key(), &accepted_from_d, reservations[1].clone())
+            .unwrap();
+    let ReservationDecision::Reserved(reserved_e) = decision else {
+        panic!("accepted release of DE must reconsider E: {decision:?}");
+    };
     assert_eq!(reserved_e.ordinal, reserved_b.ordinal + 1);
     let repeated = admit_domain_reservations(&store, &key(), reservations.to_vec(), two).unwrap();
     assert!(matches!(
@@ -968,21 +985,21 @@ fn source_graph_with_accounting(apply_accounting: bool) {
     }
     let current = store.load(&key(), Access::ReadOnly).unwrap();
     let revision = current.revision();
-    let held = admit_domain_reservations(
+    let held = admit_after_edge_release(
         &store,
         &key(),
-        vec![fixture::domain_operation(
+        &OperationId::new("release-EF").unwrap(),
+        fixture::domain_operation(
             &current,
             "graph-reserve-F",
             Command::Domain(Box::new(DomainEvent::Reserve {
                 intent: f.clone(),
                 at: current.domains().unwrap().last_tick(),
             })),
-        )],
-        NonZeroUsize::MIN,
+        ),
     )
     .unwrap();
-    let [ReservationDecision::Held(refused)] = held.as_slice() else {
+    let ReservationDecision::Held(refused) = held else {
         panic!("F cannot reserve while CPU debt is unresolved: {held:?}");
     };
     // Accepted dependencies and fresh authority do not settle unknown cumulative
@@ -1067,4 +1084,41 @@ fn source_graph_with_accounting(apply_accounting: bool) {
                 .holds(Resource::WorkerSlots)
         );
     }
+    let current = store.load(&key(), Access::ReadOnly).unwrap();
+    let release_id = OperationId::new("release-EF").unwrap();
+    let Command::Release(accepted) = &current
+        .operations()
+        .iter()
+        .find(|operation| operation.id == release_id)
+        .unwrap()
+        .command
+    else {
+        panic!("failed to retain the original release of EF");
+    };
+    let invalidation = fixture::domain_operation(
+        &current,
+        "invalidate-accepted-ef",
+        Command::InvalidateEvidence {
+            observation: accepted.examinations[0].observation.clone(),
+            reason: "Synthetic source observation no longer applies".into(),
+        },
+    );
+    store.admit(&key(), invalidation).unwrap();
+    let invalidated = store.load(&key(), Access::ReadOnly).unwrap();
+    let probe = fixture::domain_operation(
+        &invalidated,
+        "reconsider-after-invalidation",
+        Command::Domain(Box::new(DomainEvent::Reserve {
+            intent: f,
+            at: invalidated.domains().unwrap().last_tick(),
+        })),
+    );
+    assert!(matches!(
+        admit_after_edge_release(&store, &key(), &release_id, probe),
+        Err(EdgeReservationError::ReleaseUnavailable)
+    ));
+    assert_eq!(
+        store.load(&key(), Access::ReadOnly).unwrap().revision(),
+        invalidated.revision(),
+    );
 }

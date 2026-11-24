@@ -359,7 +359,10 @@ grant. The canonical store reloads under its lifecycle lock and applies
 the existing Core and Evidence checks for current dependencies, claim,
 candidate, package, authority and resource capacity. The caller selects
 which tasks to reconsider after a dependency release or resource change.
-The order is explicit and supplies no scheduler priority or aging policy.
+`admit_after_edge_release` targets only the consumer of a retained,
+currently released edge at the supplied journal revision. The store
+then rechecks the consumer's entire required fan-in. The caller's batch
+order supplies no scheduler priority or aging policy.
 
 The result distinguishes new reservations, exact duplicates, governed
 holds and storage stops. A governed hold leaves other selected inputs
