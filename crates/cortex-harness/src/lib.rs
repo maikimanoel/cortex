@@ -30,10 +30,11 @@ pub use domain_manager::{
 };
 #[cfg(target_os = "linux")]
 pub use domain_runtime::{
-    DomainAdmissionAttempt, DomainOperations, DomainPreparation, DomainRecoveryObservation,
-    DomainRun, PreparedNonceDomain, cancel_nonce_domain, cancel_prepared_nonce_domain,
-    execute_nonce_domain, inspect_nonce_domain, observe_nonce_domain_closure,
-    observe_nonce_domain_closure_tree, prepare_nonce_domain, release_nonce_domain,
+    DomainAdmissionAttempt, DomainCancellationAttemptError, DomainOperations, DomainPreparation,
+    DomainRecoveryObservation, DomainRun, PreparedNonceDomain, cancel_nonce_domain,
+    cancel_prepared_nonce_domain, execute_nonce_domain, inspect_nonce_domain,
+    observe_nonce_domain_closure, observe_nonce_domain_closure_tree, prepare_nonce_domain,
+    release_nonce_domain,
 };
 
 #[cfg(target_os = "linux")]
@@ -70,7 +71,7 @@ pub mod structured_output;
 #[cfg(target_os = "linux")]
 pub use domain_runtime::{
     ManagedClosureObservationAttemptError, ManagedClosureObservationError,
-    cancel_managed_executable_domain, observe_managed_executable_closure_tree,
-    observe_managed_executable_closure_tree_with_attempt, prepare_managed_executable_domain,
-    release_managed_executable_domain,
+    cancel_managed_executable_domain, cancel_managed_executable_domain_with_attempt,
+    observe_managed_executable_closure_tree, observe_managed_executable_closure_tree_with_attempt,
+    prepare_managed_executable_domain, release_managed_executable_domain,
 };

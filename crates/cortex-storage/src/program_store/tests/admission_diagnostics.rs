@@ -720,3 +720,134 @@ fn fixture_reservation_readback_refuses_conflict_and_later_disposition() {
     ));
     assert_eq!(snapshot(&f), cancelled);
 }
+
+#[test]
+fn native_sql_insert_and_commit_failures_preserve_fixture_effect_boundaries() {
+    use cortex_core::program::supervision::{ProcessCompletion, Quiescence};
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
+
+    #[derive(Clone, Copy)]
+    enum Cut {
+        Insert,
+        InsertAndRollback,
+        Commit,
+    }
+
+    for terminal in [false, true] {
+        for cut in [Cut::Insert, Cut::InsertAndRollback, Cut::Commit] {
+            let root = Temp::new();
+            let (store, base, dispatch) = prepared(&root);
+            let (base, input) = if terminal {
+                // This zero-payload SQL exercise uses a real canonical
+                // pre-spawn refusal to produce a valid terminal input.
+                let Command::SupervisedEffect(effect) = &dispatch.command else {
+                    panic!("supervised dispatch required");
+                };
+                let EffectEvent::Dispatch { effect, scope, .. } = effect.as_ref() else {
+                    panic!("supervised dispatch required");
+                };
+                let (receipt, launched) = store
+                    .dispatch_fixture(&key(), dispatch.clone(), |_| ())
+                    .unwrap();
+                assert!(!receipt.duplicate && launched.is_some());
+                let image = store.load(&key(), Access::ReadOnly).unwrap();
+                let observation = supervised::observation(
+                    image.fixture_effects().process_spec(effect).unwrap(),
+                    1,
+                    ProcessCompletion::StartFailed,
+                    Quiescence::NoChildStarted,
+                );
+                let report = operation(
+                    &image,
+                    "controlled-fault-terminal",
+                    Command::SupervisedEffect(Box::new(EffectEvent::ProcessObserved {
+                        effect: effect.clone(),
+                        scope: scope.clone(),
+                        at: 4,
+                        observation,
+                    })),
+                );
+                (image, report)
+            } else {
+                (base, dispatch)
+            };
+            let mut diagnostics = AdmissionDiagnostics::default();
+            let failed = store
+                .admit_diagnostic_observed(
+                    &key(),
+                    input.clone(),
+                    |stage, connection| {
+                        let selected = match cut {
+                            Cut::Commit => Stage::BeforeCommit,
+                            _ => Stage::BeforeWrite,
+                        };
+                        if stage == selected {
+                            connection
+                                .authorizer(Some(move |context: AuthContext<'_>| {
+                                    let denied = match (cut, context.action) {
+                                        (
+                                            Cut::Insert | Cut::InsertAndRollback,
+                                            AuthAction::Insert { table_name },
+                                        ) => table_name == "program_inputs",
+                                        (
+                                            Cut::InsertAndRollback,
+                                            AuthAction::Transaction {
+                                                operation: TransactionOperation::Rollback,
+                                            },
+                                        )
+                                        | (
+                                            Cut::Commit,
+                                            AuthAction::Transaction {
+                                                operation: TransactionOperation::Commit,
+                                            },
+                                        ) => true,
+                                        _ => false,
+                                    };
+                                    if denied {
+                                        Authorization::Deny
+                                    } else {
+                                        Authorization::Allow
+                                    }
+                                }))
+                                .unwrap();
+                        }
+                    },
+                    |_| panic!("failed or uncertain SQL operation called its effect callback"),
+                    &mut diagnostics,
+                    None,
+                )
+                .unwrap_err();
+            let expected = match cut {
+                Cut::Insert => Completion::RolledBack,
+                Cut::InsertAndRollback | Cut::Commit => Completion::Indeterminate,
+            };
+            assert_eq!(failed.completion, expected);
+            assert!(matches!(failed.error, ProgramStoreError::Storage(_)));
+            assert_complete(&diagnostics, &input, &store);
+            let events = stages(&diagnostics);
+            assert!(events.contains(&AdmissionStage::Insert));
+            assert!(!events.contains(&AdmissionStage::CommitAcknowledged));
+            match cut {
+                Cut::Insert => assert!(events.contains(&AdmissionStage::RollbackAcknowledged)),
+                Cut::InsertAndRollback => assert!(events.contains(&AdmissionStage::RollbackFailed)),
+                Cut::Commit => {
+                    assert!(events.contains(&AdmissionStage::InsertAcknowledged));
+                    assert!(events.contains(&AdmissionStage::Commit));
+                    assert!(!events.contains(&AdmissionStage::RollbackAcknowledged));
+                }
+            }
+            let reopened =
+                ProgramStore::open(&root.store(), &key(), Access::ReadOnly, limits()).unwrap();
+            let image = reopened.load(&key(), Access::ReadOnly).unwrap();
+            assert!(image.operations() == base.operations());
+            assert!(image.fixture_effects() == base.fixture_effects());
+            assert_eq!(
+                reopened
+                    .reconcile(&key(), base.initial(), &input, Access::ReadOnly)
+                    .unwrap(),
+                Reconciliation::Absent
+            );
+            assert_eq!(failed.completion, expected);
+        }
+    }
+}
