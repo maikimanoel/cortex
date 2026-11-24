@@ -511,6 +511,19 @@ fn ordinary_fixture_reserve_late_ack_requires_exact_readback() {
         presence, Ok(Reconciliation::Present(receipt))
             if receipt.ordinal == input.expected + 1 && receipt.store == store.id() && receipt.duplicate
     ));
+    // This command stays outside the existing metadata readback policy.
+    assert!(matches!(
+        gpe_admission::confirm_metadata(
+            Err(AdmissionFailure {
+                completion: Completion::Indeterminate,
+                error: ProgramStoreError::Deadline,
+            }),
+            &input,
+            store.id(),
+            || panic!("metadata confirmation must not read a reserve"),
+        ),
+        Err(gpe_admission::UnconfirmedAdmission::Original(_))
+    ));
     let snapshot_before_read = snapshot(&f);
     let observed = gpe_admission::confirm_synthetic_reservation(
         Err(failure),

@@ -2,6 +2,8 @@
 //! GPE-FUNC-2T Q0-Q7: real trusted artifacts through the existing production owners.
 #[path = "support/gpe_admission.rs"]
 mod gpe_admission;
+#[path = "support/gpe_admission_tests.rs"]
+mod gpe_admission_tests;
 #[path = "support/gpe_evaluation.rs"]
 mod gpe_evaluation;
 #[path = "support/gpe_identity.rs"]
