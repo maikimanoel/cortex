@@ -5,7 +5,12 @@
 //! workspace. This is not a new containment backend or an acceptance authority.
 
 mod codex_cli;
+mod workspace;
 pub use codex_cli::{CodexCliHold, CodexCliInspection, inspect_codex_cli_invocation};
+pub use workspace::{
+    FixtureWorkspace, FixtureWorkspaceRequest, WorkspaceError, WorkspaceFixtureRun,
+    prepare_fixture_workspace, run_workspace_fixture,
+};
 
 use crate::{InspectionError, inspect_candidate, program_preparation::ExecutorPreparation};
 use cortex_core::{
@@ -58,6 +63,8 @@ pub enum ExecutionError {
     ArtifactDigest,
     /// Canonical state changed during artifact capture.
     ChangedRevision,
+    /// Fresh attempt output custody could not be established.
+    AttemptWorkspace(WorkspaceError),
 }
 
 impl fmt::Display for ExecutionError {
@@ -76,6 +83,7 @@ impl fmt::Display for ExecutionError {
             Self::Artifact(_) => "program execution: artifact capture refused",
             Self::ArtifactDigest => "program execution: artifact digest mismatch",
             Self::ChangedRevision => "program execution: canonical revision changed during capture",
+            Self::AttemptWorkspace(error) => return fmt::Display::fmt(error, f),
         })
     }
 }
@@ -89,6 +97,7 @@ impl Error for ExecutionError {
             Self::Binding(error) => Some(error),
             Self::Harness(error) => Some(error),
             Self::Artifact(error) => Some(error),
+            Self::AttemptWorkspace(error) => Some(error),
             _ => None,
         }
     }
@@ -160,6 +169,16 @@ pub fn run_prepared_fixture(
     request: PreparedFixtureRun<'_>,
     cancel: &AtomicBool,
 ) -> Result<FixtureRun, ExecutionError> {
+    run_prepared_fixture_inner(store, key, request, None, cancel)
+}
+
+fn run_prepared_fixture_inner(
+    store: &ProgramStore,
+    key: &StoreKey,
+    request: PreparedFixtureRun<'_>,
+    attempt_workspace: Option<&FixtureWorkspace>,
+    cancel: &AtomicBool,
+) -> Result<FixtureRun, ExecutionError> {
     if store.profile() != ProgramProfile::SupervisedFixturesV3
         || request
             .preparation
@@ -229,6 +248,17 @@ pub fn run_prepared_fixture(
         return Err(ExecutionError::Dispatch);
     }
     let workspace = check_workspace(current.context(), request.workspace_observation)?;
+    if let Some(attempt) = attempt_workspace {
+        if attempt.store != store.id()
+            || &attempt.effect != effect
+            || &attempt.scope != scope
+            || spec.cwd != scope.candidate.repository().root()
+            || spec.args.get(attempt.output_argument).map(Path::new) != Some(attempt.output())
+        {
+            return Err(WorkspaceError::Correspondence.into());
+        }
+        attempt.check_empty()?;
+    }
     drop(kernel);
     let run = execute_fixture(
         store,
