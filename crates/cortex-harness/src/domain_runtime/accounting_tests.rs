@@ -647,6 +647,21 @@ fn partial_accounting_capture_requires_cancellation_and_the_original_open_window
     .err()
     .unwrap();
     assert_eq!(refused.cause, DomainCause::Deadline);
+    // The caller's start is earlier than its bound, but the read itself now
+    // begins after that bound. This reaches the original deadline in Storage.
+    let past = start - Duration::from_secs(1);
+    let refused = capture_closure_tree(
+        &store,
+        &key(),
+        &mut manager,
+        &ids,
+        observation.clone(),
+        past,
+        start,
+    )
+    .err()
+    .unwrap();
+    assert_eq!(refused.cause, DomainCause::Deadline);
     let refused = capture_closure_tree(
         &store,
         &key(),
