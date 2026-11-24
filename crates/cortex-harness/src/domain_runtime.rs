@@ -377,21 +377,32 @@ fn current(
         .at
         .checked_add(elapsed)
         .ok_or_else(|| issue(DomainPhaseDiagnostic::Release, DomainCause::Deadline))?;
-    if cancel.load(Ordering::SeqCst) || Instant::now() >= end {
-        return Err(issue(
-            DomainPhaseDiagnostic::Release,
-            DomainCause::Authority,
-        ));
-    }
+    let still_live = || {
+        if cancel.load(Ordering::SeqCst) {
+            Err(issue(
+                DomainPhaseDiagnostic::Release,
+                DomainCause::Authority,
+            ))
+        } else if Instant::now() >= end {
+            #[cfg(test)]
+            eprintln!("Current cut expired: elapsed_ms={elapsed}, logical_tick={at}");
+            Err(issue(DomainPhaseDiagnostic::Release, DomainCause::Deadline))
+        } else {
+            Ok(())
+        }
+    };
+    still_live()?;
     kernel
         .check_domain_current(&ids.domain, at)
-        .map_err(|_| issue(DomainPhaseDiagnostic::Release, DomainCause::Authority))?;
-    if cancel.load(Ordering::SeqCst) || Instant::now() >= end {
-        return Err(issue(
-            DomainPhaseDiagnostic::Release,
-            DomainCause::Authority,
-        ));
-    }
+        .map_err(|_error| {
+            #[cfg(test)]
+            eprintln!(
+                "Current authority rejected: elapsed_ms={elapsed}, logical_tick={at}, journal_tick={:?}, cause={_error:?}",
+                kernel.domains().map(|projection| projection.last_tick())
+            );
+            issue(DomainPhaseDiagnostic::Release, DomainCause::Authority)
+        })?;
+    still_live()?;
     Ok(at)
 }
 
