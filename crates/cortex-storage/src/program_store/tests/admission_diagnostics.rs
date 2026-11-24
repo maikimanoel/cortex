@@ -740,7 +740,7 @@ fn native_sql_insert_and_commit_failures_preserve_fixture_effect_boundaries() {
             let (base, input) = if terminal {
                 // This zero-payload SQL exercise uses a real canonical
                 // pre-spawn refusal to produce a valid terminal input.
-                let Command::SupervisedEffect(effect) = &dispatch.command else {
+                let Input::SupervisedEffect(effect) = &dispatch.command else {
                     panic!("supervised dispatch required");
                 };
                 let EffectEvent::Dispatch { effect, scope, .. } = effect.as_ref() else {
@@ -760,7 +760,7 @@ fn native_sql_insert_and_commit_failures_preserve_fixture_effect_boundaries() {
                 let report = operation(
                     &image,
                     "controlled-fault-terminal",
-                    Command::SupervisedEffect(Box::new(EffectEvent::ProcessObserved {
+                    Input::SupervisedEffect(Box::new(EffectEvent::ProcessObserved {
                         effect: effect.clone(),
                         scope: scope.clone(),
                         at: 4,
@@ -798,7 +798,9 @@ fn native_sql_insert_and_commit_failures_preserve_fixture_effect_boundaries() {
                                         | (
                                             Cut::Commit,
                                             AuthAction::Transaction {
-                                                operation: TransactionOperation::Commit,
+                                                // In the locked rusqlite version COMMIT is Unknown.
+                                                // The callback is installed only at BeforeCommit.
+                                                operation: TransactionOperation::Unknown,
                                             },
                                         ) => true,
                                         _ => false,
