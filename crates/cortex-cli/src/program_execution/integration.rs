@@ -1,5 +1,11 @@
 //! Bound examinations of selected committed files in a distinct integration candidate.
 
+mod protected;
+pub use protected::{
+    AcceptedMaterialObservation, MaterialReleaseRequest, ProtectedIntegrationRequest,
+    observe_protected_integration, observe_release_material,
+};
+
 use super::{ExecutionError, check_workspace};
 use crate::{
     InspectionError,

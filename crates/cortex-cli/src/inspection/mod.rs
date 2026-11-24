@@ -389,7 +389,7 @@ pub(crate) fn committed_blob(
 pub(crate) struct CommittedFile {
     pub(crate) bytes: Vec<u8>,
     #[cfg(target_os = "linux")]
-    executable: bool,
+    pub(crate) executable: bool,
 }
 
 #[cfg(target_os = "linux")]

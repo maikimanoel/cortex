@@ -67,6 +67,11 @@ pub fn artifact_sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+/// Binary SHA-256 of an already bounded artifact byte slice.
+pub fn artifact_digest(bytes: &[u8]) -> [u8; 32] {
+    Sha256::digest(bytes).into()
+}
+
 /// Retained bytes with exact declared artifact/effect/observation correspondence.
 /// This in-memory capture creates no second authoritative journal or assessment.
 pub struct CapturedArtifact {
