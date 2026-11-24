@@ -16,10 +16,11 @@ use crate::{
 use cortex_core::{
     TaskId,
     binding::{ObservationId, RepositoryIdentity},
-    parallel::Event,
+    parallel::{EdgeDecision, Event},
     program::{
         Attempt, CoordinationGrant, OperationId,
         context::PackageRequest,
+        executor::ObservationKind,
         operational::{EffectEvent, EffectId, EffectIntent, OperationalError, OperationalGrant},
         scheduling::{Proposal, WaitReason},
         supervision::ProcessSpec,
@@ -357,16 +358,31 @@ fn affected_tasks(
         return Err(FixtureTurnError::Cursor);
     }
     let mut affected = BTreeSet::new();
+    if index == kernel.operations().len() {
+        return Ok(Some(affected));
+    }
+    let mut released = BTreeSet::new();
+    let mut latest = BTreeMap::new();
+    for decision in kernel
+        .decisions()
+        .iter()
+        .filter(|decision| decision.released)
+    {
+        released.insert(&decision.operation);
+        latest.insert(decision.edge.as_str(), &decision.operation);
+    }
     for op in &kernel.operations()[index..] {
         match &op.command {
             Command::Notify(event) if matches!(event.event(), Event::Signal { .. }) => (),
-            Command::Release(input)
-                if kernel
-                    .decisions()
-                    .iter()
-                    .any(|d| d.operation == op.id && d.released) =>
-            {
-                affected.insert(input.contract.scope().consumer().task().as_str().to_owned());
+            Command::Release(input) if released.contains(&op.id) => {
+                let edge = input.contract.scope().edge();
+                if latest.get(edge.as_str()) == Some(&&op.id)
+                    && kernel.state().readiness().edge(edge).is_ok_and(|state| {
+                        matches!(state.decision(), EdgeDecision::Released { review, .. } if review == input.review.id())
+                    })
+                {
+                    affected.insert(input.contract.scope().consumer().task().as_str().to_owned());
+                }
             }
             // Failed releases and validity observations can invalidate other
             // consumers. A shared resource or policy event can affect all.
@@ -393,6 +409,12 @@ fn stage(kernel: &CoordinationKernel, job: &FixtureWork) -> Result<Staged, Fixtu
         || scope.package_revision != job.package.revision
         || scope.package != job.input.package
         || scope.package_revision != job.input.revision
+        || job
+            .input
+            .requirements
+            .required()
+            .iter()
+            .any(|required| required.kind != ObservationKind::ControlledFixture)
         || job.process.prepared_input != job.operations.input
         || job.process.containment.is_some()
         || job.process.identity_checkpoint.is_some()
