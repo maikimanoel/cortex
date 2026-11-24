@@ -1336,14 +1336,14 @@ fn a_deadline_consumed_before_the_post_commit_launch_boundary_starts_no_child() 
     let outcome = launch_after_commit(
         &f.pin,
         &kernel,
-        &support::intent(&f.scope).id,
-        &f.scope,
+        (&support::intent(&f.scope).id, &f.scope),
         3,
         old,
         FixtureCut {
             cancel: &AtomicBool::new(false),
             end: None,
         },
+        None,
     )
     .unwrap();
     assert!(outcome.is_none());
@@ -1399,14 +1399,14 @@ fn consumed_startup_deadline_does_not_borrow_the_remaining_wall_budget() {
     let outcome = launch_after_commit(
         &f.pin,
         &kernel,
-        &support::intent(&f.scope).id,
-        &f.scope,
+        (&support::intent(&f.scope).id, &f.scope),
         3,
         old,
         FixtureCut {
             cancel: &AtomicBool::new(false),
             end: None,
         },
+        None,
     )
     .unwrap();
     assert!(outcome.is_none());
@@ -2171,4 +2171,160 @@ fn unknown_start_receipt_stops_owned_process_without_releasing_input() {
             .duplicate
     );
     assert_eq!(fs::read(marker).unwrap(), b"started\n");
+}
+
+#[test]
+fn committed_identity_checkpoint_with_lost_delivery_withholds_all_input() {
+    let root = Temp::new();
+    let repo = root.0.join("repo");
+    fs::create_dir(&repo).unwrap();
+    let binary = repo.join("fixture");
+    install_binary(&binary);
+    let (mut kernel, scope, mut spec) = support::configured_scope_kernel(Some(&repo));
+    spec.executable = binary;
+    let marker = root.0.join("launch-count");
+    spec.args = vec!["count".into(), marker.to_str().unwrap().into()];
+    spec.limits.executable_bytes = 16_000_000;
+    spec.limits.argument_bytes = 4096;
+    spec.identity_checkpoint = Some(IdentityCheckpointPolicy::BeforeInputV1);
+    let mut direct_spec = spec.clone();
+    direct_spec.containment = None;
+    direct_spec.identity_checkpoint = None;
+    let prepared = &kernel.prepared_inputs()[0].1;
+    let limits = kernel.state().definition().limits();
+    let direct = inspect_fixture(&direct_spec, prepared, limits).unwrap();
+    let mut pin = inspect_fixture(&direct_spec, prepared, limits).unwrap();
+    pin.spec = spec.clone();
+    support::prepare(&mut kernel, &scope, &spec);
+
+    let key = StoreKey::new(&[73; 32]).unwrap();
+    let store = seed_store(
+        &root.0.join("store"),
+        &key,
+        kernel.initial(),
+        kernel.operations(),
+    );
+    let dispatch = support::dispatch_operation(&kernel, &scope);
+    let identity_ids = IdentityCaptureIds {
+        checkpoint_operation: OperationId::new("scope-checkpoint-lost-delivery").unwrap(),
+        checkpoint_observation: ObservationId::new("harness", 3).unwrap(),
+    };
+
+    // Only the approved direct child is launched. Matching owned-scope facts
+    // are simulation inputs, preserved separately from actual child identity.
+    let launch = |start, current: &mut dyn FnMut() -> bool| {
+        let mut running = spawn_checked(&direct, start, current)?;
+        let selected_scope = spec.containment.as_ref().unwrap();
+        running.scope = Some(Box::new(ControlledScope {
+            facts: support::scope_observation(selected_scope, Some(true)),
+            acquired: None,
+        }));
+        Ok(running)
+    };
+    let delivered = std::cell::RefCell::new(None);
+    let submit = |stage, operation: &Operation| {
+        if stage == RecordingStage::IdentityCheckpoint {
+            let until = Instant::now() + Duration::from_millis(300);
+            loop {
+                if fs::read(&marker).is_ok_and(|bytes| bytes == b"started\n") {
+                    break;
+                }
+                assert!(
+                    Instant::now() < until,
+                    "owned fixture never announced startup"
+                );
+                thread::sleep(POLL);
+            }
+        }
+        let receipt = store.admit(&key, operation.clone())?;
+        assert!(!receipt.duplicate);
+        if stage == RecordingStage::IdentityCheckpoint {
+            assert!(
+                delivered
+                    .replace(Some((receipt, operation.clone())))
+                    .is_none()
+            );
+            Err(lost_reply())
+        } else {
+            Ok(receipt)
+        }
+    };
+    let cancel = AtomicBool::new(false);
+    let run = execute_fixture_inner(
+        (&store, &key),
+        dispatch.clone(),
+        ids(),
+        Some(identity_ids.clone()),
+        &pin,
+        FixtureCut {
+            cancel: &cancel,
+            end: None,
+        },
+        FixtureTestCuts {
+            record: Some(&submit),
+            launch: Some(&launch),
+            ..FixtureTestCuts::default()
+        },
+    )
+    .unwrap();
+    assert!(run.started.is_some() && run.identity_checkpoint.is_none() && run.recorded.is_none());
+    let original = run.recording_failure.unwrap();
+    assert_eq!(original.completion, Completion::Indeterminate);
+    assert!(matches!(original.error, ProgramStoreError::Deadline));
+    let recovery = run.recording_recovery.unwrap();
+    assert_eq!(recovery.stage, RecordingStage::IdentityCheckpoint);
+    assert!(recovery.readback.is_none());
+    let (receipt, operation) = delivered.into_inner().unwrap();
+    assert!(recovery.operation.as_ref() == Some(&operation));
+    let terminal = run.observation.unwrap();
+    assert_eq!(terminal.input_bytes, 0);
+    assert_eq!(
+        terminal.completion,
+        ProcessCompletion::Interrupted {
+            reason: InterruptionReason::AuthorityUnknown
+        }
+    );
+    let child = terminal.process.unwrap();
+    assert!(!Path::new(&format!("/proc/{}", child.pid)).exists());
+
+    let reopened = ProgramStore::open(
+        &root.0.join("store"),
+        &key,
+        Access::ReadOnly,
+        store.read_limits(),
+    )
+    .unwrap();
+    assert_eq!(
+        recovery
+            .reconcile(&reopened, &key, kernel.initial())
+            .unwrap(),
+        Some(Reconciliation::Present(AdmissionReceipt {
+            duplicate: true,
+            ..receipt
+        })),
+    );
+    let after = reopened.load(&key, Access::ReadOnly).unwrap();
+    let effect = &after.fixture_effects().effects()[0];
+    assert!(effect.pending());
+    assert_eq!(effect.process_observations.len(), 2);
+    let checkpoint = effect.process_observations.last().unwrap();
+    assert_eq!(checkpoint.completion, ProcessCompletion::IdentityVerified);
+    assert_eq!(checkpoint.input_bytes, 0);
+    assert_eq!(fs::read(&marker).unwrap(), b"started\n");
+    let repeated = execute_fixture_with_identity_checkpoint(
+        &store,
+        &key,
+        dispatch,
+        ids(),
+        identity_ids,
+        &pin,
+        &cancel,
+    )
+    .unwrap();
+    assert!(repeated.dispatch.duplicate && repeated.observation.is_none());
+    assert_eq!(fs::read(marker).unwrap(), b"started\n");
+    assert_eq!(
+        reopened.load(&key, Access::ReadOnly).unwrap().revision(),
+        receipt.ordinal
+    );
 }

@@ -143,10 +143,15 @@ type TestRecordingAdmission<'a> =
     dyn Fn(RecordingStage, &Operation) -> Result<AdmissionReceipt, AdmissionFailure> + 'a;
 
 #[cfg(test)]
+type TestFixtureLaunch<'a> =
+    dyn Fn(Instant, &mut dyn FnMut() -> bool) -> Result<Running, SpawnFailure> + 'a;
+
+#[cfg(test)]
 #[derive(Default)]
 struct FixtureTestCuts<'a> {
     withhold_dispatch_reply: bool,
     before_dispatch: Option<&'a dyn Fn()>,
+    launch: Option<&'a TestFixtureLaunch<'a>>,
     record: Option<&'a TestRecordingAdmission<'a>>,
 }
 
@@ -1274,11 +1279,11 @@ impl FixtureCut<'_> {
 fn launch_after_commit(
     prepared: &PinnedFixture,
     current: &CoordinationKernel,
-    effect: &EffectId,
-    scope: &EffectScope,
+    (effect, scope): (&EffectId, &EffectScope),
     at: u64,
     start: Instant,
     cut: FixtureCut<'_>,
+    #[cfg(test)] launch_fixture: Option<&TestFixtureLaunch<'_>>,
 ) -> Result<Option<Running>, SpawnFailure> {
     if !cut.permits(start, &prepared.spec.limits) || prepared.check(current, effect).is_err() {
         return Ok(None);
@@ -1303,7 +1308,7 @@ fn launch_after_commit(
         // from a timeout or an ambiguous operating-system spawn error.
         return Ok(None);
     }
-    spawn_checked(prepared, start, || {
+    let current = || {
         let ms = elapsed(start);
         cut.permits(start, &prepared.spec.limits)
             && ms < prepared.spec.limits.wall_ms
@@ -1319,8 +1324,13 @@ fn launch_after_commit(
                     .check_supervised_current(current.state(), effect, scope, tick)
                     .is_ok()
             })
-    })
-    .map(Some)
+    };
+    #[cfg(test)]
+    if let Some(launch_fixture) = launch_fixture {
+        let mut current = current;
+        return launch_fixture(start, &mut current).map(Some);
+    }
+    spawn_checked(prepared, start, current).map(Some)
 }
 
 /// Run one explicitly retained trusted fixture through the canonical store gate.
@@ -1558,7 +1568,16 @@ fn execute_fixture_inner(
     }
     let (receipt, launched) = store
         .dispatch_fixture(key, dispatch.clone(), |current| {
-            launch_after_commit(prepared, current, &effect, &scope, at, start, cut)
+            launch_after_commit(
+                prepared,
+                current,
+                (&effect, &scope),
+                at,
+                start,
+                cut,
+                #[cfg(test)]
+                test_cuts.launch,
+            )
         })
         .map_err(HarnessError::Admission)?;
     let Some(launched) = launched else {
