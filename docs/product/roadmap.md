@@ -279,8 +279,11 @@ baseline must not depend on a paid service or a separately installed instruction
 The earlier inspector/grounding wave proposal is not a current launch allocation.
 The delivered source-set/full-rebuild conformance mechanisms already provide bounded
 grounding coverage; do not manufacture another worker merely to repeat that work.
-The method inspector still needs its admission decisions and a qualified initial
-set. A selector consumes its reviewed interface and evidence and therefore waits.
+The bounded P0 method inspector is admitted under the scoped
+[DEC-007](../decisions/open-decisions.md#dec-007) and
+[DEC-012](../decisions/open-decisions.md#dec-012) decisions. A selector still
+requires an accepted initial method set and the applicable adoption and review
+decisions.
 The native parallel control-plane preview below is a separate bounded building block,
 not a replacement for method qualification or an effectful execution shortcut.
 
