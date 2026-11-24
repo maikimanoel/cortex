@@ -492,6 +492,33 @@ impl ProgramStore {
     pub fn id(&self) -> StoreId {
         self.id
     }
+
+    /// Derive material from an explicitly supplied version-four operation.
+    ///
+    /// This uses the unchanged canonical operation codec and the caller's
+    /// existing store byte bound. It reads no journal and confers no currentness,
+    /// admission, or authority. The callback must protect the supplied material.
+    pub fn derive_domain_operation<R>(
+        &self,
+        operation: &Operation,
+        derive: impl FnOnce(&[u8]) -> R,
+    ) -> Result<R, ProgramStoreError> {
+        use cortex_core::program::domain::DomainEvent;
+        use cortex_evidence::program::Command;
+        if self.profile != ProgramProfile::RecoverableDomainsV4
+            || !matches!(&operation.command, Command::Domain(event) if matches!(
+                event.as_ref(),
+                DomainEvent::Reserve { .. }
+                    | DomainEvent::CreateRequested { .. }
+                    | DomainEvent::BoundObserved { .. }
+                    | DomainEvent::ReleaseRequested { .. }
+            ))
+        {
+            return Err(ProgramStoreError::Unsupported);
+        }
+        let material = codec::operation(operation, self.limits.bytes)?;
+        Ok(derive(material.as_slice()))
+    }
     /// Reconstruct through Core/Evidence from complete canonical inputs. This does
     /// not recapture Git or establish live freshness. Read-only performs no writes.
     pub fn load(

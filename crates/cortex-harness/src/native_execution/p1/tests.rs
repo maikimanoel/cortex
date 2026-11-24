@@ -115,18 +115,6 @@ fn candidate_revocation_reuse_and_staleness_refuse_before_managed_effects() {
         check_binding(&alias_binding),
         Err(P1Refusal::MissingBinding)
     ));
-    let original = kernel.revision();
-    assert!(matches!(
-        after_independent_qualification(
-            Err(P1Refusal::IndependentQualificationUnavailable),
-            || {
-                let _ = kernel.admit(operation.clone()).unwrap();
-                Ok(())
-            },
-        ),
-        Err(P1Refusal::IndependentQualificationUnavailable)
-    ));
-    assert_eq!(kernel.revision(), original);
     let _ = kernel.admit(operation.clone()).unwrap();
     assert!(matches!(
         reservation_intent(&kernel, &binding),

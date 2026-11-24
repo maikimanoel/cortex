@@ -1,17 +1,21 @@
 //! Explicit initial P1 managed-domain driver for a single nominal raw-copy attempt.
 //!
-//! This driver has a callable read-only path. Strict execution additionally
-//! requires the selected host's trusted approval and independent observer
-//! integration, which the current native profile cannot establish.
+//! The independent trial path requires a protected host profile plus distinct
+//! kernel-verified owner and observer channels. Inspecting a target, executing
+//! one permitted trial and qualifying the result are separate operations.
 use super::{FileRole, cgroup::DelegationAuthorization, managed_backend::ManagedExecutionDomain};
+mod authorization;
+pub(crate) mod trust;
 use crate::{
     domain_coordination::{ReservationBatchError, ReservationDecision, admit_domain_reservations},
     domain_manager::DomainDiagnostic,
     domain_runtime::{
-        DomainManager, DomainOperations, ExecutableDomainRun,
-        prepare_managed_executable_domain_until, release_managed_executable_domain,
+        DomainManager, DomainOperations, DomainTrialGuard, ExecutableDomainRun,
+        prepare_managed_executable_domain_until, release_managed_executable_domain_with_trial,
     },
 };
+use authorization::AuthorizedTrial;
+pub use authorization::RawCopyP1Authority;
 use cortex_core::{
     binding::CandidateRequirement,
     program::{
@@ -111,6 +115,9 @@ pub enum P1Refusal {
     /// This profile has no integration that authenticates the owner decision
     /// and independently establishes the requested host controls and observer.
     IndependentQualificationUnavailable,
+    /// A configured principal refused, revoked, lost its channel or sent a
+    /// response that differed from the exact current request.
+    TrialAuthority,
     /// Canonical reservation coordination did not select this exact request.
     ReservationSelection(ReservationBatchError),
 }
@@ -329,21 +336,8 @@ pub fn inspect_raw_copy_attempt(
     })
 }
 
-// This is deliberately a single gate before reservation, reused by the
-// sequencing tests. Configuration, caller reference syntax and current local
-// metadata alone cannot authenticate this application-specific prerequisite.
-fn after_independent_qualification<T>(
-    qualified: Result<(), P1Refusal>,
-    attempt: impl FnOnce() -> Result<T, P1Refusal>,
-) -> Result<T, P1Refusal> {
-    qualified?;
-    attempt()
-}
-
-/// Strict request entry. It requires the exact selected binding and actual
-/// readbacks, then refuses until the independent external qualification
-/// integration exists. No Boolean, caller-supplied witness trait, or test
-/// configuration can turn the current profile into live permission.
+/// Compatibility entry. A selection without the independently held authority
+/// channels can only complete the read-only preflight.
 pub fn run_raw_copy_attempt(
     store: &ProgramStore,
     key: &StoreKey,
@@ -353,21 +347,33 @@ pub fn run_raw_copy_attempt(
 ) -> Result<RawCopyP1Run, P1Refusal> {
     let binding = binding.ok_or(P1Refusal::MissingBinding)?;
     inspect_raw_copy_attempt(store, key, backend, Some(binding), cancel)?;
-    after_independent_qualification(Err(P1Refusal::IndependentQualificationUnavailable), || {
-        execute_raw_copy_attempt(store, key, backend, binding, cancel)
-    })
+    Err(P1Refusal::IndependentQualificationUnavailable)
 }
 
-fn execute_raw_copy_attempt(
+/// Run the one permitted raw-copy trial on an explicitly contained host.
+///
+/// The root-managed trust profile and both live peers are required before
+/// reservation. Create and Release recheck the corresponding scoped decision
+/// after canonical intent is durable and before the actual effect. A refused,
+/// duplicate or uncertain admission never initiates a new attempt. The trial's
+/// observations still require a separate qualification decision.
+pub fn run_authorized_raw_copy_attempt(
     store: &ProgramStore,
     key: &StoreKey,
     backend: &mut ManagedExecutionDomain,
     binding: &RawCopyP1Binding<'_>,
+    authority: RawCopyP1Authority,
     cancel: &AtomicBool,
 ) -> Result<RawCopyP1Run, P1Refusal> {
+    inspect_raw_copy_attempt(store, key, backend, Some(binding), cancel)?;
+    let trial = AuthorizedTrial::authenticate(store, binding, authority, cancel)?;
+    trial.authorize_reservation()?;
     check_store_budget(store.read_limits().timeout(), binding.deadline, cancel)?;
+    trial
+        .check_live(binding.deadline)
+        .map_err(P1Refusal::Backend)?;
     admit_one_and_attempt(store, key, binding.reservation, |reservation| {
-        execute_reserved_raw_copy(store, key, backend, binding, cancel, reservation)
+        execute_reserved_raw_copy(store, key, backend, binding, cancel, reservation, &trial)
     })
 }
 
@@ -393,6 +399,7 @@ fn execute_reserved_raw_copy(
     binding: &RawCopyP1Binding<'_>,
     cancel: &AtomicBool,
     reservation: AdmissionReceipt,
+    trial: &dyn DomainTrialGuard,
 ) -> RawCopyP1Run {
     let preparation = prepare_managed_executable_domain_until(
         store,
@@ -401,6 +408,7 @@ fn execute_reserved_raw_copy(
         binding.operations,
         cancel,
         Some(binding.deadline),
+        Some(trial),
     );
     let Some(prepared) = preparation.prepared else {
         return RawCopyP1Run::Observed {
@@ -412,7 +420,14 @@ fn execute_reserved_raw_copy(
             copy: RawCopyP1Observation::Unresolved,
         };
     };
-    let run = release_managed_executable_domain(store, key, backend, prepared, cancel);
+    let run = release_managed_executable_domain_with_trial(
+        store,
+        key,
+        backend,
+        prepared,
+        cancel,
+        Some(trial),
+    );
     let copy = assess_copy(&run, backend.plan().input());
     RawCopyP1Run::Observed {
         reservation,

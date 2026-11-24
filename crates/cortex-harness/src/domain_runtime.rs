@@ -101,6 +101,36 @@ pub(crate) struct DomainFinish<'a> {
     pub end: Instant,
     pub cancel: &'a AtomicBool,
 }
+
+/// The retained post-admission image immediately before one possible effect.
+#[derive(Clone, Copy)]
+pub(crate) enum TrialEffectCut<'a> {
+    Create,
+    Release(&'a DomainBindingObservation),
+}
+
+/// An additional trial requirement, composed with the existing runtime
+/// authorization checks. Implementations must be bounded and must never wait
+/// on a caller or reenter the store while the admission lock is held.
+pub(crate) trait DomainTrialGuard {
+    fn authorize(
+        &self,
+        kernel: &CoordinationKernel,
+        intent: &DomainIntent,
+        operation: &Operation,
+        cut: TrialEffectCut<'_>,
+        end: Instant,
+    ) -> Result<(), DomainDiagnostic>;
+
+    fn check(
+        &self,
+        kernel: &CoordinationKernel,
+        intent: &DomainIntent,
+        cut: TrialEffectCut<'_>,
+        end: Instant,
+    ) -> Result<(), DomainDiagnostic>;
+}
+
 pub(crate) trait DomainManager {
     fn check_context(
         &self,
@@ -430,6 +460,17 @@ fn prepare<M: DomainManager>(
     request: ExecutionRequest<'_>,
     listener: impl FnOnce() -> Result<UnixListener, DomainDiagnostic>,
 ) -> DomainPreparation {
+    prepare_with_trial(store, key, manager, request, listener, None)
+}
+
+fn prepare_with_trial<M: DomainManager>(
+    store: &ProgramStore,
+    key: &StoreKey,
+    manager: &mut M,
+    request: ExecutionRequest<'_>,
+    listener: impl FnOnce() -> Result<UnixListener, DomainDiagnostic>,
+    trial: Option<&dyn DomainTrialGuard>,
+) -> DomainPreparation {
     let ExecutionRequest {
         ids,
         nonce,
@@ -465,10 +506,22 @@ fn prepare<M: DomainManager>(
                 at,
             },
         );
+        if let Some(trial) = trial {
+            trial.authorize(
+                &kernel,
+                &domain.intent,
+                &create,
+                TrialEffectCut::Create,
+                end,
+            )?;
+        }
         let (creation, created) = store
             .dispatch_domain(key, create, |k| {
                 let at = current(k, ids, start, end, cancel)?;
                 manager.check_context(k, &domain.intent, at)?;
+                if let Some(trial) = trial {
+                    trial.check(k, &domain.intent, TrialEffectCut::Create, end)?;
+                }
                 let listener = listener()?;
                 listener.set_nonblocking(true).map_err(|e| {
                     issue(DomainPhaseDiagnostic::Creation, DomainCause::Io(e.kind()))
@@ -583,8 +636,19 @@ fn release<M: DomainManager>(
     store: &ProgramStore,
     key: &StoreKey,
     manager: &mut M,
+    prepared: PreparedNonceDomain,
+    cancel: &AtomicBool,
+) -> DomainRun {
+    release_with_trial(store, key, manager, prepared, cancel, None)
+}
+
+fn release_with_trial<M: DomainManager>(
+    store: &ProgramStore,
+    key: &StoreKey,
+    manager: &mut M,
     mut prepared: PreparedNonceDomain,
     cancel: &AtomicBool,
+    trial: Option<&dyn DomainTrialGuard>,
 ) -> DomainRun {
     let mut run = DomainRun::empty();
     run.creation = Some(prepared.creation);
@@ -630,6 +694,15 @@ fn release<M: DomainManager>(
                 at,
             },
         );
+        if let Some(trial) = trial {
+            trial.authorize(
+                &kernel,
+                &prepared.intent,
+                &release,
+                TrialEffectCut::Release(&prepared.observation),
+                prepared.end,
+            )?;
+        }
         let (receipt, released) = store
             .dispatch_domain(key, release, |k| {
                 let at = current(k, ids, prepared.start, prepared.end, cancel)?;
@@ -665,6 +738,14 @@ fn release<M: DomainManager>(
                     process.require_live().map_err(|e| {
                         issue(DomainPhaseDiagnostic::Release, DomainCause::Io(e.kind()))
                     })?;
+                }
+                if let Some(trial) = trial {
+                    trial.check(
+                        k,
+                        &prepared.intent,
+                        TrialEffectCut::Release(&prepared.observation),
+                        prepared.end,
+                    )?;
                 }
                 frame_write(
                     &mut prepared.channel,
@@ -1244,7 +1325,7 @@ pub fn prepare_managed_executable_domain(
     ids: &DomainOperations,
     cancel: &AtomicBool,
 ) -> DomainPreparation {
-    prepare_managed_executable_domain_until(store, key, backend, ids, cancel, None)
+    prepare_managed_executable_domain_until(store, key, backend, ids, cancel, None, None)
 }
 
 pub(crate) fn prepare_managed_executable_domain_until(
@@ -1254,6 +1335,7 @@ pub(crate) fn prepare_managed_executable_domain_until(
     ids: &DomainOperations,
     cancel: &AtomicBool,
     limit: Option<Instant>,
+    trial: Option<&dyn DomainTrialGuard>,
 ) -> DomainPreparation {
     let start = Instant::now();
     let end = start
@@ -1267,7 +1349,7 @@ pub(crate) fn prepare_managed_executable_domain_until(
         .and_then(|k| record(&k, &ids.domain).ok())
         .and_then(|r| backend.endpoint(&r.intent.request).ok());
     match (end, endpoint) {
-        (Some(end), Some(endpoint)) => prepare(
+        (Some(end), Some(endpoint)) => prepare_with_trial(
             store,
             key,
             backend,
@@ -1282,6 +1364,7 @@ pub(crate) fn prepare_managed_executable_domain_until(
                 UnixListener::bind(endpoint)
                     .map_err(|e| issue(DomainPhaseDiagnostic::Creation, DomainCause::Io(e.kind())))
             },
+            trial,
         ),
         _ => {
             let mut run = DomainRun::empty();
@@ -1304,7 +1387,18 @@ pub fn release_managed_executable_domain(
     prepared: PreparedNonceDomain,
     cancel: &AtomicBool,
 ) -> ExecutableDomainRun {
-    let domain = release(store, key, backend, prepared, cancel);
+    release_managed_executable_domain_with_trial(store, key, backend, prepared, cancel, None)
+}
+
+pub(crate) fn release_managed_executable_domain_with_trial(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut crate::native_execution::managed_backend::ManagedExecutionDomain,
+    prepared: PreparedNonceDomain,
+    cancel: &AtomicBool,
+    trial: Option<&dyn DomainTrialGuard>,
+) -> ExecutableDomainRun {
+    let domain = release_with_trial(store, key, backend, prepared, cancel, trial);
     ExecutableDomainRun {
         domain,
         execution: backend.take_observation(),
