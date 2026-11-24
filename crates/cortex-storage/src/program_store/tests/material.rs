@@ -2,7 +2,11 @@
 
 use super::*;
 use cortex_core::{knowledge::SourcePath, parallel::*, temporal::SourceReference};
-use cortex_evidence::program::material::*;
+use cortex_evidence::{
+    program::material::*,
+    readiness::{EdgeEvidenceContract, PredicateCorrespondence},
+    unified::ReportedObservation,
+};
 
 fn material_release(store: &ProgramStore) -> Operation {
     let mut template = initialized();
@@ -72,6 +76,62 @@ fn material_release(store: &ProgramStore) -> Operation {
             },
         },
     }));
+    // A separate valid repository serving the same immutable commit must not
+    // acquire provenance merely by changing the report and criterion together.
+    let mut substituted = observe.clone();
+    let Input::ObserveMaterial(material) = &mut substituted.command else {
+        unreachable!()
+    };
+    let MaterialSubject::Release { contract, .. } = &mut material.subject else {
+        unreachable!()
+    };
+    let original = contract.artifact_requirement();
+    let sibling = binding("B", "b", 1);
+    let replacement = CandidateRequirement::new(
+        sibling.candidate().repository().clone(),
+        original.commit().clone(),
+        original.worktree(),
+    );
+    let old = material.report.subject().contract();
+    let changed_criterion =
+        CandidateBindingContract::new(old.task().clone(), old.revision(), replacement.clone());
+    let mappings = contract
+        .correspondences()
+        .iter()
+        .map(|entry| {
+            PredicateCorrespondence::new(
+                entry.predicate().clone(),
+                changed_criterion.clone(),
+                entry.profile().clone(),
+                entry.coverage(),
+            )
+        })
+        .collect();
+    **contract = EdgeEvidenceContract::new(
+        contract.scope().clone(),
+        contract.revision(),
+        replacement,
+        mappings,
+        contract.basis().clone(),
+        release.limits,
+    )
+    .unwrap();
+    let old = &material.report;
+    material.report = ReportedObservation::new(
+        old.id().clone(),
+        capture(&changed_criterion, 1),
+        old.profile().clone(),
+        old.times(),
+        old.kind().clone(),
+        old.detail(),
+    )
+    .unwrap();
+    let failure = store.admit(&key(), substituted).unwrap_err();
+    assert!(matches!(
+        failure.error,
+        ProgramStoreError::Domain(KernelError::Core(ProgramError::Stale))
+    ));
+
     let mut self_report = observe.clone();
     self_report.grant = report.grant;
     let fail = store.admit(&key(), self_report).unwrap_err();
