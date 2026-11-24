@@ -573,3 +573,68 @@ fn executor_preparation_refuses_a_preparable_prefix_during_reconstruction() {
     assert_eq!(prepared.input().bytes(), rebuilt.packages()[0].bytes());
     assert!(rebuilt.prepared_inputs().is_empty());
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn codex_cli_lowers_exact_input_but_retains_the_live_and_executable_holds() {
+    use cortex_cli::program_execution::{CodexCliHold, inspect_codex_cli_invocation};
+    let (kernel, scope) = setup();
+    let identity = ExecutorIdentity::new(
+        "codex-cli",
+        "0.167.0",
+        source("selected-codex-elf"),
+        source("selected-host"),
+    )
+    .unwrap();
+    let mut operation = input(&kernel, &scope, "codex-shape");
+    request(&mut operation).descriptor = ExecutorDescriptor::new(
+        source("codex-cli-synthetic-transport-test"),
+        identity.clone(),
+        Transport::StandardInputJsonLines,
+        operational_fixture::descriptor()
+            .observations()
+            .iter()
+            .cloned(),
+        8,
+    )
+    .unwrap();
+    let prepared = prepare_input(&kernel, &scope, operation).unwrap();
+    let lower =
+        |bytes| inspect_codex_cli_invocation(kernel.state(), prepared.input(), &identity, bytes);
+    let shape = lower(320_575_976).unwrap();
+    assert_eq!(shape.live_hold(), CodexCliHold::LiveProviderUnavailable);
+    assert_eq!(
+        shape.executable_hold(),
+        Some(&CodexCliHold::ExecutableBytes)
+    );
+    assert_eq!(shape.executable(), &source("selected-codex-elf"));
+    assert_eq!(shape.workspace(), scope.candidate.repository().root());
+    assert_eq!(shape.stdin(), kernel.packages()[0].bytes());
+    assert_eq!(
+        shape.args(),
+        [
+            "exec",
+            "--json",
+            "--ephemeral",
+            "--ignore-user-config",
+            "--color",
+            "never",
+            "-"
+        ]
+    );
+
+    let shape = lower(900_000).unwrap();
+    assert!(shape.executable_hold().is_none());
+    assert_eq!(shape.live_hold(), CodexCliHold::LiveProviderUnavailable);
+    let changed_identity = ExecutorIdentity::new(
+        "codex-cli",
+        "0.167.0",
+        source("different-executable"),
+        identity.host().clone(),
+    )
+    .unwrap();
+    assert!(matches!(
+        inspect_codex_cli_invocation(kernel.state(), prepared.input(), &changed_identity, 900_000),
+        Err(CodexCliHold::Descriptor)
+    ));
+}

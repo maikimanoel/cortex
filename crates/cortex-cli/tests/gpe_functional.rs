@@ -340,11 +340,6 @@ fn definition(c: &Campaign) -> ProgramDefinition {
     let artifact = ArtifactReference::new(
         ArtifactId::new(&fixture_id("prime-list")).unwrap(),
         rev(1),
-        candidate.clone(),
-    );
-    let summary = ArtifactReference::new(
-        ArtifactId::new(&fixture_id("consumer-summary")).unwrap(),
-        rev(1),
         candidate,
     );
     let edge = DependencyEdge::new(
@@ -366,7 +361,7 @@ fn definition(c: &Campaign) -> ProgramDefinition {
             GraphLimits::new(2, 1, 256, 1024, MAX_BYTES).unwrap()).unwrap(),
         vec![Workstream { id: WorkstreamId::new(&fixture_id("functional-integration")).unwrap(), responsibility: "Trusted fixture production and consumption".into(), tasks: vec![task("A"), task("B")] }],
         ["A", "B"].into_iter().map(|name| Increment { id: IncrementId::new(&fixture_id(name)).unwrap(), task: task(name),
-            artifacts: if name == "A" { vec![artifact.clone()] } else { vec![summary.clone()] }, claim_scopes: vec![ClaimScopeId::new(&fixture_id(name)).unwrap()] }).collect(),
+            artifacts: if name == "A" { vec![artifact.clone()] } else { vec![] }, claim_scopes: vec![ClaimScopeId::new(&fixture_id(name)).unwrap()] }).collect(),
         ProgramLimits::new(3, 256, MAX_BYTES).unwrap()).unwrap()
 }
 fn grant(k: &CoordinationKernel) -> CoordinationGrant {
@@ -902,6 +897,11 @@ fn run(
         &AtomicBool::new(false),
     )
     .unwrap();
+    assert_eq!(
+        result.workspace.observation().contract().candidate(),
+        &scope.candidate
+    );
+    let result = result.run;
     assert!(
         result.recording_failure.is_none(),
         "terminal observation recording failed"
@@ -1683,35 +1683,39 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
     let (b, bid, bspec, bpin, b_preparation) = prepare(&c, &store, "B", "B", Some(&captured));
     process(&c, &store, &b, &bid, &bspec, "B");
     workflow_evaluation.register(&c, &store, &b, &bid, "B");
+    let wrong_package = dispatch(&load(&c, &store), &b, &bid, "wrong-input-guard");
+    let before_input_refusal = snapshot(&c.state);
+    let refused = run_prepared_fixture(
+        &store,
+        &c.key,
+        PreparedFixtureRun {
+            preparation: &a_preparation,
+            dispatch: wrong_package,
+            pin: &bpin,
+            captures: capture_ids("wrong-input-guard"),
+            workspace_observation: ObservationId::new(b.task.as_str(), 3).unwrap(),
+        },
+        &AtomicBool::new(false),
+    );
+    assert!(matches!(refused, Err(ExecutionError::PreparedInput)));
+    assert_eq!(snapshot(&c.state), before_input_refusal);
+    assert!(!c.output.join("launched-B").exists());
     let dispatch_b = run(&c, &store, &b, &bid, &bspec, (&bpin, &b_preparation), "B");
     assert_eq!(
         fs::read(c.output.join("B.consumed")).unwrap(),
         captured.bytes()
     );
-    let consumer_artifact = initial
-        .increments()
-        .iter()
-        .find(|i| i.task == b.task)
-        .unwrap()
-        .artifacts
-        .first()
-        .unwrap();
-    let current = capture_fixture_output(
-        &store,
-        &c.key,
-        FixtureArtifactRequest {
-            effect: &bid,
-            artifact: consumer_artifact,
-            output_root: &c.output,
-            path: &c.output.join("B"),
-            additional_sources: std::slice::from_ref(&c.cortex),
+    let returned = cortex_harness::native_execution::artifacts::capture(
+        fs::File::open(&c.output).unwrap(),
+        &[cortex_harness::native_execution::artifacts::ArtifactSpec {
+            path: PathBuf::from("B"),
             max_bytes: 256,
-            expected_sha256: None,
-            workspace_observation: ObservationId::new(b.task.as_str(), 5).unwrap(),
-        },
+            sha256: None,
+        }],
+        256,
     )
     .unwrap();
-    let actual = current.content.bytes();
+    let actual = returned[0].bytes.as_slice();
     assert_eq!(actual, CONSUMED);
     assert_ne!(actual, b"cortex-consumer-v1\ncount=4\nsum=18\nsquares=87\n");
     let before_settlement = load(&c, &store);
@@ -1723,7 +1727,7 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
             >= 10_500
     );
     settle(&c, &store, &b, &bid, "B");
-    let bv = observe(&c, &store, "B", actual, CONSUMED, Some(&current.content));
+    let bv = observe(&c, &store, "B", actual, CONSUMED, None);
     assess(&c, &store, &bv, "B");
     workflow_evaluation.record(
         &c,
