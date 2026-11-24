@@ -52,6 +52,7 @@ use cortex_harness::{
     artifact::{ArtifactError, CapturedArtifact, capture_artifact},
     execute_fixture, inspect_fixture,
 };
+use cortex_storage as admission_storage;
 use cortex_storage::{
     history_store::{Access, Completion, StoreKey},
     program_store::{AdmissionReceipt, ProgramStore, ReadLimits},
@@ -404,17 +405,23 @@ fn load(c: &Campaign, store: &ProgramStore) -> CoordinationKernel {
 fn admit(c: &Campaign, store: &ProgramStore, id: &str, command: Input) -> AdmissionReceipt {
     let before = load(c, store);
     let input = operation(&before, id, command);
-    admit_from(c, store, &before, input)
+    admit_from(c, store, &before, input, AdmissionReadback::Metadata)
 }
 fn admit_exact(c: &Campaign, store: &ProgramStore, input: Operation) -> AdmissionReceipt {
     let before = load(c, store);
-    admit_from(c, store, &before, input)
+    admit_from(c, store, &before, input, AdmissionReadback::Metadata)
 }
+enum AdmissionReadback {
+    Metadata,
+    SyntheticReservation,
+}
+
 fn admit_from(
     c: &Campaign,
     store: &ProgramStore,
     before: &CoordinationKernel,
     input: Operation,
+    readback: AdmissionReadback,
 ) -> AdmissionReceipt {
     let id = input.id.as_str();
     let expected = input.expected;
@@ -446,13 +453,26 @@ fn admit_from(
         .and_then(|()| fs::set_permissions(&path, fs::Permissions::from_mode(0o600)))
         .map_err(|error| error.kind());
     // Report emission must not hide an uncertain admission behind an I/O panic.
-    let observed = gpe_admission::confirm_metadata(result, &input, store.id(), || {
-        // This separate read concerns only the newly owned fixture input. It
-        // neither repeats admission nor refreshes authority for a later command.
-        store.reconcile(&c.key, before.initial(), &input, Access::ReadOnly)
-    })
+    let observed = match readback {
+        AdmissionReadback::Metadata => {
+            gpe_admission::confirm_metadata(result, &input, store.id(), || {
+                store.reconcile(&c.key, before.initial(), &input, Access::ReadOnly)
+            })
+        }
+        AdmissionReadback::SyntheticReservation => {
+            assert_eq!(input.id, op("reserve-synthetic-unknown"));
+            gpe_admission::confirm_synthetic_reservation(
+                result,
+                &input,
+                store.id(),
+                before,
+                store,
+                &c.key,
+            )
+        }
+    }
     .unwrap_or_else(|failure| {
-        panic!("{text}confirmation={failure:?}; diagnostic_retention={retained:?}")
+        panic!("{text}confirmation={failure}; diagnostic_retention={retained:?}")
     });
     let receipt = match observed {
         gpe_admission::ObservedAdmission::Admitted(receipt) => receipt,
@@ -799,11 +819,11 @@ fn prepare(
         EffectEvent::Grant(operational.clone()),
     );
     let id = EffectId::new(&fixture_id(&format!("effect-{label}"))).unwrap();
-    effect(
-        c,
-        store,
+    let before_reservation = load(c, store);
+    let reservation = operation(
+        &before_reservation,
         &format!("reserve-{label}"),
-        EffectEvent::Reserve {
+        Input::SupervisedEffect(Box::new(EffectEvent::Reserve {
             intent: EffectIntent {
                 id: id.clone(),
                 grant: operational.id,
@@ -811,9 +831,15 @@ fn prepare(
                 demand: demand(),
                 retry_of: None,
             },
-            at: load(c, store).fixture_effects().last_tick(),
-        },
+            at: before_reservation.fixture_effects().last_tick(),
+        })),
     );
+    let readback = if label == "synthetic-unknown" {
+        AdmissionReadback::SyntheticReservation
+    } else {
+        AdmissionReadback::Metadata
+    };
+    admit_from(c, store, &before_reservation, reservation, readback);
     let k = load(c, store);
     let prepared = &k
         .prepared_inputs()
