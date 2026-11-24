@@ -541,44 +541,38 @@ fn advance(
 ) -> FixtureProgress {
     let wait = store.read_limits().timeout();
     let mut workspace = None;
-    for op in staged.prefix {
-        if !fits(deadline, wait, cancel) {
-            return FixtureProgress::Budget;
-        }
-        if op.id == job.operations.process
-            && let Some(selected) = &job.workspace
-        {
-            let request = FixtureWorkspaceRequest {
-                effect: &job.effect,
-                expected_revision: op.expected,
-                parent: &selected.parent,
-                additional_sources: &selected.additional_sources,
-                output_argument: selected.output_argument,
-                source_observation: selected.source_observation.clone(),
-            };
-            match prepare_fixture_workspace_before(store, key, request, Some(deadline)) {
-                Ok(prepared) => workspace = Some(prepared),
-                Err(error) => return FixtureProgress::Workspace(error),
-            }
+    let prefix = admit_fixture_prefix(
+        staged.prefix,
+        receipts,
+        |op| {
             if !fits(deadline, wait, cancel) {
-                return FixtureProgress::Budget;
+                return Err(FixtureProgress::Budget);
             }
-        }
-        match store.admit(key, op.clone()) {
-            Ok(receipt) => {
-                receipts.push(receipt);
-                if receipt.duplicate {
-                    // A competing controller owns the retained prefix.
-                    return FixtureProgress::ConcurrentPrefix;
+            if op.id == job.operations.process
+                && let Some(selected) = &job.workspace
+            {
+                let request = FixtureWorkspaceRequest {
+                    effect: &job.effect,
+                    expected_revision: op.expected,
+                    parent: &selected.parent,
+                    additional_sources: &selected.additional_sources,
+                    output_argument: selected.output_argument,
+                    source_observation: selected.source_observation.clone(),
+                };
+                workspace = Some(
+                    prepare_fixture_workspace_before(store, key, request, Some(deadline))
+                        .map_err(FixtureProgress::Workspace)?,
+                );
+                if !fits(deadline, wait, cancel) {
+                    return Err(FixtureProgress::Budget);
                 }
             }
-            Err(failure) => {
-                return FixtureProgress::Admission {
-                    operation: Box::new(op),
-                    failure,
-                };
-            }
-        }
+            Ok(())
+        },
+        |op| store.admit(key, op),
+    );
+    if let Err(progress) = prefix {
+        return progress;
     }
     // Existing supervisor operations have cooperative deadlines and short
     // store/inspection calls. Preserve the entire requested process envelope
@@ -614,3 +608,33 @@ fn advance(
         },
     }
 }
+
+fn admit_fixture_prefix(
+    prefix: Vec<Operation>,
+    receipts: &mut Vec<AdmissionReceipt>,
+    mut before_admission: impl FnMut(&Operation) -> Result<(), FixtureProgress>,
+    mut admit: impl FnMut(Operation) -> Result<AdmissionReceipt, AdmissionFailure>,
+) -> Result<(), FixtureProgress> {
+    for op in prefix {
+        before_admission(&op)?;
+        match admit(op.clone()) {
+            Ok(receipt) => {
+                receipts.push(receipt);
+                if receipt.duplicate {
+                    // A competing controller owns the retained prefix.
+                    return Err(FixtureProgress::ConcurrentPrefix);
+                }
+            }
+            Err(failure) => {
+                return Err(FixtureProgress::Admission {
+                    operation: Box::new(op),
+                    failure,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests;
