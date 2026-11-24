@@ -97,6 +97,17 @@ receipt, not current process liveness. Inspection explains the nonterminal or
 missing proof and keeps the reservation; it does not fabricate an uncommitted
 Unknown event.
 
+The direct supervisor returns the original recording failure with its stage
+and selected StoreId. An append that reached admission also returns the
+complete attempted operation, including the original predecessor and captured
+observation. An append stopped before submission carries no operation.
+Read-only reconciliation of an indeterminate start or terminal append
+retains the original failure separately from the matching receipt or the
+readback error or disposition. A checkpoint with an uncertain receipt
+withholds input and does not automatically reconcile, even if the record
+can later be confirmed. Use the exact original store to resolve receipt
+presence. A recorded outcome alone confers no execution or settlement authority.
+
 Historical unknown effects remain reserved unless applicable proof independently
 satisfies their existing contract. An owner disposition may preserve and archive
 an unresolved campaign; it cannot retroactively fabricate quiescence. No new

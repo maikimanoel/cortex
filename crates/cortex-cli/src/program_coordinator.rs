@@ -139,6 +139,11 @@ pub struct FixtureCursor {
 }
 
 impl FixtureCursor {
+    /// Store identity required to interpret any retained or attempted operation.
+    pub fn store_id(&self) -> StoreId {
+        self.store
+    }
+
     /// Ordinal at the beginning of the observed turn.
     pub fn revision(&self) -> u64 {
         self.revision

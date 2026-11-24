@@ -66,6 +66,12 @@ commits never invoke it. The callback must not reenter the store or wait for the
 child to finish. A crash after commit preserves dispatch uncertainty, including
 when no process was ultimately started.
 
+When the supervisor sees a retained dispatch ID before submitting an effect,
+it compares the complete operation using read-only reconciliation. A caller
+must retain the selected StoreId, exact input and original response. A
+confirmed dispatch may still have no observed process, and conflicting input
+does not authorize a later callback.
+
 There is no transaction spanning SQLite and process creation. Callback success,
 process exit and durable observation admission are separate boundaries. A lost
 spawn reply cannot be resolved by replaying the callback. An unknown process is
