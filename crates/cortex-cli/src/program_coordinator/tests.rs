@@ -201,3 +201,58 @@ fn lost_prefix_acknowledgment_requires_exact_readback_and_holds_reopened_work() 
         assert!(unchanged.operations() == saved.operations());
     }
 }
+
+#[test]
+fn real_dispatch_refusal_keeps_exact_input_at_cli_error_boundary() {
+    let scratch = TestStoreRoot::new();
+    let key = StoreKey::new(&[0x4d; 32]).unwrap();
+    let limits = ReadLimits::new(8_000_000, Duration::from_secs(2)).unwrap();
+    let (kernel, scope, _) = supervision::prepared_kernel(None);
+    let path = scratch.0.join("store");
+    let store =
+        ProgramStore::create_supervised_fixture(&path, &key, kernel.initial().clone(), limits)
+            .unwrap();
+    for operation in kernel.operations() {
+        store.admit(&key, operation.clone()).unwrap();
+    }
+    let mut attempted = supervision::dispatch_operation(&kernel, &scope);
+    attempted.expected -= 1;
+    let failure = store
+        .dispatch_fixture(&key, attempted.clone(), |_| {
+            panic!("the stale dispatch reached the effect callback");
+        })
+        .unwrap_err();
+    assert_eq!(failure.completion, Completion::Rejected);
+    let selected = store.id();
+    let error = crate::program_execution::preserve_supervisor_failure(
+        selected,
+        attempted.clone(),
+        HarnessError::Admission(failure),
+    );
+    let ExecutionError::DispatchAdmission(recovery) = error else {
+        panic!("the CLI discarded the canonical failure");
+    };
+    assert_eq!(recovery.store, selected);
+    assert!(recovery.operation == attempted);
+    assert_eq!(recovery.failure.completion, Completion::Rejected);
+    assert!(matches!(
+        recovery.failure.error,
+        ProgramStoreError::Domain(KernelError::Core(cortex_core::program::ProgramError::Stale))
+    ));
+    drop(store);
+    let reopened = ProgramStore::open(&path, &key, Access::ReadOnly, limits).unwrap();
+    assert_eq!(
+        recovery
+            .reconcile(&reopened, &key, kernel.initial())
+            .unwrap(),
+        Reconciliation::Conflict,
+    );
+    let image = reopened.load(&key, Access::ReadOnly).unwrap();
+    assert_eq!(image.revision(), kernel.revision());
+    assert!(image.fixture_effects().effects()[0].dispatch_at.is_none());
+    assert!(
+        image.fixture_effects().effects()[0]
+            .process_observations
+            .is_empty()
+    );
+}

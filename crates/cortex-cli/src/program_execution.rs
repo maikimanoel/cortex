@@ -340,17 +340,25 @@ fn run_prepared_fixture_inner(
             cancel,
         ),
     }
-    .map_err(|error| match error {
+    .map_err(|error| preserve_supervisor_failure(store.id(), request.dispatch, error))?;
+    Ok(FixtureRun { workspace, run })
+}
+
+pub(crate) fn preserve_supervisor_failure(
+    store: StoreId,
+    operation: Operation,
+    error: HarnessError,
+) -> ExecutionError {
+    match error {
         HarnessError::Admission(failure) => {
             ExecutionError::DispatchAdmission(Box::new(DispatchAdmissionAttempt {
-                store: store.id(),
-                operation: request.dispatch,
+                store,
+                operation,
                 failure,
             }))
         }
         error => ExecutionError::Harness(error),
-    })?;
-    Ok(FixtureRun { workspace, run })
+    }
 }
 
 /// The one exact declared output the caller will examine.
