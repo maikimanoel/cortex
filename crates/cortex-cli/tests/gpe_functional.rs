@@ -26,7 +26,14 @@ fn fixture_id(label: &str) -> String {
         |namespace| namespace.qualify(label).expect("bounded fixture identity"),
     )
 }
-use cortex_cli::inspect_candidate;
+use cortex_cli::{
+    inspect_candidate,
+    program_execution::{
+        ExecutionError, FixtureArtifactRequest, PreparedFixtureRun, capture_fixture_output,
+        run_prepared_fixture,
+    },
+    program_preparation::{ExecutorPreparation, prepare_executor_input},
+};
 use cortex_core::{
     CandidateId, TaskContract, TaskId,
     binding::*,
@@ -333,6 +340,11 @@ fn definition(c: &Campaign) -> ProgramDefinition {
     let artifact = ArtifactReference::new(
         ArtifactId::new(&fixture_id("prime-list")).unwrap(),
         rev(1),
+        candidate.clone(),
+    );
+    let summary = ArtifactReference::new(
+        ArtifactId::new(&fixture_id("consumer-summary")).unwrap(),
+        rev(1),
         candidate,
     );
     let edge = DependencyEdge::new(
@@ -354,7 +366,7 @@ fn definition(c: &Campaign) -> ProgramDefinition {
             GraphLimits::new(2, 1, 256, 1024, MAX_BYTES).unwrap()).unwrap(),
         vec![Workstream { id: WorkstreamId::new(&fixture_id("functional-integration")).unwrap(), responsibility: "Trusted fixture production and consumption".into(), tasks: vec![task("A"), task("B")] }],
         ["A", "B"].into_iter().map(|name| Increment { id: IncrementId::new(&fixture_id(name)).unwrap(), task: task(name),
-            artifacts: if name == "A" { vec![artifact.clone()] } else { vec![] }, claim_scopes: vec![ClaimScopeId::new(&fixture_id(name)).unwrap()] }).collect(),
+            artifacts: if name == "A" { vec![artifact.clone()] } else { vec![summary.clone()] }, claim_scopes: vec![ClaimScopeId::new(&fixture_id(name)).unwrap()] }).collect(),
         ProgramLimits::new(3, 256, MAX_BYTES).unwrap()).unwrap()
 }
 fn grant(k: &CoordinationKernel) -> CoordinationGrant {
@@ -521,7 +533,13 @@ fn prepare(
     name: &str,
     label: &str,
     consumed: Option<&CapturedArtifact>,
-) -> (EffectScope, EffectId, ProcessSpec, PinnedFixture) {
+) -> (
+    EffectScope,
+    EffectId,
+    ProcessSpec,
+    PinnedFixture,
+    ExecutorPreparation,
+) {
     let k = load(c, store);
     let scope = k.state().readiness().scope(&task(name)).unwrap();
     let attempt = Attempt {
@@ -652,9 +670,9 @@ fn prepare(
         2,
     )
     .unwrap();
-    admit(
-        c,
-        store,
+    let journal = load(c, store);
+    let prepared_operation = operation(
+        &journal,
         &format!("prepared-{label}"),
         Input::PrepareExecutorInput(Box::new(ExecutorInputRequest {
             package: package.id.clone(),
@@ -664,6 +682,15 @@ fn prepare(
             max_bytes: 65_536,
         })),
     );
+    let preparation = prepare_executor_input(
+        &journal,
+        journal.revision(),
+        &task(name),
+        scope.context().contract().candidate(),
+        prepared_operation,
+    )
+    .unwrap();
+    admit_exact(c, store, preparation.operation().clone());
     let scope = EffectScope {
         program: k.state().definition().id().clone(),
         baseline: rev(1),
@@ -773,7 +800,7 @@ fn prepare(
         identity_checkpoint: None,
     };
     let pin = inspect_fixture(&spec, prepared, k.state().definition().limits()).unwrap();
-    (scope, id, spec, pin)
+    (scope, id, spec, pin, preparation)
 }
 fn process(
     c: &Campaign,
@@ -825,7 +852,7 @@ fn run(
     scope: &EffectScope,
     id: &EffectId,
     spec: &ProcessSpec,
-    pin: &PinnedFixture,
+    fixture: (&PinnedFixture, &ExecutorPreparation),
     label: &str,
 ) -> Operation {
     let kernel = load(c, store);
@@ -862,12 +889,16 @@ fn run(
         &serde_json::to_string_pretty(&manifest).unwrap(),
     );
     c.launch_slot();
-    let result = execute_fixture(
+    let result = run_prepared_fixture(
         store,
         &c.key,
-        dispatch.clone(),
-        capture_ids(label),
-        pin,
+        PreparedFixtureRun {
+            preparation: fixture.1,
+            dispatch: dispatch.clone(),
+            pin: fixture.0,
+            captures: capture_ids(label),
+            workspace_observation: ObservationId::new(scope.task.as_str(), 4).unwrap(),
+        },
         &AtomicBool::new(false),
     )
     .unwrap();
@@ -1204,7 +1235,7 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
         },
     );
     effect(&c, &store, "policy", EffectEvent::Policy(policy()));
-    let (a, aid, spec, pin) = prepare(&c, &store, "A", "A", None);
+    let (a, aid, spec, pin, a_preparation) = prepare(&c, &store, "A", "A", None);
     let k = load(&c, &store);
     let prepared = &k.prepared_inputs()[0].1;
     let mut wrong = spec.clone();
@@ -1254,7 +1285,27 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
     );
     c.mark("Q0");
     workflow_evaluation.register(&c, &store, &a, &aid, "A");
-    let dispatch_a = run(&c, &store, &a, &aid, &spec, &pin, "A");
+    let clean = fs::read(c.fixture.join("main.rs")).unwrap();
+    fs::write(c.fixture.join("main.rs"), b"fn main() {}").unwrap();
+    let dirty_dispatch = dispatch(&load(&c, &store), &a, &aid, "dirty-guard");
+    let before_dirty_refusal = snapshot(&c.state);
+    let refused = run_prepared_fixture(
+        &store,
+        &c.key,
+        PreparedFixtureRun {
+            preparation: &a_preparation,
+            dispatch: dirty_dispatch,
+            pin: &pin,
+            captures: capture_ids("dirty-guard"),
+            workspace_observation: ObservationId::new(a.task.as_str(), 3).unwrap(),
+        },
+        &AtomicBool::new(false),
+    );
+    assert!(matches!(refused, Err(ExecutionError::Workspace(_))));
+    assert_eq!(snapshot(&c.state), before_dirty_refusal);
+    assert!(!c.output.join("launched-A").exists());
+    fs::write(c.fixture.join("main.rs"), clean).unwrap();
+    let dispatch_a = run(&c, &store, &a, &aid, &spec, (&pin, &a_preparation), "A");
     let k = load(&c, &store);
     assert!(k.records().is_empty() && k.decisions().is_empty());
     assert!(
@@ -1264,16 +1315,35 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
             .unwrap()
             .dependency_ready()
     );
-    let captured = capture_artifact(
-        &k,
-        &aid,
-        &artifact,
-        &c.output,
-        &c.output.join("A"),
-        std::slice::from_ref(&c.cortex),
-        256,
+    let producer_file = c.output.join("A");
+    let output = |expected_sha256| FixtureArtifactRequest {
+        effect: &aid,
+        artifact: &artifact,
+        output_root: &c.output,
+        path: &producer_file,
+        additional_sources: std::slice::from_ref(&c.cortex),
+        max_bytes: 256,
+        expected_sha256,
+        workspace_observation: ObservationId::new(a.task.as_str(), 5).unwrap(),
+    };
+    let captured = capture_fixture_output(
+        &store,
+        &c.key,
+        output(Some(
+            "a1a410bd6438bb73e09ee3220cf8a87470d1d6401757f68be666fd8399e78df0",
+        )),
     )
     .unwrap();
+    assert_eq!(captured.revision, k.revision());
+    assert_eq!(
+        captured.workspace.observation().contract().candidate(),
+        &a.candidate
+    );
+    let captured = captured.content;
+    assert!(matches!(
+        capture_fixture_output(&store, &c.key, output(Some("different-output-digest"))),
+        Err(ExecutionError::ArtifactDigest)
+    ));
     assert_eq!(captured.bytes(), ARTIFACT);
     assert_eq!(
         captured.sha256(),
@@ -1610,15 +1680,38 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
     changed.expected += 1;
     assert!(store.admit(&c.key, changed).is_err());
     c.mark("Q3");
-    let (b, bid, bspec, bpin) = prepare(&c, &store, "B", "B", Some(&captured));
+    let (b, bid, bspec, bpin, b_preparation) = prepare(&c, &store, "B", "B", Some(&captured));
     process(&c, &store, &b, &bid, &bspec, "B");
     workflow_evaluation.register(&c, &store, &b, &bid, "B");
-    let dispatch_b = run(&c, &store, &b, &bid, &bspec, &bpin, "B");
+    let dispatch_b = run(&c, &store, &b, &bid, &bspec, (&bpin, &b_preparation), "B");
     assert_eq!(
         fs::read(c.output.join("B.consumed")).unwrap(),
         captured.bytes()
     );
-    let actual = fs::read(c.output.join("B")).unwrap();
+    let consumer_artifact = initial
+        .increments()
+        .iter()
+        .find(|i| i.task == b.task)
+        .unwrap()
+        .artifacts
+        .first()
+        .unwrap();
+    let current = capture_fixture_output(
+        &store,
+        &c.key,
+        FixtureArtifactRequest {
+            effect: &bid,
+            artifact: consumer_artifact,
+            output_root: &c.output,
+            path: &c.output.join("B"),
+            additional_sources: std::slice::from_ref(&c.cortex),
+            max_bytes: 256,
+            expected_sha256: None,
+            workspace_observation: ObservationId::new(b.task.as_str(), 5).unwrap(),
+        },
+    )
+    .unwrap();
+    let actual = current.content.bytes();
     assert_eq!(actual, CONSUMED);
     assert_ne!(actual, b"cortex-consumer-v1\ncount=4\nsum=18\nsquares=87\n");
     let before_settlement = load(&c, &store);
@@ -1630,7 +1723,7 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
             >= 10_500
     );
     settle(&c, &store, &b, &bid, "B");
-    let bv = observe(&c, &store, "B", &actual, CONSUMED, None);
+    let bv = observe(&c, &store, "B", actual, CONSUMED, Some(&current.content));
     assess(&c, &store, &bv, "B");
     workflow_evaluation.record(
         &c,
@@ -1707,7 +1800,7 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
         ),
         Err(ArtifactError::Correspondence)
     ));
-    let (unknown, uid, uspec, _) = prepare(&c, &store, "A", "synthetic-unknown", None);
+    let (unknown, uid, uspec, _, _) = prepare(&c, &store, "A", "synthetic-unknown", None);
     process(&c, &store, &unknown, &uid, &uspec, "synthetic-unknown");
     workflow_evaluation.register(&c, &store, &unknown, &uid, "synthetic-unknown");
     let synthetic_dispatch = dispatch(&load(&c, &store), &unknown, &uid, "synthetic-unknown");
