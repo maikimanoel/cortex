@@ -245,6 +245,12 @@ snapshot-exclusion proof, independent whole-domain witness, final debit, or
 settlement. The existing post-cancel observer retains its prior partial event
 encoding and cancellation prerequisite.
 
+`observe_managed_executable_closure_tree_with_attempt` retains the complete
+captured operation and store identity alongside a publication failure. The
+caller can reconcile against the same store and initial contract without
+capturing again. A matching observation ID with different observed facts is
+a conflict.
+
 The managed adapter also retains an in-memory CPU history for the exact store,
 domain, invocation, cgroup and monotonic interval. It samples the held directory
 while bootstrap awaits setup, at normal transport end and after durable

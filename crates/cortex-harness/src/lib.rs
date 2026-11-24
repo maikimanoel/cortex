@@ -69,7 +69,8 @@ pub mod structured_output;
 
 #[cfg(target_os = "linux")]
 pub use domain_runtime::{
-    ManagedClosureObservationError, cancel_managed_executable_domain,
-    observe_managed_executable_closure_tree, prepare_managed_executable_domain,
+    ManagedClosureObservationAttemptError, ManagedClosureObservationError,
+    cancel_managed_executable_domain, observe_managed_executable_closure_tree,
+    observe_managed_executable_closure_tree_with_attempt, prepare_managed_executable_domain,
     release_managed_executable_domain,
 };

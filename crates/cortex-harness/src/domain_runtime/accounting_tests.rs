@@ -6,7 +6,10 @@ use crate::native_execution::accounting::{
     check_cpu_closure_against_sample, parse_cpu_usage, source_cpu_attempt,
 };
 use cortex_evidence::program::KernelError;
-use cortex_storage::{history_store::Completion, program_store::ProgramStoreError};
+use cortex_storage::{
+    history_store::Completion,
+    program_store::{ProgramStoreError, Reconciliation},
+};
 
 const CPU: Consumption = Consumption::CpuExecutionMillis;
 
@@ -22,7 +25,12 @@ fn tick(k: &CoordinationKernel) -> u64 {
     k.domains().unwrap().last_tick() + 1
 }
 
-fn sample(store: &ProgramStore, i: &DomainIntent, label: &str, micros: Option<u64>) -> u64 {
+fn capture_sample(
+    store: &ProgramStore,
+    i: &DomainIntent,
+    label: &str,
+    micros: Option<u64>,
+) -> Operation {
     let k = load(store);
     let at = tick(&k);
     let cancel = input(
@@ -62,6 +70,12 @@ fn sample(store: &ProgramStore, i: &DomainIntent, label: &str, micros: Option<u6
         start + Duration::from_secs(1),
     )
     .unwrap();
+    assert_eq!((fake.inner.created, fake.inner.stopped), (0, 0));
+    op
+}
+
+fn sample(store: &ProgramStore, i: &DomainIntent, label: &str, micros: Option<u64>) -> u64 {
+    let op = capture_sample(store, i, label, micros);
     let Command::Domain(tree) = &op.command else {
         panic!("wrong command");
     };
@@ -69,8 +83,92 @@ fn sample(store: &ProgramStore, i: &DomainIntent, label: &str, micros: Option<u6
         panic!("fixture did not use canonical tree observation");
     };
     store.admit(&key(), op).unwrap();
-    assert_eq!((fake.inner.created, fake.inner.stopped), (0, 0));
     captured
+}
+
+#[test]
+fn managed_observation_admission_preserves_exact_input_for_reconciliation() {
+    let root = Temp::new();
+    let (store, intent, ids) = stored(&root);
+    let component = Temp::new();
+    let mut manager = LifecycleManager::new(&component, &intent);
+    let run = execute_lifecycle(&store, &mut manager, &ids);
+    manager.inner.finish();
+    assert!(run.report.is_some());
+    let input = capture_sample(&store, &intent, "exact-reconcile", Some(1_001));
+    let before = load(&store);
+    let failure =
+        publish_managed_closure_tree(&store, &key(), input.clone(), Instant::now()).unwrap_err();
+    let ManagedClosureObservationAttemptError::Admission {
+        store: attempted_store,
+        operation: attempted,
+        failure,
+    } = failure
+    else {
+        panic!("expected a publication failure");
+    };
+    assert_eq!(attempted_store, store.id());
+    assert_eq!(failure.completion, Completion::Rejected);
+    assert!(matches!(failure.error, ProgramStoreError::Deadline));
+    assert!(*attempted == input);
+    assert_eq!(
+        store
+            .reconcile(&key(), before.initial(), &attempted, Access::ReadOnly)
+            .unwrap(),
+        Reconciliation::Absent,
+    );
+
+    let mut competing = input;
+    let Command::Domain(tree) = &mut competing.command else {
+        panic!("expected the captured observation event");
+    };
+    let DomainEvent::ClosureTreeObserved { observation, .. } = tree.as_mut() else {
+        panic!("expected a captured tree");
+    };
+    observation.sample.basis = fixture::source("competing-observation");
+    let committed = publish_managed_closure_tree(
+        &store,
+        &key(),
+        competing.clone(),
+        Instant::now() + Duration::from_secs(5),
+    )
+    .unwrap();
+    let fail = publish_managed_closure_tree(
+        &store,
+        &key(),
+        (*attempted).clone(),
+        Instant::now() + Duration::from_secs(5),
+    )
+    .unwrap_err();
+    let ManagedClosureObservationAttemptError::Admission {
+        operation, failure, ..
+    } = fail
+    else {
+        panic!("expected an input conflict");
+    };
+    assert_eq!(failure.completion, Completion::Rejected);
+    assert!(matches!(
+        failure.error,
+        ProgramStoreError::Domain(KernelError::Core(
+            cortex_core::program::ProgramError::IdentityConflict
+        ))
+    ));
+    assert_eq!(
+        store
+            .reconcile(&key(), before.initial(), &operation, Access::ReadOnly)
+            .unwrap(),
+        Reconciliation::Conflict,
+    );
+    assert_eq!(
+        store
+            .reconcile(&key(), before.initial(), &competing, Access::ReadOnly)
+            .unwrap(),
+        Reconciliation::Present(AdmissionReceipt {
+            duplicate: true,
+            ..committed
+        }),
+    );
+    assert_eq!(load(&store).revision(), committed.ordinal);
 }
 
 fn check_debt(store: &ProgramStore, f: &DomainIntent) {
