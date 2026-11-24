@@ -409,9 +409,12 @@ impl CoordinationKernel {
         }
         self.replaying = true;
         while let Some(operation) = next(&self)? {
-            if self.admit(operation)?.duplicate {
+            if self.check_admission(&operation)?.is_some() {
                 return Err(KernelError::Core(ProgramError::IdentityConflict).into());
             }
+            // This replay image is owned by reconstruct and discarded on error.
+            // Live admission still needs its draft to preserve the caller's state.
+            self.record_new_operation(operation)?;
         }
         self.finish_reconstruction();
         Ok(self)
@@ -591,12 +594,16 @@ impl CoordinationKernel {
             return Ok(receipt);
         }
         let mut draft = self.clone();
-        draft.reduce(&operation)?;
-        draft.operations.push(operation);
-        let ordinal = draft.revision();
+        let receipt = draft.record_new_operation(operation)?;
         *self = draft;
+        Ok(receipt)
+    }
+
+    fn record_new_operation(&mut self, operation: Operation) -> Result<KernelReceipt, KernelError> {
+        self.reduce(&operation)?;
+        self.operations.push(operation);
         Ok(KernelReceipt {
-            ordinal,
+            ordinal: self.revision(),
             duplicate: false,
         })
     }
