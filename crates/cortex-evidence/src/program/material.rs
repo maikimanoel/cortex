@@ -1,7 +1,10 @@
 //! Typed accepted material in the explicit protected-material program profile.
 
 use super::*;
-use cortex_core::{knowledge::SourcePath, temporal::SourceOrigin};
+use cortex_core::{
+    knowledge::{MAX_SOURCE_BYTES, SourcePath},
+    temporal::SourceOrigin,
+};
 
 /// The regular-file modes admitted by the committed-object verifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,7 +33,7 @@ impl MaterialFile {
         length: u64,
         sha256: [u8; 32],
     ) -> Result<Self, ProgramError> {
-        if length > 64 * 1024 * 1024 {
+        if length > MAX_SOURCE_BYTES as u64 {
             return Err(ProgramError::Capacity);
         }
         Ok(Self {
@@ -472,7 +475,7 @@ impl CoordinationKernel {
                 {
                     return Err(ProgramError::Stale.into());
                 }
-                self.artifact_author(artifact_report, contract)?;
+                self.check_selected_artifact_report(artifact_report, contract)?;
                 if mapping_charge(mapping)? >= limit
                     || contract.correspondences().len() > self.state.definition().limits().entries
                     || scope.requirement().predicates().len()
@@ -547,33 +550,66 @@ impl CoordinationKernel {
         }
     }
 
-    fn artifact_author(
+    fn artifact_reports<'a>(
+        &'a self,
+        contract: &'a EdgeEvidenceContract,
+    ) -> impl Iterator<Item = (&'a NotificationId, &'a ActorId)> {
+        self.operations.iter().filter_map(move |operation| {
+            let Command::Notify(notification) = &operation.command else {
+                return None;
+            };
+            let Event::Artifact(report) = notification.event() else {
+                return None;
+            };
+            (notification.graph() == contract.scope().graph()
+                && report.producer() == contract.scope().producer()
+                && report.artifact() == contract.scope().requirement().artifact())
+            .then_some((notification.id(), &operation.grant.actor))
+        })
+    }
+
+    fn check_selected_artifact_report(
         &self,
         id: &NotificationId,
         contract: &EdgeEvidenceContract,
-    ) -> Result<&ActorId, KernelError> {
+    ) -> Result<(), KernelError> {
         let mut authors = self
-            .operations
-            .iter()
-            .filter_map(|operation| match &operation.command {
-                Command::Notify(notification)
-                    if notification.id() == id
-                        && notification.graph() == contract.scope().graph() =>
-                {
-                    let Event::Artifact(report) = notification.event() else {
-                        return None;
-                    };
-                    (report.producer() == contract.scope().producer()
-                        && report.artifact() == contract.scope().requirement().artifact())
-                    .then_some(&operation.grant.actor)
-                }
-                _ => None,
-            });
+            .artifact_reports(contract)
+            .filter_map(|(report, actor)| (report == id).then_some(actor));
         let author = authors.next().ok_or(ProgramError::Missing)?;
         if authors.any(|other| other != author) {
             return Err(ProgramError::Authority.into());
         }
-        Ok(author)
+        Ok(())
+    }
+
+    pub(super) fn check_material_review_scope(
+        &self,
+        grant: &CoordinationGrant,
+        id: &ObservationId,
+    ) -> Result<(), KernelError> {
+        let Some((_, observed)) = self.material_observation(id) else {
+            return Ok(());
+        };
+        let tasks = match &observed.subject {
+            MaterialSubject::Release { contract, .. } => vec![
+                contract.scope().producer().task().clone(),
+                contract.scope().consumer().task().clone(),
+            ],
+            MaterialSubject::Integration {
+                scope, releases, ..
+            } => {
+                let mut tasks = vec![scope.task().clone()];
+                for id in releases {
+                    let Command::ReleaseMaterial(material) = &self.operation(id)?.command else {
+                        return Err(ProgramError::Missing.into());
+                    };
+                    tasks.push(material.release.contract.scope().producer().task().clone());
+                }
+                tasks
+            }
+        };
+        self.check(grant, CoordinationPermission::Review, &tasks)
     }
 
     fn check_independence(
@@ -582,13 +618,11 @@ impl CoordinationKernel {
         subject: &MaterialSubject,
     ) -> Result<(), KernelError> {
         match subject {
-            MaterialSubject::Release {
-                contract,
-                artifact_report,
-                ..
-            } => {
+            MaterialSubject::Release { contract, .. } => {
                 let producer = contract.scope().producer();
-                if actor == self.artifact_author(artifact_report, contract)?
+                if self
+                    .artifact_reports(contract)
+                    .any(|(_, author)| actor == author)
                     || self.task_author(actor, producer).0
                 {
                     return Err(ProgramError::Authority.into());

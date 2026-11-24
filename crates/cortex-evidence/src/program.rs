@@ -982,6 +982,7 @@ impl CoordinationKernel {
             }
             Command::Examine(e) => {
                 self.check(g, CoordinationPermission::Review, &[])?;
+                self.check_material_review_scope(g, &e.observation)?;
                 let current = self
                     .record_mut(&e.observation)?
                     .inspect(&e.validation())
@@ -996,6 +997,7 @@ impl CoordinationKernel {
                 reason,
             } => {
                 self.check(g, CoordinationPermission::Review, &[])?;
+                self.check_material_review_scope(g, observation)?;
                 self.record_mut(observation)?.invalidate(reason)?;
                 self.invalidate_consumers(g, &o.id, std::slice::from_ref(observation))?;
             }
