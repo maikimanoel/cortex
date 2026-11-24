@@ -1095,8 +1095,33 @@ fn source_graph_with_accounting(apply_accounting: bool) {
     else {
         panic!("failed to retain the original release of EF");
     };
-    let invalidation = fixture::domain_operation(
+    let second = fixture::domain_operation(
         &current,
+        "same-review-new-release-operation",
+        Command::Release(accepted.clone()),
+    );
+    store.admit(&key(), second.clone()).unwrap();
+    let rereleased = store.load(&key(), Access::ReadOnly).unwrap();
+    assert!(
+        rereleased
+            .decisions()
+            .last()
+            .is_some_and(|decision| { decision.released && decision.operation == second.id })
+    );
+    let old_trigger = fixture::domain_operation(
+        &rereleased,
+        "reconsider-on-older-release-operation",
+        Command::Domain(Box::new(DomainEvent::Reserve {
+            intent: f.clone(),
+            at: rereleased.domains().unwrap().last_tick(),
+        })),
+    );
+    assert!(matches!(
+        admit_after_edge_release(&store, &key(), &release_id, old_trigger),
+        Err(EdgeReservationError::ReleaseUnavailable)
+    ));
+    let invalidation = fixture::domain_operation(
+        &rereleased,
         "invalidate-accepted-ef",
         Command::InvalidateEvidence {
             observation: accepted.examinations[0].observation.clone(),
@@ -1114,7 +1139,7 @@ fn source_graph_with_accounting(apply_accounting: bool) {
         })),
     );
     assert!(matches!(
-        admit_after_edge_release(&store, &key(), &release_id, probe),
+        admit_after_edge_release(&store, &key(), &second.id, probe),
         Err(EdgeReservationError::ReleaseUnavailable)
     ));
     assert_eq!(

@@ -109,12 +109,19 @@ pub fn admit_after_edge_release(
         .readiness()
         .edge(edge)
         .map_err(|_| Refusal::ReleaseUnavailable)?;
-    if !member.decisions().iter().any(|decision| {
-        &decision.operation == release && &decision.edge == edge && decision.released
-    }) || !matches!(
-        current.decision(),
-        EdgeDecision::Released { review, .. } if review == input.review.id()
-    ) {
+    // Readiness can rebuild its projection during an amendment. A reused
+    // review notification ID must not revive an older durable release.
+    if !member
+        .decisions()
+        .iter()
+        .rev()
+        .find(|decision| &decision.edge == edge && decision.released)
+        .is_some_and(|decision| &decision.operation == release)
+        || !matches!(
+            current.decision(),
+            EdgeDecision::Released { review, .. } if review == input.review.id()
+        )
+    {
         return Err(Refusal::ReleaseUnavailable);
     }
     if input.contract.scope().consumer().task() != &scope.task {
