@@ -304,10 +304,12 @@ one another. No disposition/priority/adoption decision is computed.
 Inspection runs no process, callback, filesystem/network operation or clock. It
 never changes definitions, active policy, source reports or terminal assessments.
 Existing mutable `EvidenceRecord::inspect` may retain first sticky invalidation.
-Structural/identity/budget admission precedes staged inspection; all results and
-allocations are prepared before publishing legitimate invalidations. A typed Err
-leaves the whole supplied record pool unchanged; valid negative findings can retain
-invalidation, and unrelated records remain unchanged. Allocation panics/aborts are
+Structural and identity validation, input budgets and mandatory finding slots
+precede staged inspection. Additional findings are charged before retention.
+All results and allocations are prepared before publishing legitimate
+invalidations. A typed Err leaves the whole supplied record pool unchanged;
+valid negative findings can retain invalidation, and unrelated records remain
+unchanged. Allocation panics/aborts are
 outside this typed-error guarantee. Returning to old values cannot revive stale
 records; actual revalidation requires new observations and assessments.
 

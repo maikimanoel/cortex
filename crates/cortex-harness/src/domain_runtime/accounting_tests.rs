@@ -2,10 +2,14 @@
 //! synthetic. Every durable decision is made by the canonical store.
 use super::*;
 use crate::native_execution::accounting::{
-    CpuClosureCheckError, check_cpu_closure_against_sample, parse_cpu_usage,
+    CollectedCpuClosure, CollectedCpuClosureAction, CollectedCpuClosureCut, CpuClosureCheckError,
+    check_cpu_closure_against_sample, parse_cpu_usage, source_cpu_attempt,
 };
 use cortex_evidence::program::KernelError;
-use cortex_storage::{history_store::Completion, program_store::ProgramStoreError};
+use cortex_storage::{
+    history_store::Completion,
+    program_store::{ProgramStoreError, Reconciliation},
+};
 
 const CPU: Consumption = Consumption::CpuExecutionMillis;
 
@@ -21,7 +25,12 @@ fn tick(k: &CoordinationKernel) -> u64 {
     k.domains().unwrap().last_tick() + 1
 }
 
-fn sample(store: &ProgramStore, i: &DomainIntent, label: &str, micros: Option<u64>) -> u64 {
+fn capture_sample(
+    store: &ProgramStore,
+    i: &DomainIntent,
+    label: &str,
+    micros: Option<u64>,
+) -> Operation {
     let k = load(store);
     let at = tick(&k);
     let cancel = input(
@@ -61,6 +70,12 @@ fn sample(store: &ProgramStore, i: &DomainIntent, label: &str, micros: Option<u6
         start + Duration::from_secs(1),
     )
     .unwrap();
+    assert_eq!((fake.inner.created, fake.inner.stopped), (0, 0));
+    op
+}
+
+fn sample(store: &ProgramStore, i: &DomainIntent, label: &str, micros: Option<u64>) -> u64 {
+    let op = capture_sample(store, i, label, micros);
     let Command::Domain(tree) = &op.command else {
         panic!("wrong command");
     };
@@ -68,25 +83,114 @@ fn sample(store: &ProgramStore, i: &DomainIntent, label: &str, micros: Option<u6
         panic!("fixture did not use canonical tree observation");
     };
     store.admit(&key(), op).unwrap();
-    assert_eq!((fake.inner.created, fake.inner.stopped), (0, 0));
     captured
+}
+
+#[test]
+fn managed_observation_admission_preserves_exact_input_for_reconciliation() {
+    let root = Temp::new();
+    let (store, intent, ids) = stored(&root);
+    let component = Temp::new();
+    let mut manager = LifecycleManager::new(&component, &intent);
+    let run = execute_lifecycle(&store, &mut manager, &ids);
+    manager.inner.finish();
+    assert!(run.report.is_some());
+    let input = capture_sample(&store, &intent, "exact-reconcile", Some(1_001));
+    let before = load(&store);
+    let failure =
+        publish_managed_closure_tree(&store, &key(), input.clone(), Instant::now()).unwrap_err();
+    let ManagedClosureObservationAttemptError::Admission {
+        store: attempted_store,
+        operation: attempted,
+        failure,
+    } = failure
+    else {
+        panic!("expected a publication failure");
+    };
+    assert_eq!(attempted_store, store.id());
+    assert_eq!(failure.completion, Completion::Rejected);
+    assert!(matches!(failure.error, ProgramStoreError::Deadline));
+    assert!(*attempted == input);
+    assert_eq!(
+        store
+            .reconcile(&key(), before.initial(), &attempted, Access::ReadOnly)
+            .unwrap(),
+        Reconciliation::Absent,
+    );
+
+    let mut competing = input;
+    let Command::Domain(tree) = &mut competing.command else {
+        panic!("expected the captured observation event");
+    };
+    let DomainEvent::ClosureTreeObserved { observation, .. } = tree.as_mut() else {
+        panic!("expected a captured tree");
+    };
+    observation.sample.basis = fixture::source("competing-observation");
+    let committed = publish_managed_closure_tree(
+        &store,
+        &key(),
+        competing.clone(),
+        Instant::now() + Duration::from_secs(5),
+    )
+    .unwrap();
+    let fail = publish_managed_closure_tree(
+        &store,
+        &key(),
+        (*attempted).clone(),
+        Instant::now() + Duration::from_secs(5),
+    )
+    .unwrap_err();
+    let ManagedClosureObservationAttemptError::Admission {
+        operation, failure, ..
+    } = fail
+    else {
+        panic!("expected an input conflict");
+    };
+    assert_eq!(failure.completion, Completion::Rejected);
+    assert!(matches!(
+        failure.error,
+        ProgramStoreError::Domain(KernelError::Core(
+            cortex_core::program::ProgramError::IdentityConflict
+        ))
+    ));
+    assert_eq!(
+        store
+            .reconcile(&key(), before.initial(), &operation, Access::ReadOnly)
+            .unwrap(),
+        Reconciliation::Conflict,
+    );
+    assert_eq!(
+        store
+            .reconcile(&key(), before.initial(), &competing, Access::ReadOnly)
+            .unwrap(),
+        Reconciliation::Present(AdmissionReceipt {
+            duplicate: true,
+            ..committed
+        }),
+    );
+    assert_eq!(load(&store).revision(), committed.ordinal);
 }
 
 fn check_debt(store: &ProgramStore, f: &DomainIntent) {
     let k = load(store);
-    let refused = store
-        .admit(
-            &key(),
-            input(
-                &k,
-                "reserve-dependent",
-                DomainEvent::Reserve {
-                    intent: f.clone(),
-                    at: tick(&k),
-                },
-            ),
-        )
-        .unwrap_err();
+    let reserve = input(
+        &k,
+        "reserve-dependent",
+        DomainEvent::Reserve {
+            intent: f.clone(),
+            at: tick(&k),
+        },
+    );
+    assert!(matches!(
+        k.preview_admission(&reserve),
+        Err(KernelError::Domain(DomainError::Debt(CPU)))
+    ));
+    assert!(k.domains().unwrap().domain(&f.id).is_none());
+    let decisions =
+        admit_domain_reservations(store, &key(), vec![reserve], NonZeroUsize::MIN).unwrap();
+    let [ReservationDecision::Held(refused)] = decisions.as_slice() else {
+        panic!("dependent reservation did not hold: {decisions:?}");
+    };
     assert_eq!(refused.completion, Completion::Rejected);
     assert!(matches!(
         refused.error,
@@ -101,6 +205,56 @@ fn close_assertion(intent: &DomainIntent, usage: Option<u64>) -> ClosureReceipt 
     let mut receipt = fixture::closure(intent, usage);
     receipt.evidence = fixture::source("independent-simulated-closure");
     receipt
+}
+
+fn collected_request(
+    k: &CoordinationKernel,
+    label: &str,
+    intent: &DomainIntent,
+    action: CollectedCpuClosureAction,
+    cut: CollectedCpuClosureCut,
+) -> CollectedCpuClosure {
+    let prototype = input(
+        k,
+        label,
+        DomainEvent::Unknown {
+            domain: intent.id.clone(),
+            at: tick(k),
+            basis: fixture::source("source-simulation"),
+        },
+    );
+    CollectedCpuClosure {
+        operation: prototype.id,
+        expected_revision: prototype.expected,
+        at: tick(k),
+        grant: prototype.grant,
+        action,
+        cut,
+    }
+}
+
+pub(super) fn exercise_dependent_cpu_closure(store: &ProgramStore, f: &DomainIntent) {
+    let k = load(store);
+    assert!(matches!(
+        k.domains().unwrap().consumed_or_reserved(CPU),
+        Err(DomainError::Debt(CPU))
+    ));
+    let request = collected_request(
+        &k,
+        "close-F-with-collected-cpu",
+        f,
+        CollectedCpuClosureAction::Close,
+        CollectedCpuClosureCut::NormalEnd,
+    );
+    let key = key();
+    let submit = source_cpu_attempt(store, &key, f, request, 1100);
+    submit().unwrap();
+    let replay = load(store);
+    let domain = replay.domains().unwrap().domain(&f.id).unwrap();
+    assert_eq!(domain.phase, DomainPhase::Closed);
+    assert_eq!(domain.measured_consumption(CPU), Some(2));
+    assert!(domain.holds(Resource::WorkerSlots));
+    assert_eq!(replay.domains().unwrap().consumed_or_reserved(CPU), Ok(14));
 }
 
 pub(super) fn exercise_settlement(
@@ -154,7 +308,7 @@ pub(super) fn exercise_settlement(
         &k,
         "close-B",
         DomainEvent::Closed {
-            receipt: close_assertion(b, Some(2)),
+            receipt: close_assertion(b, None),
             at: tick(&k),
         },
     );
@@ -178,6 +332,18 @@ pub(super) fn exercise_settlement(
         ))
     ));
     check_debt(store, f);
+
+    let k = load(store);
+    let settlement_key = key();
+    let b_cpu = collected_request(
+        &k,
+        "settle-B-with-collected-cpu",
+        b,
+        CollectedCpuClosureAction::Settle,
+        CollectedCpuClosureCut::AfterCancellation,
+    );
+    source_cpu_attempt(store, &settlement_key, b, b_cpu, 1001)().unwrap();
+    check_debt(store, f); // E still holds cumulative debt.
 
     let k = load(store);
     let mut debit = close_assertion(e, Some(10));
@@ -208,19 +374,19 @@ pub(super) fn exercise_settlement(
         .unwrap_err();
     assert_eq!(denied, KernelError::Domain(DomainError::Budget(CPU)));
 
-    let settle = input(
+    let settle = collected_request(
         &k,
-        "settle-E",
-        DomainEvent::Settle {
-            receipt: debit,
-            at: tick(&k),
-        },
+        "settle-E-with-collected-cpu",
+        e,
+        CollectedCpuClosureAction::Settle,
+        CollectedCpuClosureCut::AfterCancellation,
     );
+    let attempt = source_cpu_attempt(store, &settlement_key, e, settle, 9201);
     let barrier = std::sync::Barrier::new(2);
     let (one, two) = thread::scope(|scope| {
         let submit = || {
             barrier.wait();
-            store.admit(&key(), settle.clone()).unwrap()
+            attempt().unwrap()
         };
         let one = scope.spawn(submit);
         let two = scope.spawn(submit);
@@ -244,26 +410,41 @@ pub(super) fn exercise_settlement(
             at: tick(&k),
         },
     );
+    let preview = k.preview_admission(&valid).unwrap();
+    assert_eq!(preview.observed_revision(), k.revision());
+    assert_eq!(preview.resulting_ordinal(), k.revision() + 1);
+    assert!(!preview.is_duplicate());
+    assert!(k.domains().unwrap().domain(&f.id).is_none());
+    assert_eq!(load(store).revision(), k.revision());
+
     let mut stale = valid.clone();
     stale.id = OperationId::new("stale-F").unwrap();
     let barrier = std::sync::Barrier::new(2);
     let (one, two) = thread::scope(|scope| {
         let submit = |operation| {
             barrier.wait();
-            store.admit(&key(), operation)
+            admit_domain_reservations(store, &key(), vec![operation], NonZeroUsize::MIN)
+                .unwrap()
+                .pop()
+                .unwrap()
         };
         let one = scope.spawn(move || submit(valid));
         let two = scope.spawn(move || submit(stale));
         (one.join().unwrap(), two.join().unwrap())
     });
     let refusal = match (one, two) {
-        (Ok(receipt), Err(refused)) | (Err(refused), Ok(receipt)) => {
+        (ReservationDecision::Reserved(receipt), ReservationDecision::Held(refused))
+        | (ReservationDecision::Held(refused), ReservationDecision::Reserved(receipt)) => {
             assert!(!receipt.duplicate);
             refused
         }
         _ => panic!("exactly one new F reservation must commit"),
     };
     assert_eq!(refusal.completion, Completion::Rejected);
+    assert!(matches!(
+        refusal.error,
+        ProgramStoreError::Domain(KernelError::Core(cortex_core::program::ProgramError::Stale))
+    ));
     assert_eq!(load(store).revision(), k.revision() + 1);
     assert_eq!(
         load(store).domains().unwrap().consumed_or_reserved(CPU),
@@ -466,6 +647,21 @@ fn partial_accounting_capture_requires_cancellation_and_the_original_open_window
     .err()
     .unwrap();
     assert_eq!(refused.cause, DomainCause::Deadline);
+    // The caller's start is earlier than its bound, but the read itself now
+    // begins after that bound. This reaches the original deadline in Storage.
+    let past = start - Duration::from_secs(1);
+    let refused = capture_closure_tree(
+        &store,
+        &key(),
+        &mut manager,
+        &ids,
+        observation.clone(),
+        past,
+        start,
+    )
+    .err()
+    .unwrap();
+    assert_eq!(refused.cause, DomainCause::Deadline);
     let refused = capture_closure_tree(
         &store,
         &key(),
@@ -571,4 +767,151 @@ fn successful_report_and_missing_counter_do_not_settle_after_reopen() {
     assert!(record.closure.is_none() && record.holds(Resource::DiskBytes));
     assert!(record.holds(Resource::WorkerSlots) && record.unresolved_consumption(CPU));
     assert_eq!(record.measured_consumption(CPU), None);
+}
+
+#[test]
+fn managed_tree_capture_and_canonical_commit_survive_lost_publication_reply() {
+    let root = Temp::new();
+    let (store, intent, mut ids) = stored(&root);
+    let component = Temp::new();
+    let mut manager = LifecycleManager::new(&component, &intent);
+    let first = execute_lifecycle(&store, &mut manager, &ids);
+    manager.inner.finish();
+    assert!(first.report.is_some() && first.admission_failure.is_none());
+    let before_cancel = load(&store);
+    let at = tick(&before_cancel);
+    let cancel = input(
+        &before_cancel,
+        "simulation-owner-cancel",
+        DomainEvent::Cancel {
+            domain: intent.id.clone(),
+            at,
+            basis: fixture::source("simulation-owner-cancel"),
+        },
+    );
+    ids.grant = cancel.grant.clone();
+    store.admit(&key(), cancel).unwrap();
+    let before = load(&store);
+
+    manager.synthetic_empty_tree = true;
+    manager.synthetic_cpu_micros = Some(1_001);
+    let start = Instant::now();
+    let end = start + Duration::from_secs(1);
+    let id = OperationId::new("simulation-tree-lost-reply").unwrap();
+    let mut committed = None;
+    let failure = observe_managed_tree(
+        &store,
+        &key(),
+        &mut manager,
+        &ids,
+        id.clone(),
+        (start, end),
+        |operation| {
+            let receipt =
+                store.admit_observed_domain_until(&key(), operation.clone(), end, || Ok(()))?;
+            assert!(!receipt.duplicate);
+            committed = Some((receipt, operation));
+            Err(AdmissionFailure {
+                completion: Completion::Indeterminate,
+                error: ProgramStoreError::Deadline,
+            })
+        },
+    )
+    .unwrap_err();
+    let ManagedClosureObservationAttemptError::Admission {
+        store: target,
+        operation,
+        failure,
+    } = failure
+    else {
+        panic!("managed capture did not reach canonical publication");
+    };
+    let (receipt, independent) = committed.expect("a real managed record was committed");
+    assert_eq!(target, store.id());
+    assert!(*operation == independent);
+    assert_eq!(operation.id, id);
+    assert_eq!(operation.expected, before.revision());
+    assert_eq!(receipt.ordinal, operation.expected + 1);
+    assert_eq!(failure.completion, Completion::Indeterminate);
+    assert!(matches!(failure.error, ProgramStoreError::Deadline));
+
+    let reopened = ProgramStore::open(
+        &root.0.join("store"),
+        &key(),
+        Access::ReadOnly,
+        store.read_limits(),
+    )
+    .unwrap();
+    assert_eq!(
+        reopened
+            .reconcile(&key(), before.initial(), &operation, Access::ReadOnly)
+            .unwrap(),
+        Reconciliation::Present(AdmissionReceipt {
+            duplicate: true,
+            ..receipt
+        }),
+    );
+    let after = load(&reopened);
+    let domain = after.domains().unwrap().domain(&intent.id).unwrap();
+    assert!(domain.cancelled && domain.closure.is_none());
+    assert!(domain.holds(Resource::WorkerSlots) && domain.holds(Resource::DiskBytes));
+    assert!(after.operations().last() == Some(operation.as_ref()));
+    assert_eq!(
+        (
+            manager.inner.created,
+            manager.inner.stopped,
+            manager.completions
+        ),
+        (1, 0, 1)
+    );
+    let later = execute_lifecycle(&store, &mut manager, &ids);
+    assert!(later.recovery_only);
+    assert!(
+        (later.creation, later.binding, later.release, later.report) == (None, None, None, None)
+    );
+    assert_eq!(load(&reopened).revision(), receipt.ordinal);
+    assert_eq!((manager.inner.created, manager.completions), (1, 1));
+}
+
+#[test]
+fn managed_binding_conflict_returns_original_exact_admission_input() {
+    let root = Temp::new();
+    let (store, intent, mut ids) = stored(&root);
+    let component = Temp::new();
+    let mut manager = LifecycleManager::new(&component, &intent);
+    let before = load(&store);
+    ids.bind = before.operations().first().unwrap().id.clone();
+    let result = execute_lifecycle(&store, &mut manager, &ids);
+    manager.inner.finish();
+    assert!(result.creation.is_some() && result.binding.is_none() && result.release.is_none());
+    let refused = result.admission_failure.unwrap();
+    assert_eq!(refused.store, store.id());
+    assert_eq!(refused.operation.id, ids.bind);
+    assert_eq!(refused.operation.expected, before.revision() + 1);
+    assert_eq!(refused.failure.completion, Completion::Rejected);
+    assert!(matches!(&refused.operation.command,
+        Command::Domain(inner) if matches!(inner.as_ref(), DomainEvent::BoundObserved { domain, .. } if *domain == intent.id)));
+    assert!(matches!(
+        refused.failure.error,
+        ProgramStoreError::Domain(KernelError::Core(
+            cortex_core::program::ProgramError::IdentityConflict
+        ))
+    ));
+    let reopened = ProgramStore::open(
+        &root.0.join("store"),
+        &key(),
+        Access::ReadOnly,
+        store.read_limits(),
+    )
+    .unwrap();
+    assert_eq!(
+        refused
+            .reconcile(&reopened, &key(), before.initial())
+            .unwrap(),
+        Reconciliation::Conflict
+    );
+    let later = execute_lifecycle(&store, &mut manager, &ids);
+    assert!(later.recovery_only);
+    assert_eq!(load(&reopened).revision(), refused.operation.expected);
+    assert_eq!((manager.inner.created, manager.completions), (1, 0));
 }

@@ -1,9 +1,12 @@
 //! Deterministic admission faults; no physical worker or historical store.
 use super::supervised::supervised_fixture as supervised;
 use super::*;
+use crate as admission_storage;
+#[path = "../../../../cortex-cli/tests/support/gpe_admission.rs"]
+mod gpe_admission;
 use crate::program_store::diagnostics::{ADMISSION_OBSERVATION_CAPACITY, Recorder};
 use crate::program_store::diagnostics::{AdmissionErrorKind, AdmissionOutcome};
-use cortex_core::program::operational::EffectStatus;
+use cortex_core::program::operational::{EffectEvent, EffectStatus};
 use cortex_core::program::scheduling::Resource;
 
 fn prepared(f: &Temp) -> (ProgramStore, CoordinationKernel, Operation) {
@@ -448,4 +451,371 @@ fn diagnostic_postcommit_metadata_requires_exact_canonical_confirmation() {
         Reconciliation::Conflict
     );
     assert_eq!(error.completion, Completion::Indeterminate);
+}
+
+fn fresh_reservation(f: &Temp) -> (ProgramStore, CoordinationKernel, Operation) {
+    let (before, scope, _) = supervised::configured_kernel(None);
+    let store = ProgramStore::create_supervised_fixture(
+        &f.store(),
+        &key(),
+        before.initial().clone(),
+        limits(),
+    )
+    .unwrap();
+    for prior in before.operations() {
+        store.admit(&key(), prior.clone()).unwrap();
+    }
+    let input = operation(
+        &before,
+        "reserve-synthetic-unknown",
+        Input::SupervisedEffect(Box::new(EffectEvent::Reserve {
+            intent: supervised::intent(&scope),
+            at: before.fixture_effects().grants().last().unwrap().not_before,
+        })),
+    );
+    (store, before, input)
+}
+
+#[test]
+fn ordinary_fixture_reserve_late_ack_requires_exact_readback() {
+    let f = Temp::new();
+    let (store, before, input) = fresh_reservation(&f);
+    let mut diagnostics = AdmissionDiagnostics::default();
+    let failure = store
+        .admit_diagnostic_observed(
+            &key(),
+            input.clone(),
+            |_, _| {},
+            |_| panic!("reservation invoked an execution callback"),
+            &mut diagnostics,
+            Some(AdmissionFault::Deadline(Stage::AfterCommit)),
+        )
+        .unwrap_err();
+    assert_eq!(failure.completion, Completion::Indeterminate);
+    assert!(matches!(failure.error, ProgramStoreError::Deadline));
+    eprintln!("Synthetic encrypted-store postcommit fault: {diagnostics:?}");
+    assert!(stages(&diagnostics).contains(&AdmissionStage::CommitAcknowledged));
+    let reopened = ProgramStore::open(&f.store(), &key(), Access::ReadOnly, limits()).unwrap();
+    let after = reopened.load(&key(), Access::ReadOnly).unwrap();
+    let record = after.fixture_effects().effects().last().unwrap();
+    assert_eq!(record.status, EffectStatus::Reserved);
+    assert_eq!(record.dispatch_at, None);
+    assert!(
+        after
+            .operations()
+            .last()
+            .is_some_and(|retained| retained == &input)
+    );
+    let presence = reopened.reconcile(&key(), before.initial(), &input, Access::ReadOnly);
+    assert!(matches!(
+        presence, Ok(Reconciliation::Present(receipt))
+            if receipt.ordinal == input.expected + 1 && receipt.store == store.id() && receipt.duplicate
+    ));
+    // This command stays outside the existing metadata readback policy.
+    assert!(matches!(
+        gpe_admission::confirm_metadata(
+            Err(AdmissionFailure {
+                completion: Completion::Indeterminate,
+                error: ProgramStoreError::Deadline,
+            }),
+            &input,
+            store.id(),
+            || panic!("metadata confirmation must not read a reserve"),
+        ),
+        Err(gpe_admission::UnconfirmedAdmission::Original(_))
+    ));
+    let snapshot_before_read = snapshot(&f);
+    let observed = gpe_admission::confirm_synthetic_reservation(
+        Err(failure),
+        &input,
+        store.id(),
+        &before,
+        &reopened,
+        &key(),
+    )
+    .unwrap();
+    let gpe_admission::ObservedAdmission::Confirmed { original, receipt } = observed else {
+        panic!("read-back converted the original reservation completion");
+    };
+    assert_eq!(original.completion, Completion::Indeterminate);
+    assert!(matches!(original.error, ProgramStoreError::Deadline));
+    assert_eq!(Some(receipt.ordinal), input.expected.checked_add(1));
+    assert_eq!(receipt.store, store.id());
+    assert!(receipt.duplicate);
+    assert_eq!(snapshot(&f), snapshot_before_read);
+}
+
+#[test]
+fn fixture_reservation_readback_refuses_conflict_and_later_disposition() {
+    use gpe_admission::UnconfirmedAdmission::{Original, Reconciliation as Readback, Reservation};
+    let f = Temp::new();
+    let (store, before, input) = fresh_reservation(&f);
+    let failure = || AdmissionFailure {
+        completion: Completion::Indeterminate,
+        error: ProgramStoreError::Deadline,
+    };
+    let confirm = |request: &Operation, expected, key: &StoreKey| {
+        gpe_admission::confirm_synthetic_reservation(
+            Err(failure()),
+            request,
+            expected,
+            &before,
+            &store,
+            key,
+        )
+    };
+    let empty = snapshot(&f);
+    assert!(matches!(
+        confirm(&input, store.id(), &key()),
+        Err(Readback {
+            observation: Ok(Reconciliation::Absent),
+            ..
+        })
+    ));
+    assert_eq!(snapshot(&f), empty);
+
+    let first = store.admit(&key(), input.clone()).unwrap();
+    assert!(!first.duplicate);
+    let direct = gpe_admission::confirm_synthetic_reservation(
+        Ok(first),
+        &input,
+        store.id(),
+        &before,
+        &store,
+        &key(),
+    )
+    .unwrap();
+    assert!(
+        matches!(direct, gpe_admission::ObservedAdmission::Admitted(receipt) if receipt == first)
+    );
+    let retained = snapshot(&f);
+    let wrong_key = StoreKey::new(&[36; 32]).unwrap();
+    assert!(matches!(
+        confirm(&input, store.id(), &wrong_key),
+        Err(Readback {
+            observation: Err(_),
+            ..
+        })
+    ));
+    assert!(matches!(
+        confirm(&input, StoreId::from_bytes([2; 16]), &key()),
+        Err(Original(_))
+    ));
+    for predecessor in [0, u64::MAX] {
+        let mut changed = input.clone();
+        changed.expected = predecessor;
+        assert!(matches!(
+            confirm(&changed, store.id(), &key()),
+            Err(Original(_))
+        ));
+    }
+    let mut changed_grant = input.clone();
+    changed_grant.grant.actor = ActorId::new("changed-actor").unwrap();
+    let mut changed_demand = input.clone();
+    let Input::SupervisedEffect(event) = &mut changed_demand.command else {
+        unreachable!()
+    };
+    let EffectEvent::Reserve { intent, .. } = event.as_mut() else {
+        unreachable!()
+    };
+    intent.demand[0].amount = Some(intent.demand[0].amount.unwrap() + 1);
+    let mut changed_scope = input.clone();
+    let Input::SupervisedEffect(event) = &mut changed_scope.command else {
+        unreachable!()
+    };
+    let EffectEvent::Reserve { intent, .. } = event.as_mut() else {
+        unreachable!()
+    };
+    intent.scope.generation = rev(2);
+    for changed in [changed_grant, changed_demand, changed_scope] {
+        assert!(matches!(
+            confirm(&changed, store.id(), &key()),
+            Err(Readback {
+                observation: Ok(Reconciliation::Conflict),
+                ..
+            })
+        ));
+    }
+    let latest = store.load(&key(), Access::ReadOnly).unwrap();
+    let record = &latest.fixture_effects().effects()[0];
+    let next = supervised::dispatch_operation(&latest, &record.intent.scope);
+    assert!(matches!(
+        confirm(&next, store.id(), &key()),
+        Err(Original(_))
+    ));
+    for error in [
+        AdmissionFailure {
+            completion: Completion::Indeterminate,
+            error: ProgramStoreError::Unsupported,
+        },
+        AdmissionFailure {
+            completion: Completion::RolledBack,
+            error: ProgramStoreError::Deadline,
+        },
+    ] {
+        assert!(matches!(
+            gpe_admission::confirm_synthetic_reservation(
+                Err(error),
+                &input,
+                store.id(),
+                &before,
+                &store,
+                &key()
+            ),
+            Err(Original(_))
+        ));
+    }
+    assert_eq!(snapshot(&f), retained);
+    let revoke = operation(
+        &latest,
+        "revoke-retained-grant",
+        Input::SupervisedEffect(Box::new(EffectEvent::Revoke {
+            grant: record.intent.grant.clone(),
+            at: latest.fixture_effects().last_tick(),
+            basis: source("fixture-revoked"),
+        })),
+    );
+    store.admit(&key(), revoke).unwrap();
+    let revoked = snapshot(&f);
+    assert!(matches!(
+        confirm(&input, store.id(), &key()),
+        Err(Reservation {
+            current_read: Ok(false),
+            ..
+        })
+    ));
+    assert_eq!(snapshot(&f), revoked);
+    let current = store.load(&key(), Access::ReadOnly).unwrap();
+    assert_eq!(
+        current.fixture_effects().effects()[0].status,
+        EffectStatus::Reserved
+    );
+    let cancel = operation(
+        &current,
+        "cancel-retained-reservation",
+        Input::SupervisedEffect(Box::new(EffectEvent::Cancel {
+            effect: record.intent.id.clone(),
+            scope: record.intent.scope.clone(),
+            at: current.fixture_effects().last_tick(),
+            basis: source("fixture-cancelled"),
+        })),
+    );
+    store.admit(&key(), cancel).unwrap();
+    assert_eq!(
+        store
+            .load(&key(), Access::ReadOnly)
+            .unwrap()
+            .fixture_effects()
+            .effects()[0]
+            .status,
+        EffectStatus::CancelledBeforeDispatch
+    );
+    let cancelled = snapshot(&f);
+    assert!(matches!(
+        confirm(&input, store.id(), &key()),
+        Err(Reservation {
+            current_read: Ok(false),
+            ..
+        })
+    ));
+    assert_eq!(snapshot(&f), cancelled);
+}
+
+#[test]
+fn native_sql_insert_and_commit_failures_preserve_fixture_effect_boundaries() {
+    use cortex_core::program::supervision::{ProcessCompletion, Quiescence};
+
+    #[derive(Clone, Copy)]
+    enum Cut {
+        Insert,
+        InsertAndRollback,
+        Commit,
+    }
+
+    for terminal in [false, true] {
+        for cut in [Cut::Insert, Cut::InsertAndRollback, Cut::Commit] {
+            let root = Temp::new();
+            let (store, base, dispatch) = prepared(&root);
+            let (base, input) = if terminal {
+                // This zero-payload SQL exercise uses a real canonical
+                // pre-spawn refusal to produce a valid terminal input.
+                let Input::SupervisedEffect(effect) = &dispatch.command else {
+                    panic!("supervised dispatch required");
+                };
+                let EffectEvent::Dispatch { effect, scope, .. } = effect.as_ref() else {
+                    panic!("supervised dispatch required");
+                };
+                let (receipt, launched) = store
+                    .dispatch_fixture(&key(), dispatch.clone(), |_| ())
+                    .unwrap();
+                assert!(!receipt.duplicate && launched.is_some());
+                let image = store.load(&key(), Access::ReadOnly).unwrap();
+                let observation = supervised::observation(
+                    image.fixture_effects().process_spec(effect).unwrap(),
+                    1,
+                    ProcessCompletion::StartFailed,
+                    Quiescence::NoChildStarted,
+                );
+                let report = operation(
+                    &image,
+                    "controlled-fault-terminal",
+                    Input::SupervisedEffect(Box::new(EffectEvent::ProcessObserved {
+                        effect: effect.clone(),
+                        scope: scope.clone(),
+                        at: 4,
+                        observation,
+                    })),
+                );
+                (image, report)
+            } else {
+                (base, dispatch)
+            };
+            let mut diagnostics = AdmissionDiagnostics::default();
+            let failed = store
+                .admit_diagnostic_observed(
+                    &key(),
+                    input.clone(),
+                    |_, _| {},
+                    |_| panic!("failed or uncertain SQL operation called its effect callback"),
+                    &mut diagnostics,
+                    Some(match cut {
+                        Cut::Insert => AdmissionFault::InsertDenied,
+                        Cut::InsertAndRollback => AdmissionFault::InsertAndRollbackDenied,
+                        Cut::Commit => AdmissionFault::CommitDenied,
+                    }),
+                )
+                .unwrap_err();
+            let expected = match cut {
+                Cut::Insert => Completion::RolledBack,
+                Cut::InsertAndRollback | Cut::Commit => Completion::Indeterminate,
+            };
+            assert_eq!(failed.completion, expected);
+            assert!(matches!(failed.error, ProgramStoreError::Storage(_)));
+            assert_complete(&diagnostics, &input, &store);
+            let events = stages(&diagnostics);
+            assert!(events.contains(&AdmissionStage::Insert));
+            assert!(!events.contains(&AdmissionStage::CommitAcknowledged));
+            match cut {
+                Cut::Insert => assert!(events.contains(&AdmissionStage::RollbackAcknowledged)),
+                Cut::InsertAndRollback => assert!(events.contains(&AdmissionStage::RollbackFailed)),
+                Cut::Commit => {
+                    assert!(events.contains(&AdmissionStage::InsertAcknowledged));
+                    assert!(events.contains(&AdmissionStage::Commit));
+                    assert!(!events.contains(&AdmissionStage::RollbackAcknowledged));
+                }
+            }
+            let reopened =
+                ProgramStore::open(&root.store(), &key(), Access::ReadOnly, limits()).unwrap();
+            let image = reopened.load(&key(), Access::ReadOnly).unwrap();
+            assert!(image.operations() == base.operations());
+            assert!(image.fixture_effects() == base.fixture_effects());
+            assert_eq!(
+                reopened
+                    .reconcile(&key(), base.initial(), &input, Access::ReadOnly)
+                    .unwrap(),
+                Reconciliation::Absent
+            );
+            assert_eq!(failed.completion, expected);
+        }
+    }
 }

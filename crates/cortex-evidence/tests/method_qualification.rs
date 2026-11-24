@@ -565,15 +565,19 @@ fn mi06_missing_current_capture_preserves_unestablished_validity() {
 #[test]
 fn mi32_duplicate_assignments_are_idempotent_and_charged() {
     let mut f = Fixture::new(0);
-    let before = run(&mut f).claims().to_vec();
+    let baseline = run(&mut f);
+    let before = baseline.claims().to_vec();
+    let findings = baseline.input_usage().get(InspectionLimitKind::Findings);
     let original = f.records.clone();
     let mut w = f.witnesses();
     w.push(w[0].clone());
     let e = examinations(&f.cases);
     let q = QualificationRequest::new(&f.contract, f.contract.scope(), &w, &e, None);
-    let r = inspect_method(&f.set, &f.method, Some(&q), &mut f.records, limits()).unwrap();
+    let exact = InspectionLimits::new(256, 256, 256, 4096, 8_000_000, findings).unwrap();
+    let r = inspect_method(&f.set, &f.method, Some(&q), &mut f.records, exact).unwrap();
     assert_eq!(r.claims(), before);
     assert_eq!(r.input_usage().get(InspectionLimitKind::Assignments), 5);
+    assert_eq!(r.input_usage().get(InspectionLimitKind::Findings), findings);
     assert_eq!(r.records(), original);
 }
 

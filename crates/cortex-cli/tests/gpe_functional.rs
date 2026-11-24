@@ -2,6 +2,8 @@
 //! GPE-FUNC-2T Q0-Q7: real trusted artifacts through the existing production owners.
 #[path = "support/gpe_admission.rs"]
 mod gpe_admission;
+#[path = "support/gpe_admission_tests.rs"]
+mod gpe_admission_tests;
 #[path = "support/gpe_evaluation.rs"]
 mod gpe_evaluation;
 #[path = "support/gpe_identity.rs"]
@@ -26,7 +28,14 @@ fn fixture_id(label: &str) -> String {
         |namespace| namespace.qualify(label).expect("bounded fixture identity"),
     )
 }
-use cortex_cli::inspect_candidate;
+use cortex_cli::{
+    inspect_candidate,
+    program_execution::{
+        ExecutionError, FixtureArtifactRequest, PreparedFixtureRun, capture_fixture_output,
+        run_prepared_fixture,
+    },
+    program_preparation::{ExecutorPreparation, prepare_executor_input},
+};
 use cortex_core::{
     CandidateId, TaskContract, TaskId,
     binding::*,
@@ -45,6 +54,7 @@ use cortex_harness::{
     artifact::{ArtifactError, CapturedArtifact, capture_artifact},
     execute_fixture, inspect_fixture,
 };
+use cortex_storage as admission_storage;
 use cortex_storage::{
     history_store::{Access, Completion, StoreKey},
     program_store::{AdmissionReceipt, ProgramStore, ReadLimits},
@@ -55,7 +65,7 @@ use std::{
     os::unix::fs::{MetadataExt, PermissionsExt, symlink},
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
-    sync::atomic::AtomicBool,
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
     time::{Duration, SystemTime},
 };
 use zeroize::Zeroize;
@@ -132,15 +142,26 @@ struct Campaign {
 impl Campaign {
     fn new() -> Self {
         let namespace = fixture_namespace();
-        let retained = std::env::var_os("CORTEX_GPE_CAMPAIGN_ROOT").is_some();
-        let root = std::env::var_os("CORTEX_GPE_CAMPAIGN_ROOT")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                std::env::temp_dir().join(format!("cortex-gpe-func-2t-{}", std::process::id()))
-            });
-        if !root.exists() {
-            private_dir(&root);
-        }
+        let configured = std::env::var_os("CORTEX_GPE_CAMPAIGN_ROOT").map(PathBuf::from);
+        let retained = configured.is_some();
+        let root = match configured {
+            Some(root) => {
+                if !root.exists() {
+                    private_dir(&root);
+                }
+                root
+            }
+            None => {
+                static NEXT: AtomicU64 = AtomicU64::new(0);
+                let root = std::env::temp_dir().join(format!(
+                    "cortex-gpe-func-2t-{}-{}",
+                    std::process::id(),
+                    NEXT.fetch_add(1, Ordering::Relaxed)
+                ));
+                private_dir(&root);
+                root
+            }
+        };
         let root = root.canonicalize().unwrap();
         if let Some(namespace) = namespace {
             namespace
@@ -386,17 +407,23 @@ fn load(c: &Campaign, store: &ProgramStore) -> CoordinationKernel {
 fn admit(c: &Campaign, store: &ProgramStore, id: &str, command: Input) -> AdmissionReceipt {
     let before = load(c, store);
     let input = operation(&before, id, command);
-    admit_from(c, store, &before, input)
+    admit_from(c, store, &before, input, AdmissionReadback::Metadata)
 }
 fn admit_exact(c: &Campaign, store: &ProgramStore, input: Operation) -> AdmissionReceipt {
     let before = load(c, store);
-    admit_from(c, store, &before, input)
+    admit_from(c, store, &before, input, AdmissionReadback::Metadata)
 }
+enum AdmissionReadback {
+    Metadata,
+    SyntheticReservation,
+}
+
 fn admit_from(
     c: &Campaign,
     store: &ProgramStore,
     before: &CoordinationKernel,
     input: Operation,
+    readback: AdmissionReadback,
 ) -> AdmissionReceipt {
     let id = input.id.as_str();
     let expected = input.expected;
@@ -428,13 +455,26 @@ fn admit_from(
         .and_then(|()| fs::set_permissions(&path, fs::Permissions::from_mode(0o600)))
         .map_err(|error| error.kind());
     // Report emission must not hide an uncertain admission behind an I/O panic.
-    let observed = gpe_admission::confirm_metadata(result, &input, store.id(), || {
-        // This separate read concerns only the newly owned fixture input. It
-        // neither repeats admission nor refreshes authority for a later command.
-        store.reconcile(&c.key, before.initial(), &input, Access::ReadOnly)
-    })
+    let observed = match readback {
+        AdmissionReadback::Metadata => {
+            gpe_admission::confirm_metadata(result, &input, store.id(), || {
+                store.reconcile(&c.key, before.initial(), &input, Access::ReadOnly)
+            })
+        }
+        AdmissionReadback::SyntheticReservation => {
+            assert_eq!(input.id, op("reserve-synthetic-unknown"));
+            gpe_admission::confirm_synthetic_reservation(
+                result,
+                &input,
+                store.id(),
+                before,
+                store,
+                &c.key,
+            )
+        }
+    }
     .unwrap_or_else(|failure| {
-        panic!("{text}confirmation={failure:?}; diagnostic_retention={retained:?}")
+        panic!("{text}confirmation={failure}; diagnostic_retention={retained:?}")
     });
     let receipt = match observed {
         gpe_admission::ObservedAdmission::Admitted(receipt) => receipt,
@@ -515,13 +555,123 @@ fn demand() -> Vec<Demand> {
     })
     .collect()
 }
+fn fixture_executor_request(package: &PackageRequest) -> ExecutorInputRequest {
+    let descriptor = ExecutorDescriptor::new(
+        source("finite-rust-descriptor"),
+        ExecutorIdentity::new(
+            "gpe-trusted-rust-fixture",
+            "1",
+            source("stripped-owned-fixture"),
+            policy().host,
+        )
+        .unwrap(),
+        Transport::StandardInputJsonLines,
+        [Control::StandardInput, Control::StructuredOutput]
+            .into_iter()
+            .map(|control| CapabilityObservation {
+                control,
+                kind: cortex_core::program::executor::ObservationKind::ControlledFixture,
+                support: Support::Supported,
+                basis: source("trusted-direct-child-development"),
+            })
+            .collect(),
+        2,
+    )
+    .unwrap();
+    let requirements = Requirements::new(
+        source("trusted-direct-child-profile"),
+        [Control::StandardInput, Control::StructuredOutput]
+            .into_iter()
+            .map(|control| Requirement {
+                control,
+                kind: cortex_core::program::executor::ObservationKind::ControlledFixture,
+            })
+            .collect(),
+        2,
+    )
+    .unwrap();
+    ExecutorInputRequest {
+        package: package.id.clone(),
+        revision: package.revision,
+        descriptor,
+        requirements,
+        max_bytes: 65_536,
+    }
+}
+
+fn fixture_process(
+    c: &Campaign,
+    name: &str,
+    label: &str,
+    input_len: u64,
+    approval: SourceReference,
+) -> ProcessSpec {
+    ProcessSpec {
+        reference: source(&format!("process-{label}")),
+        executable: c.binary.clone(),
+        executable_identity: source("stripped-owned-fixture"),
+        cwd: c.fixture.clone(),
+        args: vec![
+            if name == "A" {
+                "produce".into()
+            } else {
+                "consume".into()
+            },
+            c.fixture.to_str().unwrap().into(),
+            c.output.join(label).to_str().unwrap().into(),
+            c.output.join("A").to_str().unwrap().into(),
+            c.output
+                .join(format!("launched-{label}"))
+                .to_str()
+                .unwrap()
+                .into(),
+        ],
+        prepared_input: op(&format!("prepared-{label}")),
+        input_len,
+        host: policy().host,
+        profile: source("trusted-direct-child-profile"),
+        privacy: policy().privacy,
+        approval,
+        limits: ProcessLimits {
+            wall_ms: 10_000,
+            cleanup_ms: 500,
+            input_bytes: 65_536,
+            output_bytes: 4096,
+            frame_bytes: 1024,
+            authority_poll_ms: 20,
+            executable_bytes: 1_000_000,
+            arguments: 5,
+            argument_bytes: 4096,
+            transport: Some(TransportLimits {
+                startup_ms: 5000,
+                idle_ms: 5000,
+                stdout_bytes: 4096,
+                stderr_bytes: 1024,
+                records: 2,
+                buffer_bytes: 131_072,
+            }),
+        },
+        containment: None,
+        identity_checkpoint: None,
+    }
+}
+
+#[path = "support/operational_coordinator.rs"]
+mod operational_coordinator;
+
 fn prepare(
     c: &Campaign,
     store: &ProgramStore,
     name: &str,
     label: &str,
     consumed: Option<&CapturedArtifact>,
-) -> (EffectScope, EffectId, ProcessSpec, PinnedFixture) {
+) -> (
+    EffectScope,
+    EffectId,
+    ProcessSpec,
+    PinnedFixture,
+    ExecutorPreparation,
+) {
     let k = load(c, store);
     let scope = k.state().readiness().scope(&task(name)).unwrap();
     let attempt = Attempt {
@@ -618,52 +768,21 @@ fn prepare(
     for input in operations {
         admit_exact(c, store, input);
     }
-    let descriptor = ExecutorDescriptor::new(
-        source("finite-rust-descriptor"),
-        ExecutorIdentity::new(
-            "gpe-trusted-rust-fixture",
-            "1",
-            source("stripped-owned-fixture"),
-            policy().host,
-        )
-        .unwrap(),
-        Transport::StandardInputJsonLines,
-        [Control::StandardInput, Control::StructuredOutput]
-            .into_iter()
-            .map(|control| CapabilityObservation {
-                control,
-                kind: cortex_core::program::executor::ObservationKind::ControlledFixture,
-                support: Support::Supported,
-                basis: source("trusted-direct-child-development"),
-            })
-            .collect(),
-        2,
-    )
-    .unwrap();
-    let requirements = Requirements::new(
-        source("trusted-direct-child-profile"),
-        [Control::StandardInput, Control::StructuredOutput]
-            .into_iter()
-            .map(|control| Requirement {
-                control,
-                kind: cortex_core::program::executor::ObservationKind::ControlledFixture,
-            })
-            .collect(),
-        2,
-    )
-    .unwrap();
-    admit(
-        c,
-        store,
+    let journal = load(c, store);
+    let prepared_operation = operation(
+        &journal,
         &format!("prepared-{label}"),
-        Input::PrepareExecutorInput(Box::new(ExecutorInputRequest {
-            package: package.id.clone(),
-            revision: rev(1),
-            descriptor,
-            requirements,
-            max_bytes: 65_536,
-        })),
+        Input::PrepareExecutorInput(Box::new(fixture_executor_request(&package))),
     );
+    let preparation = prepare_executor_input(
+        &journal,
+        journal.revision(),
+        &task(name),
+        scope.context().contract().candidate(),
+        prepared_operation,
+    )
+    .unwrap();
+    admit_exact(c, store, preparation.operation().clone());
     let scope = EffectScope {
         program: k.state().definition().id().clone(),
         baseline: rev(1),
@@ -702,11 +821,11 @@ fn prepare(
         EffectEvent::Grant(operational.clone()),
     );
     let id = EffectId::new(&fixture_id(&format!("effect-{label}"))).unwrap();
-    effect(
-        c,
-        store,
+    let before_reservation = load(c, store);
+    let reservation = operation(
+        &before_reservation,
         &format!("reserve-{label}"),
-        EffectEvent::Reserve {
+        Input::SupervisedEffect(Box::new(EffectEvent::Reserve {
             intent: EffectIntent {
                 id: id.clone(),
                 grant: operational.id,
@@ -714,9 +833,15 @@ fn prepare(
                 demand: demand(),
                 retry_of: None,
             },
-            at: load(c, store).fixture_effects().last_tick(),
-        },
+            at: before_reservation.fixture_effects().last_tick(),
+        })),
     );
+    let readback = if label == "synthetic-unknown" {
+        AdmissionReadback::SyntheticReservation
+    } else {
+        AdmissionReadback::Metadata
+    };
+    admit_from(c, store, &before_reservation, reservation, readback);
     let k = load(c, store);
     let prepared = &k
         .prepared_inputs()
@@ -724,56 +849,15 @@ fn prepare(
         .find(|(id, _)| id == &op(&format!("prepared-{label}")))
         .unwrap()
         .1;
-    let spec = ProcessSpec {
-        reference: source(&format!("process-{label}")),
-        executable: c.binary.clone(),
-        executable_identity: source("stripped-owned-fixture"),
-        cwd: c.fixture.clone(),
-        args: vec![
-            if name == "A" {
-                "produce".into()
-            } else {
-                "consume".into()
-            },
-            c.fixture.to_str().unwrap().into(),
-            c.output.join(label).to_str().unwrap().into(),
-            c.output.join("A").to_str().unwrap().into(),
-            c.output
-                .join(format!("launched-{label}"))
-                .to_str()
-                .unwrap()
-                .into(),
-        ],
-        prepared_input: op(&format!("prepared-{label}")),
-        input_len: prepared.bytes().len() as u64,
-        host: policy().host,
-        profile: source("trusted-direct-child-profile"),
-        privacy: policy().privacy,
-        approval: operational.basis,
-        limits: ProcessLimits {
-            wall_ms: 10_000,
-            cleanup_ms: 500,
-            input_bytes: 65_536,
-            output_bytes: 4096,
-            frame_bytes: 1024,
-            authority_poll_ms: 20,
-            executable_bytes: 1_000_000,
-            arguments: 5,
-            argument_bytes: 4096,
-            transport: Some(TransportLimits {
-                startup_ms: 5000,
-                idle_ms: 5000,
-                stdout_bytes: 4096,
-                stderr_bytes: 1024,
-                records: 2,
-                buffer_bytes: 131_072,
-            }),
-        },
-        containment: None,
-        identity_checkpoint: None,
-    };
+    let spec = fixture_process(
+        c,
+        name,
+        label,
+        prepared.bytes().len() as u64,
+        operational.basis,
+    );
     let pin = inspect_fixture(&spec, prepared, k.state().definition().limits()).unwrap();
-    (scope, id, spec, pin)
+    (scope, id, spec, pin, preparation)
 }
 fn process(
     c: &Campaign,
@@ -825,7 +909,7 @@ fn run(
     scope: &EffectScope,
     id: &EffectId,
     spec: &ProcessSpec,
-    pin: &PinnedFixture,
+    fixture: (&PinnedFixture, &ExecutorPreparation),
     label: &str,
 ) -> Operation {
     let kernel = load(c, store);
@@ -862,15 +946,24 @@ fn run(
         &serde_json::to_string_pretty(&manifest).unwrap(),
     );
     c.launch_slot();
-    let result = execute_fixture(
+    let result = run_prepared_fixture(
         store,
         &c.key,
-        dispatch.clone(),
-        capture_ids(label),
-        pin,
+        PreparedFixtureRun {
+            preparation: fixture.1,
+            dispatch: dispatch.clone(),
+            pin: fixture.0,
+            captures: capture_ids(label),
+            workspace_observation: ObservationId::new(scope.task.as_str(), 4).unwrap(),
+        },
         &AtomicBool::new(false),
     )
     .unwrap();
+    assert_eq!(
+        result.workspace.observation().contract().candidate(),
+        &scope.candidate
+    );
+    let result = result.run;
     assert!(
         result.recording_failure.is_none(),
         "terminal observation recording failed"
@@ -1204,7 +1297,7 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
         },
     );
     effect(&c, &store, "policy", EffectEvent::Policy(policy()));
-    let (a, aid, spec, pin) = prepare(&c, &store, "A", "A", None);
+    let (a, aid, spec, pin, a_preparation) = prepare(&c, &store, "A", "A", None);
     let k = load(&c, &store);
     let prepared = &k.prepared_inputs()[0].1;
     let mut wrong = spec.clone();
@@ -1254,7 +1347,27 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
     );
     c.mark("Q0");
     workflow_evaluation.register(&c, &store, &a, &aid, "A");
-    let dispatch_a = run(&c, &store, &a, &aid, &spec, &pin, "A");
+    let clean = fs::read(c.fixture.join("main.rs")).unwrap();
+    fs::write(c.fixture.join("main.rs"), b"fn main() {}").unwrap();
+    let dirty_dispatch = dispatch(&load(&c, &store), &a, &aid, "dirty-guard");
+    let before_dirty_refusal = snapshot(&c.state);
+    let refused = run_prepared_fixture(
+        &store,
+        &c.key,
+        PreparedFixtureRun {
+            preparation: &a_preparation,
+            dispatch: dirty_dispatch,
+            pin: &pin,
+            captures: capture_ids("dirty-guard"),
+            workspace_observation: ObservationId::new(a.task.as_str(), 3).unwrap(),
+        },
+        &AtomicBool::new(false),
+    );
+    assert!(matches!(refused, Err(ExecutionError::Workspace(_))));
+    assert_eq!(snapshot(&c.state), before_dirty_refusal);
+    assert!(!c.output.join("launched-A").exists());
+    fs::write(c.fixture.join("main.rs"), clean).unwrap();
+    let dispatch_a = run(&c, &store, &a, &aid, &spec, (&pin, &a_preparation), "A");
     let k = load(&c, &store);
     assert!(k.records().is_empty() && k.decisions().is_empty());
     assert!(
@@ -1264,16 +1377,33 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
             .unwrap()
             .dependency_ready()
     );
-    let captured = capture_artifact(
-        &k,
-        &aid,
-        &artifact,
-        &c.output,
-        &c.output.join("A"),
-        std::slice::from_ref(&c.cortex),
-        256,
+    let producer_file = c.output.join("A");
+    let output = |expected_sha256| FixtureArtifactRequest {
+        effect: &aid,
+        artifact: &artifact,
+        output_root: &c.output,
+        path: &producer_file,
+        additional_sources: std::slice::from_ref(&c.cortex),
+        max_bytes: 256,
+        expected_sha256,
+        workspace_observation: ObservationId::new(a.task.as_str(), 5).unwrap(),
+    };
+    let captured = capture_fixture_output(
+        &store,
+        &c.key,
+        output("a1a410bd6438bb73e09ee3220cf8a87470d1d6401757f68be666fd8399e78df0"),
     )
     .unwrap();
+    assert_eq!(captured.revision, k.revision());
+    assert_eq!(
+        captured.workspace.observation().contract().candidate(),
+        &a.candidate
+    );
+    let captured = captured.content;
+    assert!(matches!(
+        capture_fixture_output(&store, &c.key, output("different-output-digest")),
+        Err(ExecutionError::ArtifactDigest)
+    ));
     assert_eq!(captured.bytes(), ARTIFACT);
     assert_eq!(
         captured.sha256(),
@@ -1610,15 +1740,42 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
     changed.expected += 1;
     assert!(store.admit(&c.key, changed).is_err());
     c.mark("Q3");
-    let (b, bid, bspec, bpin) = prepare(&c, &store, "B", "B", Some(&captured));
+    let (b, bid, bspec, bpin, b_preparation) = prepare(&c, &store, "B", "B", Some(&captured));
     process(&c, &store, &b, &bid, &bspec, "B");
     workflow_evaluation.register(&c, &store, &b, &bid, "B");
-    let dispatch_b = run(&c, &store, &b, &bid, &bspec, &bpin, "B");
+    let wrong_package = dispatch(&load(&c, &store), &b, &bid, "wrong-input-guard");
+    let before_input_refusal = snapshot(&c.state);
+    let refused = run_prepared_fixture(
+        &store,
+        &c.key,
+        PreparedFixtureRun {
+            preparation: &a_preparation,
+            dispatch: wrong_package,
+            pin: &bpin,
+            captures: capture_ids("wrong-input-guard"),
+            workspace_observation: ObservationId::new(b.task.as_str(), 3).unwrap(),
+        },
+        &AtomicBool::new(false),
+    );
+    assert!(matches!(refused, Err(ExecutionError::PreparedInput)));
+    assert_eq!(snapshot(&c.state), before_input_refusal);
+    assert!(!c.output.join("launched-B").exists());
+    let dispatch_b = run(&c, &store, &b, &bid, &bspec, (&bpin, &b_preparation), "B");
     assert_eq!(
         fs::read(c.output.join("B.consumed")).unwrap(),
         captured.bytes()
     );
-    let actual = fs::read(c.output.join("B")).unwrap();
+    let returned = cortex_harness::native_execution::artifacts::capture(
+        fs::File::open(&c.output).unwrap(),
+        &[cortex_harness::native_execution::artifacts::ArtifactSpec {
+            path: PathBuf::from("B"),
+            max_bytes: 256,
+            sha256: None,
+        }],
+        256,
+    )
+    .unwrap();
+    let actual = returned[0].bytes.as_slice();
     assert_eq!(actual, CONSUMED);
     assert_ne!(actual, b"cortex-consumer-v1\ncount=4\nsum=18\nsquares=87\n");
     let before_settlement = load(&c, &store);
@@ -1630,7 +1787,7 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
             >= 10_500
     );
     settle(&c, &store, &b, &bid, "B");
-    let bv = observe(&c, &store, "B", &actual, CONSUMED, None);
+    let bv = observe(&c, &store, "B", actual, CONSUMED, None);
     assess(&c, &store, &bv, "B");
     workflow_evaluation.record(
         &c,
@@ -1707,7 +1864,7 @@ fn two_tasks_produce_release_reconstruct_consume_invalidate_and_retain_unknown()
         ),
         Err(ArtifactError::Correspondence)
     ));
-    let (unknown, uid, uspec, _) = prepare(&c, &store, "A", "synthetic-unknown", None);
+    let (unknown, uid, uspec, _, _) = prepare(&c, &store, "A", "synthetic-unknown", None);
     process(&c, &store, &unknown, &uid, &uspec, "synthetic-unknown");
     workflow_evaluation.register(&c, &store, &unknown, &uid, "synthetic-unknown");
     let synthetic_dispatch = dispatch(&load(&c, &store), &unknown, &uid, "synthetic-unknown");

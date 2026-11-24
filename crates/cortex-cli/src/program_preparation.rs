@@ -9,6 +9,7 @@ use cortex_core::{
     program::{
         AttemptStatus, CoordinationPermission, ProgramError,
         context::{self, PackageRequest},
+        executor::PreparedInput,
         operational::OperationalError,
         scheduling::{Proposal, SchedulingDecision},
     },
@@ -87,7 +88,7 @@ impl CoordinationPreparation {
 pub enum PreparationError {
     /// Duplicate, absent, foreign or inconsistent task correspondence.
     Mapping,
-    /// Only Claim followed by Package may be prepared.
+    /// The operation does not belong to the selected preparation path.
     UnsupportedCommand,
     /// A Core correspondence or bounded-input guard refused the request.
     Core(ProgramError),
@@ -96,11 +97,110 @@ pub enum PreparationError {
     /// Canonical admission refused the in-memory draft.
     Kernel(KernelError),
 }
+
+/// Exact executor input proposed against one immutable kernel revision.
+///
+/// This owns the original canonical operation and the input produced by the
+/// existing kernel guards. It has no transport, submission or resource grant.
+/// Durable admission must still check the original predecessor and may fail.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ExecutorPreparation {
+    revision: u64,
+    operation: Operation,
+    input: PreparedInput,
+}
+impl fmt::Debug for ExecutorPreparation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ExecutorPreparation")
+            .field("revision", &self.revision)
+            .field("input_bytes", &self.input.bytes().len())
+            .finish_non_exhaustive()
+    }
+}
+impl ExecutorPreparation {
+    /// Exact accepted-operation count inspected before preparing this input.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+    /// Unchanged operation, grant and expected predecessor; never a receipt.
+    pub fn operation(&self) -> &Operation {
+        &self.operation
+    }
+    /// Canonical complete input and its exact descriptor/control requirements.
+    pub fn input(&self) -> &PreparedInput {
+        &self.input
+    }
+    /// Transfer the operation for separately explicit authoritative admission.
+    pub fn into_operation(self) -> Operation {
+        self.operation
+    }
+}
+
+/// Prepare an explicit executor-input operation for an exact retained task package.
+///
+/// Callers first admit their selected Claim/Package operations through the existing
+/// authoritative path. This consumer then checks the exact current candidate and
+/// package identity and invokes the canonical kernel guards on an isolated draft.
+/// Capability holds, changed descriptor identities and package staleness retain
+/// their existing typed causes. It does not discover an executable or qualify a host.
+///
+/// Only a fresh `PrepareExecutorInput` operation is accepted here. Historical exact
+/// replay remains the journal's responsibility; this function never rebases or
+/// retries an operation. The caller's kernel, attempts, reservations and observations
+/// are unchanged on both success and error. Input preparation does not authorize a
+/// later process or associate an operational effect with an ownership attempt.
+pub fn prepare_executor_input(
+    kernel: &CoordinationKernel,
+    expected_revision: u64,
+    task: &TaskId,
+    candidate: &CandidateRequirement,
+    operation: Operation,
+) -> Result<ExecutorPreparation, PreparationError> {
+    if expected_revision != kernel.revision() || operation.expected != expected_revision {
+        return Err(ProgramError::Stale.into());
+    }
+    if kernel.operations().iter().any(|old| old.id == operation.id) {
+        return Err(ProgramError::IdentityConflict.into());
+    }
+    let Command::PrepareExecutorInput(request) = &operation.command else {
+        return Err(PreparationError::UnsupportedCommand);
+    };
+    let limits = kernel.state().definition().limits();
+    if request.descriptor.observations().len() > limits.entries
+        || request.requirements.required().len() > limits.entries
+        || request.max_bytes == 0
+        || request.max_bytes > limits.bytes
+    {
+        return Err(ProgramError::Capacity.into());
+    }
+    let package = kernel
+        .packages()
+        .iter()
+        .find(|p| p.request().id == request.package && p.request().revision == request.revision)
+        .ok_or(ProgramError::Missing)?;
+    if &package.request().task != task {
+        return Err(PreparationError::Mapping);
+    }
+    let scope = kernel
+        .state()
+        .readiness()
+        .scope(task)
+        .map_err(ProgramError::from)?;
+    if scope.context().contract().candidate() != candidate {
+        return Err(ProgramError::Stale.into());
+    }
+    let input = kernel.preview_executor_input(&operation)?;
+    Ok(ExecutorPreparation {
+        revision: expected_revision,
+        operation,
+        input,
+    })
+}
 impl fmt::Display for PreparationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Mapping => f.write_str("preparation: invalid task correspondence"),
-            Self::UnsupportedCommand => f.write_str("preparation: unsupported command pair"),
+            Self::UnsupportedCommand => f.write_str("preparation: unsupported command"),
             Self::Core(e) => write!(f, "preparation: {e}"),
             Self::Operational(e) => write!(f, "preparation: {e}"),
             Self::Kernel(e) => write!(f, "preparation: {e}"),

@@ -51,6 +51,8 @@ pub enum ProgramProfile {
     SupervisedFixturesV3,
     /// One shared-pool coordinator with recoverable provider-free domain records.
     RecoverableDomainsV4,
+    /// Explicit metadata journal for typed independently accepted Git material.
+    ProtectedMaterialV5,
 }
 impl ProgramProfile {
     fn format(self) -> i64 {
@@ -59,6 +61,7 @@ impl ProgramProfile {
             Self::FixturesV2 => 2,
             Self::SupervisedFixturesV3 => 3,
             Self::RecoverableDomainsV4 => 4,
+            Self::ProtectedMaterialV5 => 5,
         }
     }
     fn policy(self) -> &'static str {
@@ -67,16 +70,30 @@ impl ProgramProfile {
             Self::FixturesV2 => "local-operator-program-fixtures-v2",
             Self::SupervisedFixturesV3 => "local-operator-program-supervised-fixtures-v3",
             Self::RecoverableDomainsV4 => "local-operator-recoverable-domains-v4",
+            Self::ProtectedMaterialV5 => "local-operator-protected-material-v5",
         }
     }
     fn check(self, input: &Operation) -> Result<(), ProgramStoreError> {
         use cortex_evidence::program::Command;
+        if self != Self::ProtectedMaterialV5
+            && matches!(
+                &input.command,
+                Command::ObserveMaterial(_)
+                    | Command::ReleaseMaterial(_)
+                    | Command::AcceptIntegration(_)
+            )
+        {
+            return Err(ProgramStoreError::Unsupported);
+        }
         if let Command::DomainMember { operation, .. } = &input.command
             && matches!(
                 operation.command,
                 Command::Domain(_)
                     | Command::DomainMember { .. }
                     | Command::RegisterDomainMember(_)
+                    | Command::ObserveMaterial(_)
+                    | Command::ReleaseMaterial(_)
+                    | Command::AcceptIntegration(_)
             )
         {
             return Err(ProgramStoreError::Unsupported);
@@ -101,7 +118,7 @@ impl ProgramProfile {
         {
             return Err(ProgramStoreError::Unsupported);
         }
-        if self == Self::MetadataV1
+        if matches!(self, Self::MetadataV1 | Self::ProtectedMaterialV5)
             && matches!(
                 input.command,
                 cortex_evidence::program::Command::FixtureEffect(_)
@@ -117,6 +134,7 @@ impl ProgramProfile {
         match self {
             Self::SupervisedFixturesV3 => CoordinationKernel::new_supervised_fixture(initial),
             Self::RecoverableDomainsV4 => CoordinationKernel::new_domain_fixture(initial),
+            Self::ProtectedMaterialV5 => CoordinationKernel::new_protected_material(initial),
             _ => CoordinationKernel::new(initial),
         }
     }
@@ -210,6 +228,7 @@ impl ReadLimits {
 }
 struct Budget {
     start: Instant,
+    deadline: Option<Instant>,
     limits: ReadLimits,
     used: usize,
     #[cfg(test)]
@@ -219,10 +238,25 @@ impl Budget {
     fn new(limits: ReadLimits) -> Self {
         Self {
             start: Instant::now(),
+            deadline: None,
             limits,
             used: 0,
             #[cfg(test)]
             expired: false,
+        }
+    }
+    fn until(mut self, deadline: Instant) -> Self {
+        self.deadline = Some(deadline);
+        self
+    }
+    fn lock_timeout(&self) -> Result<Duration, ProgramStoreError> {
+        match self.deadline {
+            Some(deadline) => deadline
+                .checked_duration_since(Instant::now())
+                .filter(|remaining| !remaining.is_zero())
+                .map(|remaining| self.limits.timeout.min(remaining))
+                .ok_or(ProgramStoreError::Deadline),
+            None => Ok(self.limits.timeout),
         }
     }
     fn check(&self) -> Result<(), ProgramStoreError> {
@@ -230,7 +264,10 @@ impl Budget {
         if self.expired {
             return Err(ProgramStoreError::Deadline);
         }
-        if self.start.elapsed() >= self.limits.timeout {
+        let now = Instant::now();
+        if now.duration_since(self.start) >= self.limits.timeout
+            || self.deadline.is_some_and(|deadline| now >= deadline)
+        {
             Err(ProgramStoreError::Deadline)
         } else {
             Ok(())
@@ -249,6 +286,21 @@ impl Budget {
         }
     }
 }
+struct ObservationCut<'a> {
+    deadline: Instant,
+    check: &'a mut dyn FnMut() -> Result<(), ProgramStoreError>,
+}
+
+struct AdmissionHooks<'a, O> {
+    observe: O,
+    cut: Option<ObservationCut<'a>>,
+}
+impl<O> AdmissionHooks<'_, O> {
+    fn trace(observe: O) -> Self {
+        Self { observe, cut: None }
+    }
+}
+
 /// Exact successful metadata admission, not a verification or acceptance judgment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AdmissionReceipt {
@@ -374,6 +426,23 @@ impl ProgramStore {
             ProgramProfile::RecoverableDomainsV4,
         )
     }
+    /// Create a new metadata-only journal for protected material.
+    /// Existing stores are never migrated; neither this profile nor its receipts
+    /// grant fixture dispatch, managed launch or publication.
+    pub fn create_protected_material(
+        path: &Path,
+        key: &StoreKey,
+        initial: ProgramDefinition,
+        limits: ReadLimits,
+    ) -> Result<Self, ProgramStoreError> {
+        Self::create_profile(
+            path,
+            key,
+            initial,
+            limits,
+            ProgramProfile::ProtectedMaterialV5,
+        )
+    }
     fn create_profile(
         path: &Path,
         key: &StoreKey,
@@ -492,6 +561,33 @@ impl ProgramStore {
     pub fn id(&self) -> StoreId {
         self.id
     }
+
+    /// Derive material from an explicitly supplied version-four operation.
+    ///
+    /// This uses the unchanged canonical operation codec and the caller's
+    /// existing store byte bound. It reads no journal and confers no currentness,
+    /// admission, or authority. The callback must protect the supplied material.
+    pub fn derive_domain_operation<R>(
+        &self,
+        operation: &Operation,
+        derive: impl FnOnce(&[u8]) -> R,
+    ) -> Result<R, ProgramStoreError> {
+        use cortex_core::program::domain::DomainEvent;
+        use cortex_evidence::program::Command;
+        if self.profile != ProgramProfile::RecoverableDomainsV4
+            || !matches!(&operation.command, Command::Domain(event) if matches!(
+                event.as_ref(),
+                DomainEvent::Reserve { .. }
+                    | DomainEvent::CreateRequested { .. }
+                    | DomainEvent::BoundObserved { .. }
+                    | DomainEvent::ReleaseRequested { .. }
+            ))
+        {
+            return Err(ProgramStoreError::Unsupported);
+        }
+        let material = codec::operation(operation, self.limits.bytes)?;
+        Ok(derive(material.as_slice()))
+    }
     /// Reconstruct through Core/Evidence from complete canonical inputs. This does
     /// not recapture Git or establish live freshness. Read-only performs no writes.
     pub fn load(
@@ -499,14 +595,37 @@ impl ProgramStore {
         key: &StoreKey,
         access: Access,
     ) -> Result<CoordinationKernel, ProgramStoreError> {
-        let mut budget = Budget::new(self.limits);
-        let _lock = self.location.lock_for(self.limits.timeout)?;
+        self.load_with_budget(key, access, Budget::new(self.limits))
+    }
+    /// Read the current projection within a caller's original monotonic deadline
+    /// and the existing store limits. The deadline checks are cooperative.
+    pub fn load_read_only_until(
+        &self,
+        key: &StoreKey,
+        deadline: Instant,
+    ) -> Result<CoordinationKernel, ProgramStoreError> {
+        self.load_with_budget(
+            key,
+            Access::ReadOnly,
+            Budget::new(self.limits).until(deadline),
+        )
+    }
+    fn load_with_budget(
+        &self,
+        key: &StoreKey,
+        access: Access,
+        mut budget: Budget,
+    ) -> Result<CoordinationKernel, ProgramStoreError> {
+        let _lock = self.location.lock_for(budget.lock_timeout()?)?;
         self.location.ready()?;
         budget.check()?;
         let conn = history_store::connect(&self.location, key, access)?;
         let (id, kernel, profile) = load(&conn, &self.location, &mut budget)?;
         if id != self.id || profile != self.profile {
             return Err(ProgramStoreError::TargetChanged);
+        }
+        if budget.deadline.is_some() {
+            budget.check()?;
         }
         Ok(kernel)
     }
@@ -518,6 +637,48 @@ impl ProgramStore {
         input: Operation,
     ) -> Result<AdmissionReceipt, AdmissionFailure> {
         self.admit_observed(key, input, |_, _| {})
+    }
+    /// Admit a version-four closure observation or disposition under its original
+    /// monotonic deadline. The brief local check can only refuse an otherwise
+    /// valid canonical operation. It runs under the lifecycle lock immediately
+    /// before commit and must not perform external effects, wait for input or
+    /// reenter the store. Duplicates do not call it. Late acknowledgment after
+    /// a possible commit is indeterminate and requires explicit reconciliation.
+    /// All timing bounds remain cooperative on a responsive local filesystem.
+    pub fn admit_observed_domain_until(
+        &self,
+        key: &StoreKey,
+        input: Operation,
+        deadline: Instant,
+        mut check: impl FnMut() -> Result<(), ProgramStoreError>,
+    ) -> Result<AdmissionReceipt, AdmissionFailure> {
+        use cortex_core::program::domain::DomainEvent;
+        if self.profile != ProgramProfile::RecoverableDomainsV4
+            || !matches!(&input.command, Command::Domain(event) if matches!(
+                event.as_ref(),
+                DomainEvent::ClosureTreeObserved { .. }
+                    | DomainEvent::Closed { .. }
+                    | DomainEvent::Settle { .. }
+            ))
+        {
+            return Err(AdmissionFailure::rejected(ProgramStoreError::Unsupported));
+        }
+        self.admit_recorded(
+            key,
+            input,
+            AdmissionHooks {
+                observe: |_: Stage, _: &Connection| {},
+                cut: Some(ObservationCut {
+                    deadline,
+                    check: &mut check,
+                }),
+            },
+            |_| (),
+            &mut diagnostics::Disabled,
+            #[cfg(test)]
+            None,
+        )
+        .map(|(receipt, _)| receipt)
     }
     /// Admit with an explicitly selected bounded in-memory diagnostic report.
     ///
@@ -538,7 +699,7 @@ impl ProgramStore {
         let result = self.admit_recorded(
             key,
             input,
-            |_, _| {},
+            AdmissionHooks::trace(|_: Stage, _: &Connection| {}),
             |_| (),
             diagnostics,
             #[cfg(test)]
@@ -614,7 +775,7 @@ impl ProgramStore {
         self.admit_recorded(
             key,
             input,
-            observe,
+            AdmissionHooks::trace(observe),
             launch,
             &mut diagnostics::Disabled,
             #[cfg(test)]
@@ -632,7 +793,14 @@ impl ProgramStore {
         fault: Option<AdmissionFault>,
     ) -> Result<(AdmissionReceipt, Option<R>), AdmissionFailure> {
         diagnostics.begin(self.id, &input);
-        let result = self.admit_recorded(key, input, observe, launch, diagnostics, fault);
+        let result = self.admit_recorded(
+            key,
+            input,
+            AdmissionHooks::trace(observe),
+            launch,
+            diagnostics,
+            fault,
+        );
         diagnostics.finish(&result);
         result
     }
@@ -640,16 +808,26 @@ impl ProgramStore {
         &self,
         key: &StoreKey,
         input: Operation,
-        mut observe: impl FnMut(Stage, &Connection),
+        hooks: AdmissionHooks<'_, impl FnMut(Stage, &Connection)>,
         launch: impl FnOnce(&CoordinationKernel) -> R,
         diagnostics: &mut D,
         #[cfg(test)] fault: Option<AdmissionFault>,
     ) -> Result<(AdmissionReceipt, Option<R>), AdmissionFailure> {
+        let AdmissionHooks {
+            mut observe,
+            mut cut,
+        } = hooks;
         let mut budget = Budget::new(self.limits);
+        if let Some(cut) = &cut {
+            budget = budget.until(cut.deadline);
+        }
         diagnostics.record(AdmissionStage::LockRequested);
+        let timeout = budget
+            .lock_timeout()
+            .map_err(|error| diagnostic_rejection(diagnostics, error))?;
         let _lock = self
             .location
-            .lock_for(self.limits.timeout)
+            .lock_for(timeout)
             .map_err(|error| diagnostic_rejection(diagnostics, error.into()))?;
         diagnostics.record(AdmissionStage::LockAcquired);
         #[cfg(test)]
@@ -668,21 +846,38 @@ impl ProgramStore {
         let mut conn = history_store::connect(&self.location, key, Access::Recover)
             .map_err(|error| diagnostic_rejection(diagnostics, error.into()))?;
         #[cfg(test)]
-        if fault == Some(AdmissionFault::RollbackDenied) {
+        if let Some(fault) = fault
+            && !matches!(fault, AdmissionFault::Deadline(_))
+        {
             use rusqlite::hooks::{AuthAction, Authorization, TransactionOperation};
-            conn.authorizer(Some(|context: rusqlite::hooks::AuthContext<'_>| {
-                if matches!(
-                    context.action,
-                    AuthAction::Transaction {
-                        operation: TransactionOperation::Rollback
-                    }
-                ) {
+            conn.authorizer(Some(move |context: rusqlite::hooks::AuthContext<'_>| {
+                let denied = matches!(
+                    (fault, context.action),
+                    (
+                        AdmissionFault::InsertDenied | AdmissionFault::InsertAndRollbackDenied,
+                        AuthAction::Insert {
+                            table_name: "program_inputs"
+                        }
+                    ) | (
+                        AdmissionFault::RollbackDenied | AdmissionFault::InsertAndRollbackDenied,
+                        AuthAction::Transaction {
+                            operation: TransactionOperation::Rollback
+                        }
+                    ) | (
+                        AdmissionFault::CommitDenied,
+                        // Locked rusqlite maps the literal SQL COMMIT to Unknown.
+                        AuthAction::Transaction {
+                            operation: TransactionOperation::Unknown
+                        }
+                    )
+                );
+                if denied {
                     Authorization::Deny
                 } else {
                     Authorization::Allow
                 }
             }))
-            .expect("install controlled rollback denial");
+            .expect("install controlled statement denial");
         }
         diagnostics.record(AdmissionStage::BeginTransaction);
         let tx = conn
@@ -785,7 +980,14 @@ impl ProgramStore {
             budget.expired = true;
         }
         diagnostics.record(AdmissionStage::PreCommitDeadlineCheck);
-        if let Err(error) = budget.check() {
+        let ready = budget.check().and_then(|()| {
+            if let Some(cut) = &mut cut {
+                (cut.check)()?;
+                budget.check()?;
+            }
+            Ok(())
+        });
+        if let Err(error) = ready {
             diagnostics.record(AdmissionStage::Failure((&error).into()));
             return Err(AdmissionFailure {
                 completion: if diagnostic_rollback(tx, diagnostics).is_ok() {
@@ -929,6 +1131,9 @@ impl ProgramStore {
 enum AdmissionFault {
     Deadline(Stage),
     RollbackDenied,
+    InsertDenied,
+    InsertAndRollbackDenied,
+    CommitDenied,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Stage {
@@ -1011,6 +1216,7 @@ fn identity(
         ProgramProfile::FixturesV2,
         ProgramProfile::SupervisedFixturesV3,
         ProgramProfile::RecoverableDomainsV4,
+        ProgramProfile::ProtectedMaterialV5,
     ]
     .into_iter()
     .find(|p| p.format() == format && p.policy() == policy)

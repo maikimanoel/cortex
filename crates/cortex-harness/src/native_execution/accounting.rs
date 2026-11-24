@@ -3,6 +3,18 @@ use cortex_core::program::domain::{
     ClosureReceipt, Consumption, DomainClosureTreeObservation, DomainRecord,
 };
 
+mod lifetime;
+pub use lifetime::{ManagedCpuCut, ManagedCpuObservations, ManagedCpuReadback};
+pub(in crate::native_execution) use lifetime::{clock_namespace, monotonic_ns};
+mod settlement;
+#[cfg(test)]
+pub(crate) use settlement::tests::source_cpu_attempt;
+pub use settlement::{
+    CollectedCpuClosure, CollectedCpuClosureAction, CollectedCpuClosureCut,
+    CollectedCpuClosureError,
+};
+pub(in crate::native_execution) use settlement::{challenge, submit};
+
 const CPU_STAT_LIMIT: usize = 16_384;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,15 +47,40 @@ pub(crate) fn parse_cpu_usage(input: &str) -> Result<u64, CounterError> {
     value.parse().map_err(|_| CounterError::Range)
 }
 
-/// Compare samples of one already verified counter epoch. An empty observation
-/// with changing usage cannot corroborate that window. Equality is not a fence.
-pub(crate) fn bracketed_cpu_usage(
+/// Bounded cumulative CPU readback for one already verified cgroup epoch.
+/// None of these states establishes complete attributable terminal consumption.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CpuCounterObservation {
+    /// At least one bounded read was absent, unreadable, or malformed.
+    Unavailable,
+    /// The counter regressed, or changed across an apparently empty tree read.
+    Contradictory,
+    /// Cumulative usage in microseconds, usable only as a lower bound.
+    LowerBoundMicros(u64),
+}
+
+impl CpuCounterObservation {
+    pub(crate) fn lower_bound_micros(self) -> Option<u64> {
+        match self {
+            Self::LowerBoundMicros(value) => Some(value),
+            Self::Unavailable | Self::Contradictory => None,
+        }
+    }
+}
+
+/// Compare samples of one already verified counter epoch. Equality is not a fence.
+pub(crate) fn bracket_cpu_observation(
     before: Option<u64>,
     after: Option<u64>,
     populated: bool,
-) -> Option<u64> {
-    let (before, after) = (before?, after?);
-    (after >= before && (populated || after == before)).then_some(after)
+) -> CpuCounterObservation {
+    match (before, after) {
+        (Some(before), Some(after)) if after >= before && (populated || before == after) => {
+            CpuCounterObservation::LowerBoundMicros(after)
+        }
+        (Some(_), Some(_)) => CpuCounterObservation::Contradictory,
+        _ => CpuCounterObservation::Unavailable,
+    }
 }
 
 /// Why a candidate closure debit could not be compared with an exact sample.
@@ -217,11 +254,30 @@ mod tests {
 
     #[test]
     fn bracketed_reading_does_not_fill_gaps_or_accept_resets() {
-        assert_eq!(bracketed_cpu_usage(Some(0), Some(0), false), Some(0));
-        assert_eq!(bracketed_cpu_usage(Some(9), Some(11), true), Some(11));
-        assert_eq!(bracketed_cpu_usage(Some(9), Some(11), false), None);
-        assert_eq!(bracketed_cpu_usage(Some(u64::MAX), Some(0), true), None);
-        assert_eq!(bracketed_cpu_usage(None, Some(0), false), None);
-        assert_eq!(bracketed_cpu_usage(Some(0), None, true), None);
+        use CpuCounterObservation::*;
+        assert_eq!(
+            bracket_cpu_observation(Some(0), Some(0), false),
+            LowerBoundMicros(0)
+        );
+        assert_eq!(
+            bracket_cpu_observation(Some(9), Some(11), true),
+            LowerBoundMicros(11)
+        );
+        assert_eq!(
+            bracket_cpu_observation(Some(9), Some(11), false),
+            Contradictory
+        );
+        assert_eq!(
+            bracket_cpu_observation(Some(u64::MAX), Some(0), true),
+            Contradictory
+        );
+        assert_eq!(bracket_cpu_observation(None, Some(0), false), Unavailable);
+        assert_eq!(bracket_cpu_observation(Some(0), None, true), Unavailable);
+        assert_eq!(Contradictory.lower_bound_micros(), None);
+        assert_eq!(Unavailable.lower_bound_micros(), None);
+        assert_eq!(
+            LowerBoundMicros(u64::MAX).lower_bound_micros(),
+            Some(u64::MAX)
+        );
     }
 }

@@ -351,3 +351,41 @@ identity/predecessor correspondence, and uses one outer in-memory draft plus the
 existing reducer guards. It cannot dispatch or reserve durable resources. Later
 explicit ProgramStore admissions can commit a prefix; that prefix and any
 Indeterminate result must remain retained without automatic retry.
+
+On Linux, `cortex_harness::domain_coordination::admit_domain_reservations`
+executes an explicitly selected, finite batch of version-four reservation
+operations. Each input carries its original expected revision and scoped
+grant. The canonical store reloads under its lifecycle lock and applies
+the existing Core and Evidence checks for current dependencies, claim,
+candidate, package, authority and resource capacity. The caller selects
+which tasks to reconsider after a dependency release or resource change.
+`admit_after_edge_release` targets only the consumer of a retained,
+currently released edge at the supplied journal revision. The store
+then rechecks the consumer's entire required fan-in. The caller's batch
+order supplies no scheduler priority or aging policy.
+
+The result distinguishes new reservations, exact duplicates, governed
+holds and storage stops. A governed hold leaves other selected inputs
+eligible for their own check. A storage stop leaves the rest unattempted.
+The authoritative journal retains any committed prefix. A reservation is
+one lifecycle cut. Creation, binding, release, report and closure require
+their existing separate operations and proofs.
+
+### One cooperative fixture turn
+
+On Linux, `cortex_cli::program_coordinator::run_fixture_turn` selects one
+fresh attempt from a finite set of task, package, process, authority and
+operation-ID declarations for a supervised format-3 program. It orders
+candidates using the current resource projection and the caller's explicit
+ordering facts. A declined proposal consumes no resources. Each selected
+operation is materialized with its exact predecessor and submitted through
+the existing store. An optional private output slot binds the declared
+preparation, bounded launch and artifact capture to that same attempt.
+
+A cursor identifies a prefix of the exact canonical store. New accepted
+release entries reconsider their consumers. Other retained events can
+affect multiple tasks and use conservative reconsideration. Selection always
+reads current readiness and resource facts. An already retained operation
+suppresses subsequent launches from the same attempt. The coordinator
+retains partial and uncertain results for explicit reconciliation. Required
+assessments, authorizations, settlement and integration remain distinct.

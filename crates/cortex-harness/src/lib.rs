@@ -15,6 +15,9 @@ pub mod artifact;
 pub mod domain_bootstrap;
 
 #[cfg(target_os = "linux")]
+pub mod domain_coordination;
+
+#[cfg(target_os = "linux")]
 mod domain_manager;
 #[cfg(target_os = "linux")]
 mod domain_runtime;
@@ -27,8 +30,9 @@ pub use domain_manager::{
 };
 #[cfg(target_os = "linux")]
 pub use domain_runtime::{
-    DomainOperations, DomainPreparation, DomainRecoveryObservation, DomainRun, PreparedNonceDomain,
-    cancel_nonce_domain, cancel_prepared_nonce_domain, execute_nonce_domain, inspect_nonce_domain,
+    DomainAdmissionAttempt, DomainCancellationAttemptError, DomainOperations, DomainPreparation,
+    DomainRecoveryObservation, DomainRun, PreparedNonceDomain, cancel_nonce_domain,
+    cancel_prepared_nonce_domain, execute_nonce_domain, inspect_nonce_domain,
     observe_nonce_domain_closure, observe_nonce_domain_closure_tree, prepare_nonce_domain,
     release_nonce_domain,
 };
@@ -39,8 +43,9 @@ mod owned_scope;
 mod supervisor;
 #[cfg(target_os = "linux")]
 pub use supervisor::{
-    CaptureIds, HarnessError, IdentityCaptureIds, PinnedFixture, ReconciledReceipt, RunResult,
-    execute_fixture, execute_fixture_with_identity_checkpoint, inspect_fixture,
+    CaptureIds, HarnessError, IdentityCaptureIds, PinnedFixture, ReconciledReceipt,
+    RecordingRecovery, RecordingStage, RunResult, execute_fixture, execute_fixture_before,
+    execute_fixture_with_identity_checkpoint, inspect_fixture,
 };
 
 #[cfg(target_os = "linux")]
@@ -65,7 +70,8 @@ pub mod structured_output;
 
 #[cfg(target_os = "linux")]
 pub use domain_runtime::{
-    ManagedClosureObservationError, cancel_managed_executable_domain,
-    observe_managed_executable_closure_tree, prepare_managed_executable_domain,
-    release_managed_executable_domain,
+    ManagedClosureObservationAttemptError, ManagedClosureObservationError,
+    cancel_managed_executable_domain, cancel_managed_executable_domain_with_attempt,
+    observe_managed_executable_closure_tree, observe_managed_executable_closure_tree_with_attempt,
+    prepare_managed_executable_domain, release_managed_executable_domain,
 };

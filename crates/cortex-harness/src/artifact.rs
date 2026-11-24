@@ -62,6 +62,16 @@ impl From<io::Error> for ArtifactError {
     }
 }
 
+/// Exact SHA-256 of an already bounded artifact byte slice.
+pub fn artifact_sha256(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+/// Binary SHA-256 of an already bounded artifact byte slice.
+pub fn artifact_digest(bytes: &[u8]) -> [u8; 32] {
+    Sha256::digest(bytes).into()
+}
+
 /// Retained bytes with exact declared artifact/effect/observation correspondence.
 /// This in-memory capture creates no second authoritative journal or assessment.
 pub struct CapturedArtifact {
@@ -133,6 +143,45 @@ fn excludes(root: &Path, repository: &RepositoryIdentity) -> Result<bool, Artifa
         }
     }
     Ok(true)
+}
+
+/// Reject a selected output root overlapping retained or explicitly protected repositories.
+pub fn output_root_excludes_sources(
+    kernel: &CoordinationKernel,
+    output_root: &Path,
+    additional_sources: &[RepositoryIdentity],
+) -> Result<(), ArtifactError> {
+    if additional_sources.len() > kernel.state().definition().limits().entries {
+        return Err(ArtifactError::Limit);
+    }
+    for repository in additional_sources {
+        if !excludes(output_root, repository)? {
+            return Err(ArtifactError::Location);
+        }
+    }
+    for definition in std::iter::once(kernel.initial())
+        .chain(std::iter::once(kernel.state().definition()))
+        .chain(
+            kernel
+                .operations()
+                .iter()
+                .filter_map(|op| match &op.command {
+                    Command::Amend { next, .. } => Some(next.as_ref()),
+                    _ => None,
+                }),
+        )
+    {
+        for task in definition.graph().tasks() {
+            if !excludes(
+                output_root,
+                task.context().contract().candidate().repository(),
+            )? {
+                return Err(ArtifactError::Location);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Capture one caller-associated output after a successful, quiescent fixture.
@@ -233,32 +282,7 @@ pub fn capture_artifact(
     {
         return Err(ArtifactError::Location);
     }
-    for repository in additional_sources {
-        if !excludes(output_root, repository)? {
-            return Err(ArtifactError::Location);
-        }
-    }
-    for definition in std::iter::once(kernel.initial())
-        .chain(std::iter::once(state.definition()))
-        .chain(
-            kernel
-                .operations()
-                .iter()
-                .filter_map(|op| match &op.command {
-                    Command::Amend { next, .. } => Some(next.as_ref()),
-                    _ => None,
-                }),
-        )
-    {
-        for task in definition.graph().tasks() {
-            if !excludes(
-                output_root,
-                task.context().contract().candidate().repository(),
-            )? {
-                return Err(ArtifactError::Location);
-            }
-        }
-    }
+    output_root_excludes_sources(kernel, output_root, additional_sources)?;
 
     // NONBLOCK prevents a replacement FIFO from blocking open; NOFOLLOW rejects
     // a final symlink. Descriptor and path stamps reject cooperating replacement.
@@ -300,7 +324,7 @@ pub fn capture_artifact(
         artifact: artifact.clone(),
         effect: effect.clone(),
         observation: observation.id.clone(),
-        sha256: format!("{:x}", Sha256::digest(&bytes)),
+        sha256: artifact_sha256(&bytes),
         bytes,
     })
 }

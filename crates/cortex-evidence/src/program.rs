@@ -12,6 +12,9 @@ use cortex_core::{
 };
 use std::{error::Error, fmt, time::SystemTime};
 
+/// Scoped typed accepted-material and integration contracts.
+pub mod material;
+
 /// Non-disclosing admission refusal retaining useful domain causes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KernelError {
@@ -201,6 +204,12 @@ pub enum Command {
     },
     /// Support examination and optional per-edge non-effectful release.
     Release(Box<ReleaseInput>),
+    /// Report a typed material verification in the explicit protected profile.
+    ObserveMaterial(Box<material::MaterialObservation>),
+    /// Confirm the separately assessed material under an exact scoped edge review.
+    ReleaseMaterial(Box<material::MaterialRelease>),
+    /// Record a distinct protected judgment of the exact integrated candidate.
+    AcceptIntegration(Box<material::IntegrationAcceptance>),
     /// Ordering only; never an acceptance-baseline mutation.
     OrderingPlan(OrderingPlan),
     /// Exclusive declared responsibility claim.
@@ -275,6 +284,50 @@ pub struct KernelReceipt {
     /// Exact replay found an existing immutable input; nothing was changed.
     pub duplicate: bool,
 }
+/// Read-only admission result for one exact operation and borrowed baseline.
+///
+/// This is not a durable receipt, reservation or execution grant. Another writer
+/// may change a store after its snapshot was loaded. The durable caller must still
+/// submit the exact operation through `ProgramStore` and handle its actual result.
+#[derive(Clone, Copy)]
+#[must_use]
+pub struct AdmissionPreview<'a> {
+    operation: &'a Operation,
+    definition: &'a ProgramDefinition,
+    observed_revision: u64,
+    outcome: KernelReceipt,
+}
+impl AdmissionPreview<'_> {
+    /// Exact input examined, including grant and expected predecessor.
+    pub fn operation(&self) -> &Operation {
+        self.operation
+    }
+    /// Accepted program identity and complete baseline in the examined snapshot.
+    pub fn definition(&self) -> &ProgramDefinition {
+        self.definition
+    }
+    /// Observed journal revision, not a lock or a promise about a later admission.
+    pub fn observed_revision(&self) -> u64 {
+        self.observed_revision
+    }
+    /// Existing ordinal for an exact replay, or the proposed new ordinal.
+    pub fn resulting_ordinal(&self) -> u64 {
+        self.outcome.ordinal
+    }
+    /// Exact immutable input was already present in the examined snapshot.
+    pub fn is_duplicate(&self) -> bool {
+        self.outcome.duplicate
+    }
+}
+impl fmt::Debug for AdmissionPreview<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AdmissionPreview")
+            .field("observed_revision", &self.observed_revision)
+            .field("resulting_ordinal", &self.outcome.ordinal)
+            .field("duplicate", &self.outcome.duplicate)
+            .finish_non_exhaustive()
+    }
+}
 /// Result of a read-only draft examination; none of these fields grants authority.
 #[derive(Clone, PartialEq, Eq)]
 pub struct RecordInspection {
@@ -291,6 +344,7 @@ pub struct RecordInspection {
 #[derive(Clone)]
 pub struct CoordinationKernel {
     replaying: bool,
+    protected_material: bool,
     domain_projection: Option<cortex_core::program::domain::DomainProjection>,
     domain_component: bool,
     members: Vec<CoordinationKernel>,
@@ -308,6 +362,7 @@ impl CoordinationKernel {
     pub fn new(initial: ProgramDefinition) -> Result<Self, KernelError> {
         Ok(Self {
             replaying: false,
+            protected_material: false,
             domain_projection: None,
             domain_component: false,
             members: vec![],
@@ -354,9 +409,12 @@ impl CoordinationKernel {
         }
         self.replaying = true;
         while let Some(operation) = next(&self)? {
-            if self.admit(operation)?.duplicate {
+            if self.check_admission(&operation)?.is_some() {
                 return Err(KernelError::Core(ProgramError::IdentityConflict).into());
             }
+            // This replay image is owned by reconstruct and discarded on error.
+            // Live admission still needs its draft to preserve the caller's state.
+            self.record_new_operation(operation)?;
         }
         self.finish_reconstruction();
         Ok(self)
@@ -532,12 +590,115 @@ impl CoordinationKernel {
     /// Validate and admit an operation atomically in memory. A durable caller must
     /// reload under its transaction lock and commit the same complete input.
     pub fn admit(&mut self, operation: Operation) -> Result<KernelReceipt, KernelError> {
+        if let Some(receipt) = self.check_admission(&operation)? {
+            return Ok(receipt);
+        }
+        let mut draft = self.clone();
+        let receipt = draft.record_new_operation(operation)?;
+        *self = draft;
+        Ok(receipt)
+    }
+
+    fn record_new_operation(&mut self, operation: Operation) -> Result<KernelReceipt, KernelError> {
+        self.reduce(&operation)?;
+        self.operations.push(operation);
+        Ok(KernelReceipt {
+            ordinal: self.revision(),
+            duplicate: false,
+        })
+    }
+    /// Apply the same admission guards and reducer to one isolated in-memory draft.
+    ///
+    /// Original state, reservations and observations are unchanged. Exact duplicates
+    /// retain replay semantics, including their original predecessor and ordinal.
+    /// A new input clones the bounded kernel once; it performs no serialization,
+    /// filesystem I/O or dispatch. This checks neither store-specific location
+    /// constraints nor commit availability, and cannot replace durable admission.
+    /// An in-progress historical reconstruction is refused; its temporary replay
+    /// interpretation must not be presented as current admission eligibility.
+    pub fn preview_admission<'a>(
+        &'a self,
+        operation: &'a Operation,
+    ) -> Result<AdmissionPreview<'a>, KernelError> {
+        let outcome = match self.check_preview_admission(operation)? {
+            Some(receipt) => receipt,
+            None => {
+                let mut draft = self.clone();
+                draft.reduce(operation)?;
+                KernelReceipt {
+                    ordinal: self.revision() + 1,
+                    duplicate: false,
+                }
+            }
+        };
+        Ok(AdmissionPreview {
+            operation,
+            definition: self.state.definition(),
+            observed_revision: self.revision(),
+            outcome,
+        })
+    }
+    /// Inspect a fresh PrepareExecutorInput operation using the same guarded draft
+    /// rules as admission preview. The exact retained transport input is returned
+    /// without appending an operation, writing a store, or granting execution.
+    /// A partial reconstruction or an already admitted identity is refused.
+    pub fn preview_executor_input(
+        &self,
+        operation: &Operation,
+    ) -> Result<cortex_core::program::executor::PreparedInput, KernelError> {
+        if !matches!(&operation.command, Command::PrepareExecutorInput(_)) {
+            return Err(ProgramError::EffectUnavailable.into());
+        }
+        if self.check_preview_admission(operation)?.is_some() {
+            return Err(ProgramError::IdentityConflict.into());
+        }
+        let mut draft = self.clone();
+        draft.reduce(operation)?;
+        let (id, input) = draft.prepared_inputs.pop().ok_or(ProgramError::Missing)?;
+        if id != operation.id {
+            return Err(ProgramError::IdentityConflict.into());
+        }
+        Ok(input)
+    }
+
+    fn check_preview_admission(
+        &self,
+        operation: &Operation,
+    ) -> Result<Option<KernelReceipt>, KernelError> {
+        if self.replaying {
+            return Err(ProgramError::EffectUnavailable.into());
+        }
+        self.check_admission(operation)
+    }
+
+    fn check_admission(&self, operation: &Operation) -> Result<Option<KernelReceipt>, KernelError> {
+        if !self.protected_material
+            && matches!(
+                &operation.command,
+                Command::ObserveMaterial(_)
+                    | Command::ReleaseMaterial(_)
+                    | Command::AcceptIntegration(_)
+            )
+        {
+            return Err(ProgramError::EffectUnavailable.into());
+        }
+        if self.protected_material
+            && matches!(
+                &operation.command,
+                Command::FixtureEffect(_) | Command::PrepareExecutorInput(_)
+            )
+        {
+            return Err(ProgramError::EffectUnavailable.into());
+        }
         if let Command::DomainMember { operation, .. } = &operation.command
             && matches!(
                 operation.command,
                 Command::Domain(_)
                     | Command::DomainMember { .. }
                     | Command::RegisterDomainMember(_)
+                    | Command::ObserveMaterial(_)
+                    | Command::ReleaseMaterial(_)
+                    | Command::AcceptIntegration(_)
             )
         {
             return Err(ProgramError::EffectUnavailable.into());
@@ -548,11 +709,11 @@ impl CoordinationKernel {
             .enumerate()
             .find(|(_, o)| o.id == operation.id)
         {
-            return if old == &operation {
-                Ok(KernelReceipt {
+            return if old == operation {
+                Ok(Some(KernelReceipt {
                     ordinal: i as u64 + 1,
                     duplicate: true,
-                })
+                }))
             } else {
                 Err(ProgramError::IdentityConflict.into())
             };
@@ -584,15 +745,7 @@ impl CoordinationKernel {
                 }
             }
         }
-        let mut draft = self.clone();
-        draft.reduce(&operation)?;
-        draft.operations.push(operation);
-        let ordinal = draft.revision();
-        *self = draft;
-        Ok(KernelReceipt {
-            ordinal,
-            duplicate: false,
-        })
+        Ok(None)
     }
     fn check(
         &self,
@@ -608,6 +761,99 @@ impl CoordinationKernel {
             .find(|r| r.observation().id() == id)
             .ok_or(ProgramError::Missing.into())
     }
+    fn observe_record(&mut self, r: &ReportedObservation) -> Result<(), KernelError> {
+        if self
+            .records
+            .iter()
+            .any(|old| old.observation().id() == r.id())
+        {
+            return Err(ProgramError::IdentityConflict.into());
+        }
+        self.records.push(EvidenceRecord::new(r.clone()));
+        Ok(())
+    }
+
+    fn reduce_release(
+        &mut self,
+        o: &Operation,
+        r: &ReleaseInput,
+        limits: SupportLimits,
+    ) -> Result<(), KernelError> {
+        let g = &o.grant;
+        let Event::Review(review) = r.review.event() else {
+            return Err(ProgramError::Structure.into());
+        };
+        if review.edge() != r.contract.scope().edge()
+            || review.scopes() != [r.contract.scope().producer(), r.contract.scope().consumer()]
+        {
+            return Err(ProgramError::Stale.into());
+        }
+        self.check(
+            g,
+            CoordinationPermission::Review,
+            &review
+                .scopes()
+                .iter()
+                .map(|s| s.task().clone())
+                .collect::<Vec<_>>(),
+        )?;
+        let examinations: Vec<_> = r
+            .examinations
+            .iter()
+            .map(|e| {
+                RecordExamination::new(
+                    e.observation.clone(),
+                    &e.contract,
+                    e.candidate.as_ref(),
+                    e.profile.as_ref(),
+                )
+            })
+            .collect();
+        let request = SupportRequest::new(
+            r.producer.as_ref(),
+            r.consumer.as_ref(),
+            &examinations,
+            &r.bindings,
+        );
+        let report = inspect_support(
+            self.state.readiness(),
+            &r.contract,
+            &mut self.records,
+            &request,
+            limits,
+        )?;
+        let supported = report.evidence_part() == EvidencePart::AllRequiredPredicatesSupported;
+        let findings = report.findings().to_vec();
+        if supported {
+            self.state.notify(g, r.review.clone())?;
+        } else {
+            let observations: Vec<_> = r
+                .examinations
+                .iter()
+                .filter_map(|e| {
+                    let record = self
+                        .records
+                        .iter()
+                        .find(|record| record.observation().id() == &e.observation)?;
+                    let mut draft = record.clone();
+                    (draft.inspect(&e.validation()).validity() == Some(Validity::Stale))
+                        .then(|| e.observation.clone())
+                })
+                .collect();
+            self.invalidate_consumers(g, &o.id, &observations)?;
+        }
+        let released = supported
+            && matches!(self.state.readiness().edge(review.edge())?.decision(), EdgeDecision::Released { review: current, .. } if current == r.review.id());
+        self.decisions.push(DependencyDecision {
+            operation: o.id.clone(),
+            baseline: g.baseline,
+            edge: review.edge().clone(),
+            findings,
+            released,
+        });
+        Ok(())
+    }
+
     fn reduce(&mut self, o: &Operation) -> Result<(), KernelError> {
         let g = &o.grant;
         self.check_domain_ownership(self.state.definition().id(), &o.command)?;
@@ -643,6 +889,9 @@ impl CoordinationKernel {
                         Command::Domain(_)
                             | Command::DomainMember { .. }
                             | Command::RegisterDomainMember(_)
+                            | Command::ObserveMaterial(_)
+                            | Command::ReleaseMaterial(_)
+                            | Command::AcceptIntegration(_)
                     )
                 {
                     return Err(ProgramError::EffectUnavailable.into());
@@ -716,17 +965,12 @@ impl CoordinationKernel {
             }
             Command::Observe(r) => {
                 self.check(g, CoordinationPermission::Review, &[])?;
-                if self
-                    .records
-                    .iter()
-                    .any(|old| old.observation().id() == r.id())
-                {
-                    return Err(ProgramError::IdentityConflict.into());
-                }
-                self.records.push(EvidenceRecord::new(r.clone()));
+                self.observe_record(r)?;
             }
+            Command::ObserveMaterial(r) => self.observe_material(o, r)?,
             Command::Assess(a) => {
                 self.check(g, CoordinationPermission::Review, &[])?;
+                self.check_material_assessor(g, a)?;
                 if self
                     .records
                     .iter()
@@ -745,6 +989,7 @@ impl CoordinationKernel {
             }
             Command::Examine(e) => {
                 self.check(g, CoordinationPermission::Review, &[])?;
+                self.check_material_review_scope(g, &e.observation)?;
                 let current = self
                     .record_mut(&e.observation)?
                     .inspect(&e.validation())
@@ -759,83 +1004,22 @@ impl CoordinationKernel {
                 reason,
             } => {
                 self.check(g, CoordinationPermission::Review, &[])?;
+                self.check_material_review_scope(g, observation)?;
                 self.record_mut(observation)?.invalidate(reason)?;
                 self.invalidate_consumers(g, &o.id, std::slice::from_ref(observation))?;
             }
-            Command::Release(r) => {
-                let Event::Review(review) = r.review.event() else {
-                    return Err(ProgramError::Structure.into());
-                };
-                if review.edge() != r.contract.scope().edge()
-                    || review.scopes()
-                        != [r.contract.scope().producer(), r.contract.scope().consumer()]
-                {
-                    return Err(ProgramError::Stale.into());
+            Command::Release(r) => self.reduce_release(o, r, r.limits)?,
+            Command::ReleaseMaterial(r) => self.release_material(o, r)?,
+            Command::AcceptIntegration(acceptance) => {
+                self.check_integration_acceptance(o, acceptance)?;
+                if self.operations.iter().any(|past| {
+                    matches!(
+                        &past.command, Command::AcceptIntegration(prior)
+                            if prior.observation == acceptance.observation
+                    )
+                }) {
+                    return Err(ProgramError::IdentityConflict.into());
                 }
-                self.check(
-                    g,
-                    CoordinationPermission::Review,
-                    &review
-                        .scopes()
-                        .iter()
-                        .map(|s| s.task().clone())
-                        .collect::<Vec<_>>(),
-                )?;
-                let examinations: Vec<_> = r
-                    .examinations
-                    .iter()
-                    .map(|e| {
-                        RecordExamination::new(
-                            e.observation.clone(),
-                            &e.contract,
-                            e.candidate.as_ref(),
-                            e.profile.as_ref(),
-                        )
-                    })
-                    .collect();
-                let request = SupportRequest::new(
-                    r.producer.as_ref(),
-                    r.consumer.as_ref(),
-                    &examinations,
-                    &r.bindings,
-                );
-                let report = inspect_support(
-                    self.state.readiness(),
-                    &r.contract,
-                    &mut self.records,
-                    &request,
-                    r.limits,
-                )?;
-                let supported =
-                    report.evidence_part() == EvidencePart::AllRequiredPredicatesSupported;
-                let findings = report.findings().to_vec();
-                if supported {
-                    self.state.notify(g, r.review.clone())?;
-                } else {
-                    let observations: Vec<_> = r
-                        .examinations
-                        .iter()
-                        .filter_map(|e| {
-                            let record = self
-                                .records
-                                .iter()
-                                .find(|record| record.observation().id() == &e.observation)?;
-                            let mut draft = record.clone();
-                            (draft.inspect(&e.validation()).validity() == Some(Validity::Stale))
-                                .then(|| e.observation.clone())
-                        })
-                        .collect();
-                    self.invalidate_consumers(g, &o.id, &observations)?;
-                }
-                let released = supported
-                    && matches!(self.state.readiness().edge(review.edge())?.decision(), EdgeDecision::Released { review: current, .. } if current == r.review.id());
-                self.decisions.push(DependencyDecision {
-                    operation: o.id.clone(),
-                    baseline: g.baseline,
-                    edge: review.edge().clone(),
-                    findings,
-                    released,
-                });
             }
             Command::OrderingPlan(p) => self.state.set_ordering_plan(g, p.clone())?,
             Command::Claim(a) => self.state.claim(g, a.clone())?,
@@ -1186,8 +1370,10 @@ impl CoordinationKernel {
     ) -> Result<(), KernelError> {
         let mut roots = Vec::new();
         for op in &self.operations {
-            let Command::Release(r) = &op.command else {
-                continue;
+            let r = match &op.command {
+                Command::Release(r) => r,
+                Command::ReleaseMaterial(r) => &r.release,
+                _ => continue,
             };
             if !r
                 .bindings

@@ -278,14 +278,23 @@ fn replay_rebuilds_exact_inputs_decisions_and_unknown_attempts() {
             basis: source("interruption"),
         },
     );
-    let mut replay = CoordinationKernel::new(k.initial().clone()).unwrap();
-    for o in k.operations() {
-        replay.admit(o.clone()).unwrap();
-    }
+    let mut retained = k.operations().iter().cloned();
+    let replay = CoordinationKernel::new(k.initial().clone())
+        .unwrap()
+        .reconstruct(|_| Ok::<_, KernelError>(retained.next()))
+        .unwrap();
     assert!(replay.operations() == k.operations());
     assert!(replay.decisions() == k.decisions());
     assert!(replay.records() == k.records());
     assert_eq!(replay.state().attempts()[0].status, AttemptStatus::Unknown);
+    let mut duplicated = k.operations().iter().chain(k.operations().last()).cloned();
+    let invalid = CoordinationKernel::new(k.initial().clone())
+        .unwrap()
+        .reconstruct(|_| Ok::<_, KernelError>(duplicated.next()));
+    assert!(matches!(
+        invalid,
+        Err(KernelError::Core(ProgramError::IdentityConflict))
+    ));
 }
 
 #[test]

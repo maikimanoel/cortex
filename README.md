@@ -63,7 +63,11 @@ owners. Its first Rust slice, `cortex_core::parallel`, implements a bounded,
 non-effectful in-memory readiness projection over caller-supplied assertions.
 It reports per-edge release/hold/refusal and task eligibility with causal
 invalidation; it authenticates no Evidence and grants no execution permission.
-There is no operational scheduler or agent launcher. The Evidence-owned
+This projection runs no scheduler or launcher. The separate
+`cortex_cli::program_coordinator` library selects and advances one bounded
+cooperative fixture attempt through the canonical program journal. Its profile
+requires explicitly scoped local work and retains uncertain attempts. It provides
+no authorization for agents or strict managed execution. The Evidence-owned
 `cortex_evidence::readiness::inspect_support` additionally evaluates actual unified
 records for exact edge predicates, under caller-declared criterion correspondence.
 It preserves inspection-driven invalidation and returns advisory findings only;

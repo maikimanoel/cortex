@@ -32,8 +32,10 @@ Core performs no filesystem/process/clock access. [002-C unified evidence](unifi
 consumes those observations programmatically, preserving legacy semantics. It adds
 independent result/applicability/contextual-validity and caller-reported time;
 [002-D CLI integration](cli-check.md) now composes one committed-HEAD criterion.
-Operational policy enforcement, effectful durable workflows,
-full knowledge indexing and agent harnesses remain planned. The first
+The [program kernel](program-kernel.md) and [supervised fixture](supervised-fixtures.md)
+contracts add separately scoped durable admission and a bounded cooperative execution
+path. General operational policy enforcement, effectful agent workflows and full
+knowledge indexing remain planned. The first
 [003-A slice](temporal-records.md) adds in-memory requirement/decision history
 without changing the binding or evidence models.
 The [first durable slice](0002-durable-history.md) adds a Linux operator-controlled

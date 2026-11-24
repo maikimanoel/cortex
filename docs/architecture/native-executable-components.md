@@ -228,3 +228,48 @@ E through those existing operations. F remains held when either final debit is
 missing, even when both artifact edges are accepted. After both final debits are
 admitted, fresh F reservation and its simulated lifecycle proceed. Native
 final-counter production and actual host execution remain unqualified.
+
+## Managed end observation
+
+The managed adapter brackets its bounded end-of-transport tree read with CPU
+usage reads through the held group. The readback must match the retained intent,
+binding, and cgroup incarnation within the original deadline. It separately
+retains direct completion, transport completeness, recursive population and
+the CPU observation. Unavailable readings and contradictory counters remain
+non-numeric. Even a stable empty readback with a numeric value supplies only a
+cumulative lower bound in microseconds.
+
+This in-memory observation is bound to one release request. Reading it does not
+refresh live state or authorize a write. It adds no retained journal event,
+snapshot-exclusion proof, independent whole-domain witness, final debit, or
+settlement. The existing post-cancel observer retains its prior partial event
+encoding and cancellation prerequisite.
+
+`observe_managed_executable_closure_tree_with_attempt` retains the complete
+captured operation and store identity alongside a publication failure. The
+caller can reconcile against the same store and initial contract without
+capturing again. A matching observation ID with different observed facts is
+a conflict.
+
+The managed adapter also retains an in-memory CPU history for the exact store,
+domain, invocation, cgroup and monotonic interval. It samples the held directory
+while bootstrap awaits setup, at normal transport end and after durable
+cancellation when the group remains observable. Bootstrap may already have
+consumed CPU at the first cut. Missing readings, wrong epochs and regressions
+preserve uncertainty even if a later number looks valid.
+
+A separate whole-domain observer report can bind one empty-tree counter
+bracket to an initially unused, fully attributed and continuously fenced
+lifetime. The local admission path requires the configured observer role on
+the protected Unix channel and checks the exact operation, store, boot and
+time namespace. The bracket completion is sampled after the final clock
+namespace check. Managed tree publication and CPU disposition use the
+original absolute cutoff through reconstruction and canonical admission.
+The protected observer profile and local clock namespace are rechecked at
+the pre-commit cut for a new CPU disposition. A late acknowledgment leaves
+the potential write indeterminate. The existing journal decides whether
+to admit the collector's rounded whole CPU millisecond debit in `Closed`
+or `Settle`. CPU-only disposition leaves occupancy held. A controller
+restart preserves admitted receipts and cannot reconstruct unretained proof.
+Physical observer coverage, actual kernel-counter retention and P1 remain
+unqualified.

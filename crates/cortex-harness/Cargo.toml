@@ -18,7 +18,10 @@ zbus = { version = "=5.19.0", default-features = false, features = ["async-io"] 
 async-io = "2.6"
 futures-lite = "2.6"
 
-nix = { version = "=0.31.3", default-features = false, features = ["process", "signal", "sched"] }
+nix = { version = "=0.31.3", default-features = false, features = ["sched"] }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+nix = { version = "=0.31.3", default-features = false, features = ["process", "signal"] }
 
 [lints]
 workspace = true

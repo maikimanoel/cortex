@@ -259,6 +259,29 @@ impl Delegation {
         group.recover()
     }
 
+    pub(crate) fn check_selected_root(
+        &self,
+        selected: &DelegationAuthorization,
+    ) -> Result<(), ExecutionError> {
+        if self.path != selected.root
+            || self.device != selected.device
+            || self.inode != selected.inode
+            || self.boot != selected.boot
+        {
+            return Err(ExecutionError::Identity);
+        }
+        let current = fs::symlink_metadata(&selected.root)?;
+        if !current.is_dir()
+            || fs::canonicalize(&selected.root)? != selected.root
+            || current.dev() != self.device
+            || current.ino() != self.inode
+            || current.uid() != rustix::process::getuid().as_raw()
+        {
+            return Err(ExecutionError::Identity);
+        }
+        self.check()
+    }
+
     pub(crate) fn check(&self) -> Result<(), ExecutionError> {
         let m = self.root.metadata()?;
         if m.dev() != self.device
