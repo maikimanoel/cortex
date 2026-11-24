@@ -209,8 +209,35 @@ fn canonical_turn_selects_and_dispatches_after_a_durable_edge_on_reopen() {
     ));
     assert_eq!(snapshot(&c.state), before);
     c.launch_slot();
-    let first = run_fixture_turn(&store, &c.key, &work_set, None, deadline, &cancel).unwrap();
+    let gate = std::sync::Barrier::new(2);
+    let (left, right) = std::thread::scope(|threads| {
+        let offer = || {
+            gate.wait();
+            run_fixture_turn(&store, &c.key, &work_set, None, deadline, &cancel).unwrap()
+        };
+        let left = threads.spawn(offer);
+        let right = threads.spawn(offer);
+        (left.join().unwrap(), right.join().unwrap())
+    });
+    let (first, competitor) =
+        if matches!(left.progress, Some(FixtureProgress::WorkspaceObserved(_))) {
+            (left, right)
+        } else {
+            (right, left)
+        };
     observed(&first, &work_set[0]);
+    assert!(matches!(
+        competitor.progress,
+        None | Some(FixtureProgress::ConcurrentPrefix)
+    ));
+    assert_eq!(
+        load(&c, &store)
+            .operations()
+            .iter()
+            .filter(|operation| operation.id == work_set[0].operations.dispatch)
+            .count(),
+        1,
+    );
     assert!(first.held.iter().any(|hold| matches!(hold,
         FixtureHold::Waiting(blocked, causes) if blocked == &task("B") && causes.contains(&WaitReason::Preconditions)
     )));

@@ -370,3 +370,22 @@ eligible for their own check. A storage stop leaves the rest unattempted.
 The authoritative journal retains any committed prefix. A reservation is
 one lifecycle cut. Creation, binding, release, report and closure require
 their existing separate operations and proofs.
+
+### One cooperative fixture turn
+
+On Linux, `cortex_cli::program_coordinator::run_fixture_turn` selects one
+fresh attempt from a finite set of task, package, process, authority and
+operation-ID declarations for a supervised format-3 program. It orders
+candidates using the current resource projection and the caller's explicit
+ordering facts. A declined proposal consumes no resources. Each selected
+operation is materialized with its exact predecessor and submitted through
+the existing store. An optional private output slot binds the declared
+preparation, bounded launch and artifact capture to that same attempt.
+
+A cursor identifies a prefix of the exact canonical store. New accepted
+release entries reconsider their consumers. Other retained events can
+affect multiple tasks and use conservative reconsideration. Selection always
+reads current readiness and resource facts. An already retained operation
+suppresses subsequent launches from the same attempt. The coordinator
+retains partial and uncertain results for explicit reconciliation. Required
+assessments, authorizations, settlement and integration remain distinct.
