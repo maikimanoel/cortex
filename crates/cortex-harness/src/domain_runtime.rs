@@ -11,11 +11,11 @@ use cortex_core::{
 use cortex_evidence::program::{Command, CoordinationKernel, Operation};
 use cortex_storage::{
     history_store::{Access, StoreId, StoreKey},
-    program_store::{AdmissionReceipt, ProgramStore},
+    program_store::{AdmissionFailure, AdmissionReceipt, ProgramStore},
 };
 use serde_json::json;
 use std::{
-    io,
+    fmt, io,
     os::unix::net::{UnixListener, UnixStream},
     sync::atomic::{AtomicBool, Ordering},
     thread,
@@ -1056,13 +1056,38 @@ pub enum ManagedClosureObservationError {
     /// Capture refused without submitting a journal entry.
     Capture(DomainDiagnostic),
     /// Canonical admission failed. Preserve its original completion classification.
-    Admission(cortex_storage::program_store::AdmissionFailure),
+    Admission(AdmissionFailure),
 }
 
-/// Capture and publish a partial post-cancel observation of a still-held managed
-/// executable. Uses the original deadline and the existing locked admission
-/// rules. After indeterminate publication, inspect the journal for the exact
-/// observation ID. This function grants no authority to repeat effects.
+/// Capture or publication failure with the input required for exact reconciliation.
+pub enum ManagedClosureObservationAttemptError {
+    /// The capture refused before constructing an operation for admission.
+    Capture(DomainDiagnostic),
+    /// Canonical publication failed or may have committed.
+    Admission {
+        /// Exact store incarnation selected for the observation.
+        store: StoreId,
+        /// Complete attempted operation, including the original observed tick.
+        operation: Box<Operation>,
+        /// Original admission failure and completion classification.
+        failure: AdmissionFailure,
+    },
+}
+
+impl fmt::Debug for ManagedClosureObservationAttemptError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Capture(error) => f.debug_tuple("Capture").field(error).finish(),
+            Self::Admission { failure, .. } => f.debug_tuple("Admission").field(failure).finish(),
+        }
+    }
+}
+
+/// Capture and publish a partial post-cancel observation using the original deadline.
+///
+/// This compatibility entry point returns the original failure classification.
+/// Use [`observe_managed_executable_closure_tree_with_attempt`] to retain the
+/// exact operation after a failed admission.
 pub fn observe_managed_executable_closure_tree(
     store: &ProgramStore,
     key: &StoreKey,
@@ -1070,21 +1095,58 @@ pub fn observe_managed_executable_closure_tree(
     ids: &DomainOperations,
     observation_id: OperationId,
 ) -> Result<AdmissionReceipt, ManagedClosureObservationError> {
+    observe_managed_executable_closure_tree_with_attempt(store, key, backend, ids, observation_id)
+        .map_err(|error| match error {
+            ManagedClosureObservationAttemptError::Capture(error) => {
+                ManagedClosureObservationError::Capture(error)
+            }
+            ManagedClosureObservationAttemptError::Admission { failure, .. } => {
+                ManagedClosureObservationError::Admission(failure)
+            }
+        })
+}
+
+/// Capture and publish one partial post-cancel observation using the original deadline.
+///
+/// If publication does not report success, use the returned operation with
+/// `ProgramStore::reconcile` on the same store incarnation and initial contract.
+/// The observation ID alone cannot distinguish matching input from a conflict.
+/// The result supplies no authority to repeat an observation or an effect.
+pub fn observe_managed_executable_closure_tree_with_attempt(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut crate::native_execution::managed_backend::ManagedExecutionDomain,
+    ids: &DomainOperations,
+    observation_id: OperationId,
+) -> Result<AdmissionReceipt, ManagedClosureObservationAttemptError> {
     backend
         .check_bound_store(store.id())
-        .map_err(ManagedClosureObservationError::Capture)?;
+        .map_err(ManagedClosureObservationAttemptError::Capture)?;
     let start = Instant::now();
     let end = backend.observation_end().ok_or_else(|| {
-        ManagedClosureObservationError::Capture(issue(
+        ManagedClosureObservationAttemptError::Capture(issue(
             DomainPhaseDiagnostic::Closure,
             DomainCause::Correspondence,
         ))
     })?;
     let operation = capture_closure_tree(store, key, backend, ids, observation_id, start, end)
-        .map_err(ManagedClosureObservationError::Capture)?;
+        .map_err(ManagedClosureObservationAttemptError::Capture)?;
+    publish_managed_closure_tree(store, key, operation, end)
+}
+
+fn publish_managed_closure_tree(
+    store: &ProgramStore,
+    key: &StoreKey,
+    operation: Operation,
+    end: Instant,
+) -> Result<AdmissionReceipt, ManagedClosureObservationAttemptError> {
     store
-        .admit_observed_domain_until(key, operation, end, || Ok(()))
-        .map_err(ManagedClosureObservationError::Admission)
+        .admit_observed_domain_until(key, operation.clone(), end, || Ok(()))
+        .map_err(|failure| ManagedClosureObservationAttemptError::Admission {
+            store: store.id(),
+            operation: Box::new(operation),
+            failure,
+        })
 }
 
 fn capture_closure_tree<M: DomainManager>(
