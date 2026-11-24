@@ -2328,3 +2328,70 @@ fn committed_identity_checkpoint_with_lost_delivery_withholds_all_input() {
         receipt.ordinal
     );
 }
+
+#[test]
+fn actual_terminal_admission_rejection_keeps_observation_and_exact_attempt() {
+    let f = durable("count");
+    let initial = f.store.load(&f.key, Access::ReadOnly).unwrap();
+    let wrong = StoreKey::new(&[74; 32]).unwrap();
+    let submitted = std::cell::RefCell::new(None);
+    let record = |stage, operation: &Operation| {
+        if stage == RecordingStage::Terminal {
+            assert!(submitted.replace(Some(operation.clone())).is_none());
+            f.store.admit(&wrong, operation.clone())
+        } else {
+            f.store.admit(&f.key, operation.clone())
+        }
+    };
+    let cancel = AtomicBool::new(false);
+    let result = recovery_fixture_run(
+        &f,
+        FixtureTestCuts {
+            record: Some(&record),
+            ..FixtureTestCuts::default()
+        },
+        &cancel,
+    )
+    .unwrap();
+    let error = result.recording_failure.unwrap();
+    assert_eq!(error.completion, Completion::Rejected);
+    assert!(matches!(error.error,
+        ProgramStoreError::Storage(error) if error.kind() == cortex_storage::history_store::ErrorKind::CannotUnlock));
+    let recovery = result.recording_recovery.unwrap();
+    assert_eq!(recovery.stage, RecordingStage::Terminal);
+    assert!(recovery.operation == submitted.into_inner());
+    assert!(recovery.readback.is_none());
+    assert!(result.recorded.is_none() && result.started.is_some());
+    let terminal = result.observation.unwrap();
+    assert_eq!(
+        terminal.quiescence,
+        Quiescence::DirectChildReapedStreamsClosed
+    );
+    let process = terminal.process.unwrap();
+    assert!(!Path::new(&format!("/proc/{}", process.pid)).exists());
+    let image = reopen_fixture(&f);
+    assert_eq!(
+        recovery
+            .reconcile(&image, &f.key, initial.initial())
+            .unwrap(),
+        Some(Reconciliation::Absent)
+    );
+    assert!(
+        image
+            .load(&f.key, Access::ReadOnly)
+            .unwrap()
+            .fixture_effects()
+            .effects()[0]
+            .pending()
+    );
+    assert!(
+        recovery_fixture_run(&f, FixtureTestCuts::default(), &cancel)
+            .unwrap()
+            .dispatch
+            .duplicate
+    );
+    assert_eq!(
+        fs::read(f.root.0.join("launch-count")).unwrap(),
+        b"started\n"
+    );
+}
