@@ -438,6 +438,6 @@ fn coordinator_retains_pre_dispatch_prefix_and_reopen_never_launches_it() {
     );
     assert_eq!(snapshot(&c.state), current);
     assert!(!c.output.join("launched-A").exists());
-    let output = c.output.join(jobs[0].effect.as_str()).join("output");
-    assert_eq!(fs::read_dir(output).unwrap().count(), 0);
+    let slot = c.output.join(jobs[0].effect.as_str());
+    assert_eq!(fs::read_dir(slot).unwrap().count(), 0);
 }
