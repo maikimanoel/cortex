@@ -747,8 +747,9 @@ opaque!(
 
 /// Inspect exactly one method without assessing, adopting, executing or granting authority.
 ///
-/// Logical accounting charges occurrences before deduplication, nested retained contexts,
+/// Logical input accounting charges occurrences before deduplication, nested retained contexts,
 /// text/path/comparison bytes, plus a 128-byte allowance per opaque invalidation scope.
+/// Mandatory output slots are admitted before staging and extra findings before retention.
 /// Typed errors leave every supplied record unchanged. Successful negative findings may
 /// retain first sticky invalidation; source reports and terminal judgments never change.
 /// No callback, I/O or clock is used. Allocation panics/aborts are not recoverable here.
@@ -761,9 +762,25 @@ pub fn inspect_method<'d, 'r>(
 ) -> Result<MethodInspection<'d, 'r>, MethodInspectionError> {
     let definition = definitions.definition(method)?;
     let mut usage = measure(definition, qualification, records, limits)?;
-    if let Some(q) = qualification {
-        validate(definition, q, records)?;
+    let case_witnesses = match qualification {
+        Some(q) => validate(definition, q, records)?,
+        None => 0,
+    };
+    let mut findings = FindingBudget {
+        usage: &mut usage,
+        limits,
+    };
+    findings.charge(case_witnesses)?;
+    if qualification.is_some_and(|q| q.applicability.is_some()) {
+        findings.charge(1)?;
     }
+    findings.charge(
+        definition
+            .sources()
+            .iter()
+            .filter(|s| s.availability() != SourceAvailability::Inspected)
+            .count(),
+    )?;
     let mut drafts = reserved(records.len())?;
     if let Some(q) = qualification {
         for (i, r) in records.iter().enumerate() {
@@ -796,17 +813,17 @@ pub fn inspect_method<'d, 'r>(
             .iter()
             .any(|c| c.role() == CaseRole::Violation)
         {
-            issues.push(QualificationIssue::MissingViolation);
+            findings.push_issue(&mut issues, QualificationIssue::MissingViolation)?;
         }
         if !claim
             .cases()
             .iter()
             .any(|c| c.role() == CaseRole::LegitimateNeighbor)
         {
-            issues.push(QualificationIssue::MissingNeighbor);
+            findings.push_issue(&mut issues, QualificationIssue::MissingNeighbor)?;
         }
         if !claim.conflicts().is_empty() {
-            issues.push(QualificationIssue::SourceDisagreement);
+            findings.push_issue(&mut issues, QualificationIssue::SourceDisagreement)?;
         }
         if claim
             .required_sources()
@@ -818,10 +835,10 @@ pub fn inspect_method<'d, 'r>(
                 })
             })
         {
-            issues.push(QualificationIssue::RequiredSourceUnavailable);
+            findings.push_issue(&mut issues, QualificationIssue::RequiredSourceUnavailable)?;
         }
         if qualification.is_some_and(|q| q.scope != definition.context().target()) {
-            issues.push(QualificationIssue::ScopeMismatch);
+            findings.push_issue(&mut issues, QualificationIssue::ScopeMismatch)?;
         }
         let mut cases = reserved(claim.cases().len())?;
         for case in claim.cases() {
@@ -835,10 +852,14 @@ pub fn inspect_method<'d, 'r>(
                     .find(|m| m.claim == *claim.id() && m.case == *case.id())
                     .ok_or(MethodInspectionError::InvalidCorrespondence)?;
                 if mapping.coverage == CaseCoverage::Unestablished {
-                    case_issues.push(QualificationIssue::CoverageUnestablished);
+                    findings
+                        .push_issue(&mut case_issues, QualificationIssue::CoverageUnestablished)?;
                 }
                 if !profile_corresponds(definition, case, mapping) {
-                    case_issues.push(QualificationIssue::MechanismProfileMismatch);
+                    findings.push_issue(
+                        &mut case_issues,
+                        QualificationIssue::MechanismProfileMismatch,
+                    )?;
                 }
                 for (i, w) in q.witnesses.iter().enumerate() {
                     if w.claim != *claim.id()
@@ -852,15 +873,17 @@ pub fn inspect_method<'d, 'r>(
                         &mapping.verification,
                         &mapping.profile,
                         &drafts,
-                    );
+                        &mut findings,
+                    )?;
                     // A current source judgment is not sufficient without the
                     // case's declared coverage and mechanism/fixture/oracle links.
+                    findings.charge(case_issues.len())?;
                     finding.reasons.extend(case_issues.iter().cloned());
                     witnesses.push(finding);
                 }
             }
             if witnesses.is_empty() {
-                case_issues.push(QualificationIssue::MissingWitness);
+                findings.push_issue(&mut case_issues, QualificationIssue::MissingWitness)?;
             }
             cases.push(CaseInspection {
                 case: case.id().clone(),
@@ -879,12 +902,18 @@ pub fn inspect_method<'d, 'r>(
     if let Some(q) = qualification
         && let Some(a) = q.applicability
     {
-        let mut w = witness(&a.evidence, &a.verification, &a.profile, &drafts);
+        let mut w = witness(
+            &a.evidence,
+            &a.verification,
+            &a.profile,
+            &drafts,
+            &mut findings,
+        )?;
         if a.coverage == CaseCoverage::Unestablished {
-            w.reasons.push(QualificationIssue::CoverageUnestablished);
+            findings.push_issue(&mut w.reasons, QualificationIssue::CoverageUnestablished)?;
         }
         if a.verification.task().acceptance() != definition.context().applicability().trigger() {
-            w.reasons.push(QualificationIssue::CriterionMismatch);
+            findings.push_issue(&mut w.reasons, QualificationIssue::CriterionMismatch)?;
         }
         if w.requirements_met() {
             applicability = Applicability::Applicable;
@@ -928,31 +957,6 @@ pub fn inspect_method<'d, 'r>(
             applicability: None,
         }
     };
-    for claim in &claims {
-        usage.add(InspectionLimitKind::Findings, 1, limits)?;
-        usage.add(InspectionLimitKind::Findings, claim.issues.len(), limits)?;
-        for case in &claim.cases {
-            usage.add(InspectionLimitKind::Findings, 1, limits)?;
-            usage.add(InspectionLimitKind::Findings, case.issues.len(), limits)?;
-            for w in &case.witnesses {
-                usage.add(InspectionLimitKind::Findings, 1, limits)?;
-                usage.add(InspectionLimitKind::Findings, w.reasons.len(), limits)?;
-            }
-        }
-    }
-    if let Some(w) = &app_witness {
-        usage.add(InspectionLimitKind::Findings, 1, limits)?;
-        usage.add(InspectionLimitKind::Findings, w.reasons.len(), limits)?;
-    }
-    usage.add(
-        InspectionLimitKind::Findings,
-        definition
-            .sources()
-            .iter()
-            .filter(|s| s.availability() != SourceAvailability::Inspected)
-            .count(),
-        limits,
-    )?;
     // Publication boundary: all validation, cloning, output construction and fallible
     // work is complete. No callbacks/reservations/clones occur after this point.
     for (index, draft, _) in drafts {
@@ -976,12 +980,36 @@ type Dimensions = (
     bool,
 );
 type Draft = (usize, EvidenceRecord, Option<Dimensions>);
+
+struct FindingBudget<'a> {
+    usage: &'a mut InspectionUsage,
+    limits: InspectionLimits,
+}
+
+impl FindingBudget<'_> {
+    fn charge(&mut self, count: usize) -> Result<(), MethodInspectionError> {
+        self.usage
+            .add(InspectionLimitKind::Findings, count, self.limits)
+    }
+
+    fn push_issue(
+        &mut self,
+        issues: &mut Vec<QualificationIssue>,
+        issue: QualificationIssue,
+    ) -> Result<(), MethodInspectionError> {
+        self.charge(1)?;
+        issues.push(issue);
+        Ok(())
+    }
+}
+
 fn witness(
     reference: &EvidenceReference,
     contract: &CandidateBindingContract,
     profile: &VerificationProfile,
     drafts: &[Draft],
-) -> WitnessFinding {
+    findings: &mut FindingBudget<'_>,
+) -> Result<WitnessFinding, MethodInspectionError> {
     let mut w = WitnessFinding {
         reference: reference.clone(),
         result: None,
@@ -992,15 +1020,17 @@ fn witness(
         reasons: Vec::new(),
     };
     if reference.assessment.is_none() {
-        w.reasons
-            .push(QualificationIssue::MissingAssessmentReference);
+        findings.push_issue(
+            &mut w.reasons,
+            QualificationIssue::MissingAssessmentReference,
+        )?;
     }
     let Some((_, r, view)) = drafts
         .iter()
         .find(|(_, r, _)| r.observation().id() == &reference.observation)
     else {
-        w.reasons.push(QualificationIssue::MissingRecord);
-        return w;
+        findings.push_issue(&mut w.reasons, QualificationIssue::MissingRecord)?;
+        return Ok(w);
     };
     w.result = r.assessment().map(|a| a.result());
     w.applicability = r.assessment().map(|a| a.applicability());
@@ -1009,25 +1039,25 @@ fn witness(
         .as_ref()
         .is_some_and(|id| r.assessment().is_none_or(|a| a.id() != id))
     {
-        w.reasons.push(QualificationIssue::AssessmentMismatch);
+        findings.push_issue(&mut w.reasons, QualificationIssue::AssessmentMismatch)?;
     }
     if r.observation().subject().contract() != contract {
-        w.reasons.push(QualificationIssue::CriterionMismatch);
+        findings.push_issue(&mut w.reasons, QualificationIssue::CriterionMismatch)?;
     }
     if r.observation().profile() != profile {
-        w.reasons.push(QualificationIssue::ProfileMismatch);
+        findings.push_issue(&mut w.reasons, QualificationIssue::ProfileMismatch)?;
     }
     if let Some((validity, issue, id, pass)) = view {
         w.validity = *validity;
         w.issue = issue.clone();
         w.compared_to = id.clone();
         if !pass {
-            w.reasons.push(QualificationIssue::NotCurrentPass);
+            findings.push_issue(&mut w.reasons, QualificationIssue::NotCurrentPass)?;
         }
     } else {
-        w.reasons.push(QualificationIssue::MissingExamination);
+        findings.push_issue(&mut w.reasons, QualificationIssue::MissingExamination)?;
     }
-    w
+    Ok(w)
 }
 fn profile_corresponds(
     definition: &MethodDefinition,
@@ -1077,7 +1107,7 @@ fn validate(
     definition: &MethodDefinition,
     q: &QualificationRequest<'_>,
     records: &[EvidenceRecord],
-) -> Result<(), MethodInspectionError> {
+) -> Result<usize, MethodInspectionError> {
     if definition != &q.contract.definition
         || q.scope != &q.contract.scope
         || q.applicability.is_some_and(|a| &a.scope != q.scope)
@@ -1092,6 +1122,7 @@ fn validate(
             return Err(MethodInspectionError::IdentityConflict);
         }
     }
+    let mut distinct_witnesses = 0;
     for (i, w) in q.witnesses.iter().enumerate() {
         if !q
             .contract
@@ -1101,11 +1132,16 @@ fn validate(
         {
             return Err(MethodInspectionError::InvalidCorrespondence);
         }
-        if q.witnesses[..i].iter().any(|p| {
-            p.evidence.observation == w.evidence.observation
-                && (p.claim != w.claim || p.case != w.case || p.evidence != w.evidence)
-        }) {
-            return Err(MethodInspectionError::IdentityConflict);
+        // Each earlier occurrence has already passed the same identity check.
+        if let Some(prior) = q.witnesses[..i]
+            .iter()
+            .find(|p| p.evidence.observation == w.evidence.observation)
+        {
+            if prior != w {
+                return Err(MethodInspectionError::IdentityConflict);
+            }
+        } else {
+            distinct_witnesses += 1;
         }
         if q.applicability
             .is_some_and(|a| a.evidence.observation == w.evidence.observation)
@@ -1156,7 +1192,7 @@ fn validate(
             return Err(MethodInspectionError::IdentityConflict);
         }
     }
-    Ok(())
+    Ok(distinct_witnesses)
 }
 fn reserved<T>(n: usize) -> Result<Vec<T>, MethodInspectionError> {
     let mut v = Vec::new();
@@ -1216,9 +1252,7 @@ fn measure(
         .len()
         .checked_add(definition.input_usage().get(DefinitionLimitKind::Cases))
         .ok_or(MethodInspectionError::Overflow)?;
-    if minimum_findings > limits.get(InspectionLimitKind::Findings) {
-        return Err(MethodInspectionError::Limit(InspectionLimitKind::Findings));
-    }
+    u.add(InspectionLimitKind::Findings, minimum_findings, limits)?;
     let mut m = Material::new(limits.get(InspectionLimitKind::MaterialBytes));
     m.bytes = u.get(InspectionLimitKind::MaterialBytes);
     for r in records {
@@ -1435,6 +1469,22 @@ impl Material {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn input_measure_admits_claim_and_case_slots_before_staging() {
+        let definitions =
+            starter_methods(DefinitionLimits::new(2, 8, 16, 128, 100_000).unwrap()).unwrap();
+        let definition = &definitions.definitions()[0];
+        let expected = definition
+            .claims()
+            .iter()
+            .map(|claim| 1 + claim.cases().len())
+            .sum::<usize>();
+        let exact = InspectionLimits::new(1, 1, 16, 128, 100_000, expected).unwrap();
+        let usage = measure(definition, None, &[], exact).unwrap();
+        assert_eq!(usage.get(InspectionLimitKind::Findings), expected);
+    }
+
     #[test]
     fn checked_accounting_overflow_refuses() {
         let mut u = InspectionUsage([usize::MAX; 6]);
