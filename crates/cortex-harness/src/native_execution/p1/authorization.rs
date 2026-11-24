@@ -36,6 +36,13 @@ pub struct RawCopyP1Authority {
     pub operator: OwnedFd,
     /// Held endpoint connected to the separately configured observer.
     pub observer: OwnedFd,
+    /// Immutable context both peers independently review.
+    pub scope: RawCopyP1AuthorityScope,
+}
+
+/// Shared pre-effect context for the exact locally reviewed trial.
+#[derive(Clone)]
+pub struct RawCopyP1AuthorityScope {
     /// Exact Git tree reviewed independently for this trial.
     pub tree: CandidateId,
     /// Original Linux CLOCK_MONOTONIC deadline in microseconds on this boot.
@@ -84,10 +91,15 @@ fn reference(value: &SourceReference) -> Value {
     json!([origin, value.source(), value.version()])
 }
 
-fn context_fingerprint(
+/// Derive the pre-effect correspondence digest used by both peers.
+///
+/// Independently verified inputs still establish the current store, candidate,
+/// tree, boot, pinned execution, controls and stop conditions. The digest
+/// identifies that comparison and conveys no permission.
+pub fn raw_copy_authority_fingerprint(
     store: &ProgramStore,
     binding: &RawCopyP1Binding<'_>,
-    authority: &RawCopyP1Authority,
+    scope: &RawCopyP1AuthorityScope,
 ) -> Result<[u8; 32], P1Refusal> {
     let reserve = store
         .derive_domain_operation(binding.reservation, |bytes| {
@@ -102,7 +114,7 @@ fn context_fingerprint(
         binding.store.bytes(),
         reserve,
         binding.candidate.commit().as_str(),
-        authority.tree.as_str(),
+        scope.tree.as_str(),
         binding.controller_sha256,
         binding.controller_max_bytes,
         binding.fixture_sha256,
@@ -128,9 +140,9 @@ fn context_fingerprint(
         ],
         reference(binding.approval),
         reference(binding.observer),
-        authority.expires_before_micros,
-        authority.containment_sha256,
-        authority.stop_plan_sha256,
+        scope.expires_before_micros,
+        scope.containment_sha256,
+        scope.stop_plan_sha256,
         1
     ]);
     let bytes = serde_json::to_vec(&material).map_err(|_| P1Refusal::Correspondence)?;
@@ -142,13 +154,17 @@ fn request(
     context: &[u8; 32],
     operation: &[u8; 32],
     bound: Option<&[u8; 32]>,
+    expected: u64,
+    at: u64,
 ) -> String {
     json!([
         "cortex-p1-trial-v1",
         stage,
         hex(context),
         hex(operation),
-        bound.map(hex)
+        bound.map(hex),
+        expected,
+        at
     ])
     .to_string()
 }
@@ -160,7 +176,8 @@ impl<'a> AuthorizedTrial<'a> {
         authority: RawCopyP1Authority,
         cancel: &'a AtomicBool,
     ) -> Result<Self, P1Refusal> {
-        let expires_before_micros = authority.expires_before_micros;
+        let scope = &authority.scope;
+        let expires_before_micros = scope.expires_before_micros;
         let now = now_micros().ok_or(P1Refusal::DeadlineOrCancellation)?;
         let remaining = expires_before_micros
             .checked_sub(now)
@@ -169,13 +186,13 @@ impl<'a> AuthorizedTrial<'a> {
         if remaining == 0
             || remaining > super::MAX_CASE_INTERVAL.as_micros() as u64
             || local_remaining.as_micros() > u128::from(remaining)
-            || authority.tree.as_str().len() != binding.candidate.commit().as_str().len()
-            || authority.containment_sha256 == [0; 32]
-            || authority.stop_plan_sha256 == [0; 32]
+            || scope.tree.as_str().len() != binding.candidate.commit().as_str().len()
+            || scope.containment_sha256 == [0; 32]
+            || scope.stop_plan_sha256 == [0; 32]
         {
             return Err(P1Refusal::Correspondence);
         }
-        let context = context_fingerprint(store, binding, &authority)?;
+        let context = raw_copy_authority_fingerprint(store, binding, scope)?;
         let trust =
             TrialTrust::load().map_err(|_| P1Refusal::IndependentQualificationUnavailable)?;
         let operator = trust
@@ -198,11 +215,25 @@ impl<'a> AuthorizedTrial<'a> {
     }
 
     pub(super) fn authorize_reservation(&self) -> Result<(), P1Refusal> {
+        let reservation = self.binding.reservation;
+        let Command::Domain(event) = &reservation.command else {
+            return Err(P1Refusal::Correspondence);
+        };
+        let DomainEvent::Reserve { at, .. } = event.as_ref() else {
+            return Err(P1Refusal::Correspondence);
+        };
         let digest = self
-            .operation_digest(self.binding.reservation)
+            .operation_digest(reservation)
             .map_err(|_| P1Refusal::Correspondence)?;
         self.exchange(
-            &request("reserve", &self.context, &digest, None),
+            &request(
+                "reserve",
+                &self.context,
+                &digest,
+                None,
+                reservation.expected,
+                *at,
+            ),
             self.binding.deadline,
         )
         .map_err(|_| P1Refusal::TrialAuthority)
@@ -270,16 +301,18 @@ impl<'a> AuthorizedTrial<'a> {
         let Command::Domain(event) = &operation.command else {
             return Err(denied);
         };
-        let (stage, bound) = match (cut, event.as_ref()) {
-            (TrialEffectCut::Create, DomainEvent::CreateRequested { domain, .. })
+        let (stage, bound, at) = match (cut, event.as_ref()) {
+            (TrialEffectCut::Create, DomainEvent::CreateRequested { domain, at })
                 if *domain == ids.domain && operation.id == ids.create =>
             {
-                ("create", None)
+                ("create", None, *at)
             }
             (
                 TrialEffectCut::Release(binding),
                 DomainEvent::ReleaseRequested {
-                    domain, identity, ..
+                    domain,
+                    identity,
+                    at,
                 },
             ) if *domain == ids.domain
                 && binding.identity == *identity
@@ -293,7 +326,7 @@ impl<'a> AuthorizedTrial<'a> {
                                     if *domain == ids.domain && observation == binding))
                     })
                     .ok_or(denied)?;
-                ("release", Some(self.operation_digest(accepted)?))
+                ("release", Some(self.operation_digest(accepted)?), *at)
             }
             _ => return Err(denied),
         };
@@ -302,6 +335,8 @@ impl<'a> AuthorizedTrial<'a> {
             &self.context,
             &self.operation_digest(operation)?,
             bound.as_ref(),
+            operation.expected,
+            at,
         ))
     }
 }

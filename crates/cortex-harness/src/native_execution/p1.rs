@@ -18,7 +18,9 @@ use crate::{
     },
 };
 use authorization::AuthorizedTrial;
-pub use authorization::RawCopyP1Authority;
+pub use authorization::{
+    RawCopyP1Authority, RawCopyP1AuthorityScope, raw_copy_authority_fingerprint,
+};
 use cortex_core::{
     binding::CandidateRequirement,
     program::{
