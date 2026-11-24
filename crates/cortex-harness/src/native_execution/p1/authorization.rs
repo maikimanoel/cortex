@@ -21,7 +21,7 @@ use std::{
     cell::Cell,
     os::{fd::OwnedFd, unix::ffi::OsStrExt},
     sync::atomic::AtomicBool,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 /// Channels and fixed external limits for one raw-copy trial.
@@ -76,6 +76,19 @@ fn now_micros() -> Option<u64> {
         .ok()?
         .checked_mul(1_000_000)?
         .checked_add(u64::try_from(now.tv_nsec).ok()? / 1_000)
+}
+
+fn conservative_end(
+    anchor: Instant,
+    monotonic_micros: u64,
+    expires_before_micros: u64,
+) -> Option<Instant> {
+    let remaining = expires_before_micros.checked_sub(monotonic_micros)?;
+    let remaining = Duration::from_micros(remaining);
+    if remaining.is_zero() || remaining > super::MAX_CASE_INTERVAL {
+        return None;
+    }
+    anchor.checked_add(remaining)
 }
 
 fn hex(bytes: &[u8; 32]) -> String {
@@ -191,14 +204,14 @@ impl<'a> AuthorizedTrial<'a> {
     ) -> Result<Self, P1Refusal> {
         let scope = &authority.scope;
         let expires_before_micros = scope.expires_before_micros;
+        // Anchor before reading Linux monotonic time. Intervening scheduling
+        // can only shorten the mapping from the externally selected expiry.
+        let anchor = Instant::now();
         let now = now_micros().ok_or(P1Refusal::DeadlineOrCancellation)?;
-        let remaining = expires_before_micros
-            .checked_sub(now)
+        let approved_end = conservative_end(anchor, now, expires_before_micros)
             .ok_or(P1Refusal::DeadlineOrCancellation)?;
-        let local_remaining = live_budget(binding.deadline, cancel)?;
-        if remaining == 0
-            || remaining > super::MAX_CASE_INTERVAL.as_micros() as u64
-            || local_remaining.as_micros() > u128::from(remaining)
+        live_budget(binding.deadline, cancel)?;
+        if binding.deadline > approved_end
             || scope.tree.as_str().len() != binding.candidate.commit().as_str().len()
             || scope.containment_sha256 == [0; 32]
             || scope.stop_plan_sha256 == [0; 32]
@@ -359,6 +372,23 @@ impl<'a> AuthorizedTrial<'a> {
             operation.expected,
             at,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_only_the_finite_absolute_interval_from_the_original_anchor() {
+        let anchor = Instant::now();
+        let proposed_end = anchor + Duration::from_micros(9);
+        let authorized_end = conservative_end(anchor, 101, 109).unwrap();
+        assert_eq!(authorized_end, anchor + Duration::from_micros(8));
+        assert!(proposed_end > authorized_end);
+        assert!(conservative_end(anchor, 109, 109).is_none());
+        assert!(conservative_end(anchor, 110, 109).is_none());
+        assert!(conservative_end(anchor, 100, 60_000_101).is_none());
     }
 }
 
