@@ -7,7 +7,9 @@
 mod codex_cli;
 mod integration;
 mod workspace;
-pub use codex_cli::{CodexCliHold, CodexCliInspection, inspect_codex_cli_invocation};
+pub use codex_cli::{
+    CodexCliHold, CodexCliInspection, PinnedCodexCliExecutable, inspect_codex_cli_invocation,
+};
 pub use integration::{
     IntegrationConstituent, IntegrationError, IntegrationInspection, IntegrationOracle,
     IntegrationRequest, inspect_integrated_candidate,
