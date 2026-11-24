@@ -84,6 +84,27 @@ pub fn observe_release_material(
     if &current != declared {
         return Err(IntegrationError::Context);
     }
+    observation
+        .review
+        .check(
+            state.definition(),
+            CoordinationPermission::Review,
+            &[
+                declared.producer().task().clone(),
+                declared.consumer().task().clone(),
+            ],
+        )
+        .map_err(|_| IntegrationError::Authority)?;
+    if request.contract.artifact_requirement().repository()
+        != declared
+            .producer()
+            .context()
+            .contract()
+            .candidate()
+            .repository()
+    {
+        return Err(IntegrationError::Release);
+    }
     let predicate = request
         .contract
         .correspondences()
@@ -177,6 +198,18 @@ pub fn observe_protected_integration(
     {
         return Err(IntegrationError::Release);
     }
+    observation
+        .review
+        .check(
+            kernel.state().definition(),
+            CoordinationPermission::Review,
+            &[
+                scope.task().clone(),
+                retained_left.0.contract.scope().producer().task().clone(),
+                retained_right.0.contract.scope().producer().task().clone(),
+            ],
+        )
+        .map_err(|_| IntegrationError::Authority)?;
     for (selected, (release, mapping)) in selection
         .constituents
         .iter()
