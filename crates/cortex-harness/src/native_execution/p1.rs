@@ -3,7 +3,10 @@
 //! The independent trial path requires a protected host profile plus distinct
 //! kernel-verified owner and observer channels. Inspecting a target, executing
 //! one permitted trial and qualifying the result are separate operations.
-use super::{FileRole, cgroup::DelegationAuthorization, managed_backend::ManagedExecutionDomain};
+use super::{
+    FileRole, cgroup::DelegationAuthorization, managed::ManagerRecoveryState,
+    managed_backend::ManagedExecutionDomain,
+};
 mod authorization;
 pub(crate) mod trust;
 use crate::{
@@ -19,7 +22,7 @@ pub use authorization::RawCopyP1Authority;
 use cortex_core::{
     binding::CandidateRequirement,
     program::{
-        domain::{DomainEvent, DomainIntent, PoolIdentity},
+        domain::{DomainEvent, DomainIntent, DomainPhase, DomainRecord, PoolIdentity},
         supervision::ProcessCompletion,
     },
     temporal::{SourceOrigin, SourceReference},
@@ -148,6 +151,78 @@ pub enum RawCopyP1Run {
         /// Bounded preliminary raw-copy comparison.
         copy: RawCopyP1Observation,
     },
+}
+
+/// Read-only lookup of one retained P1 attempt. No bootstrap or authority is
+/// reconstructed. An absent manager name cannot settle the retained effect.
+pub struct RawCopyP1Recovery {
+    /// Latest in-journal phase of the exact attempt.
+    pub phase: DomainPhase,
+    /// Current manager lookup, when the journal retained an exact binding.
+    pub manager: Option<ManagerRecoveryState>,
+}
+
+/// P1-09 observation entry for an already retained raw-copy case. The
+/// separately bounded observation interval authorizes no effect and does not
+/// change the original execution deadline. An ambiguous Create without an
+/// exact binding remains unobserved here.
+pub fn inspect_raw_copy_recovery(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut ManagedExecutionDomain,
+    binding: &RawCopyP1Binding<'_>,
+    observation_deadline: Instant,
+    cancel: &AtomicBool,
+) -> Result<RawCopyP1Recovery, P1Refusal> {
+    if binding.store != store.id() {
+        return Err(P1Refusal::Correspondence);
+    }
+    check_store_budget(store.read_limits().timeout(), observation_deadline, cancel)?;
+    let kernel = store
+        .load(key, Access::ReadOnly)
+        .map_err(|_| P1Refusal::Journal)?;
+    let record = retained_raw_copy(&kernel, binding)?;
+    if record.intent.configuration != *backend.configuration()
+        || backend.plan().digest() != binding.plan_digest
+    {
+        return Err(P1Refusal::Correspondence);
+    }
+    live_budget(observation_deadline, cancel)?;
+    let manager = record.binding_observation.as_ref().map(|bound| {
+        backend.inspect_recovery(&record.intent, &bound.identity, observation_deadline)
+    });
+    live_budget(observation_deadline, cancel)?;
+    Ok(RawCopyP1Recovery {
+        phase: record.phase,
+        manager,
+    })
+}
+
+fn retained_raw_copy<'a>(
+    kernel: &'a CoordinationKernel,
+    binding: &RawCopyP1Binding<'_>,
+) -> Result<&'a DomainRecord, P1Refusal> {
+    let Command::Domain(event) = &binding.reservation.command else {
+        return Err(P1Refusal::Correspondence);
+    };
+    let DomainEvent::Reserve { intent, .. } = event.as_ref() else {
+        return Err(P1Refusal::Correspondence);
+    };
+    if intent.id != binding.operations.domain
+        || &intent.effect.scope.candidate != binding.candidate
+        || &intent.pool != binding.target.pool
+        || !kernel
+            .operations()
+            .iter()
+            .any(|entry| entry == binding.reservation)
+    {
+        return Err(P1Refusal::Correspondence);
+    }
+    kernel
+        .domains()
+        .and_then(|domains| domains.domain(&intent.id))
+        .filter(|record| &record.intent == intent)
+        .ok_or(P1Refusal::Correspondence)
 }
 
 fn live_budget(deadline: Instant, cancel: &AtomicBool) -> Result<Duration, P1Refusal> {
