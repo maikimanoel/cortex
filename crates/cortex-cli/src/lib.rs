@@ -25,3 +25,7 @@ pub mod program_preparation;
 /// Explicit trusted fixture execution and returned artifact composition.
 #[cfg(target_os = "linux")]
 pub mod program_execution;
+
+/// Bounded accepted-program progression through the cooperative fixture profile.
+#[cfg(target_os = "linux")]
+pub mod program_coordinator;

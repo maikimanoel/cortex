@@ -522,6 +522,110 @@ fn demand() -> Vec<Demand> {
     })
     .collect()
 }
+fn fixture_executor_request(package: &PackageRequest) -> ExecutorInputRequest {
+    let descriptor = ExecutorDescriptor::new(
+        source("finite-rust-descriptor"),
+        ExecutorIdentity::new(
+            "gpe-trusted-rust-fixture",
+            "1",
+            source("stripped-owned-fixture"),
+            policy().host,
+        )
+        .unwrap(),
+        Transport::StandardInputJsonLines,
+        [Control::StandardInput, Control::StructuredOutput]
+            .into_iter()
+            .map(|control| CapabilityObservation {
+                control,
+                kind: cortex_core::program::executor::ObservationKind::ControlledFixture,
+                support: Support::Supported,
+                basis: source("trusted-direct-child-development"),
+            })
+            .collect(),
+        2,
+    )
+    .unwrap();
+    let requirements = Requirements::new(
+        source("trusted-direct-child-profile"),
+        [Control::StandardInput, Control::StructuredOutput]
+            .into_iter()
+            .map(|control| Requirement {
+                control,
+                kind: cortex_core::program::executor::ObservationKind::ControlledFixture,
+            })
+            .collect(),
+        2,
+    )
+    .unwrap();
+    ExecutorInputRequest {
+        package: package.id.clone(),
+        revision: package.revision,
+        descriptor,
+        requirements,
+        max_bytes: 65_536,
+    }
+}
+
+fn fixture_process(
+    c: &Campaign,
+    name: &str,
+    label: &str,
+    input_len: u64,
+    approval: SourceReference,
+) -> ProcessSpec {
+    ProcessSpec {
+        reference: source(&format!("process-{label}")),
+        executable: c.binary.clone(),
+        executable_identity: source("stripped-owned-fixture"),
+        cwd: c.fixture.clone(),
+        args: vec![
+            if name == "A" {
+                "produce".into()
+            } else {
+                "consume".into()
+            },
+            c.fixture.to_str().unwrap().into(),
+            c.output.join(label).to_str().unwrap().into(),
+            c.output.join("A").to_str().unwrap().into(),
+            c.output
+                .join(format!("launched-{label}"))
+                .to_str()
+                .unwrap()
+                .into(),
+        ],
+        prepared_input: op(&format!("prepared-{label}")),
+        input_len,
+        host: policy().host,
+        profile: source("trusted-direct-child-profile"),
+        privacy: policy().privacy,
+        approval,
+        limits: ProcessLimits {
+            wall_ms: 10_000,
+            cleanup_ms: 500,
+            input_bytes: 65_536,
+            output_bytes: 4096,
+            frame_bytes: 1024,
+            authority_poll_ms: 20,
+            executable_bytes: 1_000_000,
+            arguments: 5,
+            argument_bytes: 4096,
+            transport: Some(TransportLimits {
+                startup_ms: 5000,
+                idle_ms: 5000,
+                stdout_bytes: 4096,
+                stderr_bytes: 1024,
+                records: 2,
+                buffer_bytes: 131_072,
+            }),
+        },
+        containment: None,
+        identity_checkpoint: None,
+    }
+}
+
+#[path = "support/operational_coordinator.rs"]
+mod operational_coordinator;
+
 fn prepare(
     c: &Campaign,
     store: &ProgramStore,
@@ -631,51 +735,11 @@ fn prepare(
     for input in operations {
         admit_exact(c, store, input);
     }
-    let descriptor = ExecutorDescriptor::new(
-        source("finite-rust-descriptor"),
-        ExecutorIdentity::new(
-            "gpe-trusted-rust-fixture",
-            "1",
-            source("stripped-owned-fixture"),
-            policy().host,
-        )
-        .unwrap(),
-        Transport::StandardInputJsonLines,
-        [Control::StandardInput, Control::StructuredOutput]
-            .into_iter()
-            .map(|control| CapabilityObservation {
-                control,
-                kind: cortex_core::program::executor::ObservationKind::ControlledFixture,
-                support: Support::Supported,
-                basis: source("trusted-direct-child-development"),
-            })
-            .collect(),
-        2,
-    )
-    .unwrap();
-    let requirements = Requirements::new(
-        source("trusted-direct-child-profile"),
-        [Control::StandardInput, Control::StructuredOutput]
-            .into_iter()
-            .map(|control| Requirement {
-                control,
-                kind: cortex_core::program::executor::ObservationKind::ControlledFixture,
-            })
-            .collect(),
-        2,
-    )
-    .unwrap();
     let journal = load(c, store);
     let prepared_operation = operation(
         &journal,
         &format!("prepared-{label}"),
-        Input::PrepareExecutorInput(Box::new(ExecutorInputRequest {
-            package: package.id.clone(),
-            revision: rev(1),
-            descriptor,
-            requirements,
-            max_bytes: 65_536,
-        })),
+        Input::PrepareExecutorInput(Box::new(fixture_executor_request(&package))),
     );
     let preparation = prepare_executor_input(
         &journal,
@@ -746,54 +810,13 @@ fn prepare(
         .find(|(id, _)| id == &op(&format!("prepared-{label}")))
         .unwrap()
         .1;
-    let spec = ProcessSpec {
-        reference: source(&format!("process-{label}")),
-        executable: c.binary.clone(),
-        executable_identity: source("stripped-owned-fixture"),
-        cwd: c.fixture.clone(),
-        args: vec![
-            if name == "A" {
-                "produce".into()
-            } else {
-                "consume".into()
-            },
-            c.fixture.to_str().unwrap().into(),
-            c.output.join(label).to_str().unwrap().into(),
-            c.output.join("A").to_str().unwrap().into(),
-            c.output
-                .join(format!("launched-{label}"))
-                .to_str()
-                .unwrap()
-                .into(),
-        ],
-        prepared_input: op(&format!("prepared-{label}")),
-        input_len: prepared.bytes().len() as u64,
-        host: policy().host,
-        profile: source("trusted-direct-child-profile"),
-        privacy: policy().privacy,
-        approval: operational.basis,
-        limits: ProcessLimits {
-            wall_ms: 10_000,
-            cleanup_ms: 500,
-            input_bytes: 65_536,
-            output_bytes: 4096,
-            frame_bytes: 1024,
-            authority_poll_ms: 20,
-            executable_bytes: 1_000_000,
-            arguments: 5,
-            argument_bytes: 4096,
-            transport: Some(TransportLimits {
-                startup_ms: 5000,
-                idle_ms: 5000,
-                stdout_bytes: 4096,
-                stderr_bytes: 1024,
-                records: 2,
-                buffer_bytes: 131_072,
-            }),
-        },
-        containment: None,
-        identity_checkpoint: None,
-    };
+    let spec = fixture_process(
+        c,
+        name,
+        label,
+        prepared.bytes().len() as u64,
+        operational.basis,
+    );
     let pin = inspect_fixture(&spec, prepared, k.state().definition().limits()).unwrap();
     (scope, id, spec, pin, preparation)
 }
