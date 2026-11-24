@@ -515,6 +515,12 @@ fn protected_material_requires_exact_approved_paths_and_separate_current_judgmen
             accept_protected_integration(&store, &key, acceptance("author-F", after_pass)),
             Err(IntegrationError::Admission { .. })
         ));
+        let mut reused_assessment = acceptance(REVIEWER, after_pass);
+        reused_assessment.candidate_observation = ObservationId::new("F", 4).unwrap();
+        assert!(matches!(
+            accept_protected_integration(&store, &key, reused_assessment),
+            Err(IntegrationError::Admission { .. })
+        ));
         let dirty = integrated.repository().root().join("unreviewed.txt");
         fs::write(&dirty, b"cooperative fixture drift").unwrap();
         assert!(matches!(
