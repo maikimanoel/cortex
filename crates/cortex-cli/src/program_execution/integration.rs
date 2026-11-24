@@ -1,10 +1,13 @@
 //! Bound examinations of selected committed files in a distinct integration candidate.
 
 use super::{ExecutionError, check_workspace};
-use crate::{InspectionError, inspection::committed_file_bounded};
+use crate::{
+    InspectionError,
+    inspection::{CommittedFile, committed_file_bounded},
+};
 use cortex_core::{
     TaskId,
-    binding::{BoundCandidate, ObservationId, WorktreeRequirement},
+    binding::{BoundCandidate, CandidateRequirement, ObservationId, WorktreeRequirement},
     knowledge::SourcePath,
     parallel::EdgeDecision,
     program::{CoordinationGrant, CoordinationPermission, OperationId},
@@ -226,32 +229,11 @@ fn inspect_integrated_candidate_inner(
         if integrated.commit() == worker.commit() {
             return Err(IntegrationError::Context);
         }
-        let before = committed_file_bounded(
-            worker.repository(),
-            worker.commit(),
-            selected.worker_path,
-            remaining,
-        )
-        .map_err(IntegrationError::Blob)?;
-        use_bytes(&mut remaining, before.bytes.len())?;
-        let after = committed_file_bounded(
-            integrated.repository(),
-            integrated.commit(),
-            selected.integrated_path,
-            remaining,
-        )
-        .map_err(IntegrationError::Blob)?;
-        use_bytes(&mut remaining, after.bytes.len())?;
+        let before = read_material(worker, selected.worker_path, &mut remaining)?;
+        let after = read_material(integrated, selected.integrated_path, &mut remaining)?;
         constituents_match[i] = before == after;
     }
-    let output = committed_file_bounded(
-        integrated.repository(),
-        integrated.commit(),
-        request.oracle.path,
-        remaining,
-    )
-    .map_err(IntegrationError::Blob)?;
-    use_bytes(&mut remaining, output.bytes.len())?;
+    let output = read_material(integrated, request.oracle.path, &mut remaining)?;
     let output_matches = output.bytes == request.oracle.expected;
     let candidate = check_workspace(scope.context(), request.workspace_observation.clone())
         .map_err(IntegrationError::Workspace)?;
@@ -370,6 +352,17 @@ pub fn observe_integrated_candidate(
             failure,
         }),
     }
+}
+
+fn read_material(
+    candidate: &CandidateRequirement,
+    path: &SourcePath,
+    remaining: &mut usize,
+) -> Result<CommittedFile, IntegrationError> {
+    let file = committed_file_bounded(candidate.repository(), candidate.commit(), path, *remaining)
+        .map_err(IntegrationError::Blob)?;
+    use_bytes(remaining, file.bytes.len())?;
+    Ok(file)
 }
 
 fn use_bytes(remaining: &mut usize, bytes: usize) -> Result<(), IntegrationError> {
