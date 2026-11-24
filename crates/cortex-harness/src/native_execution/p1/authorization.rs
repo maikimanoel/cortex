@@ -377,23 +377,6 @@ impl<'a> AuthorizedTrial<'a> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn maps_only_the_finite_absolute_interval_from_the_original_anchor() {
-        let anchor = Instant::now();
-        let proposed_end = anchor + Duration::from_micros(9);
-        let authorized_end = conservative_end(anchor, 101, 109).unwrap();
-        assert_eq!(authorized_end, anchor + Duration::from_micros(8));
-        assert!(proposed_end > authorized_end);
-        assert!(conservative_end(anchor, 109, 109).is_none());
-        assert!(conservative_end(anchor, 110, 109).is_none());
-        assert!(conservative_end(anchor, 100, 60_000_101).is_none());
-    }
-}
-
 fn failed(cause: DomainCause) -> DomainDiagnostic {
     issue(DomainPhaseDiagnostic::Publication, cause)
 }
@@ -434,5 +417,22 @@ impl DomainTrialGuard for AuthorizedTrial<'_> {
             return Err(failed(DomainCause::Authority));
         }
         self.check_live(end)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_only_the_finite_absolute_interval_from_the_original_anchor() {
+        let anchor = Instant::now();
+        let proposed_end = anchor + Duration::from_micros(9);
+        let authorized_end = conservative_end(anchor, 101, 109).unwrap();
+        assert_eq!(authorized_end, anchor + Duration::from_micros(8));
+        assert!(proposed_end > authorized_end);
+        assert!(conservative_end(anchor, 109, 109).is_none());
+        assert!(conservative_end(anchor, 110, 109).is_none());
+        assert!(conservative_end(anchor, 100, 60_000_101).is_none());
     }
 }
