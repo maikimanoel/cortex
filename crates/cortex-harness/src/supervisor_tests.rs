@@ -473,7 +473,17 @@ fn descendant_fixture_requires_complete_exact_input_and_eof_before_spawning() {
     pin.spec.limits.arguments = 3;
     let mut running = spawn(&pin, Instant::now()).unwrap();
     let deadline = Instant::now() + Duration::from_secs(1);
-    while !ready.exists() {
+    let expected = b"awaiting-input-eof";
+    loop {
+        match fs::read(&ready) {
+            Ok(bytes) if bytes == expected => break,
+            Ok(bytes) => assert!(
+                expected.starts_with(&bytes),
+                "fixture emitted an unexpected readiness marker"
+            ),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => panic!("readiness observation failed: {:?}", error.kind()),
+        }
         assert!(
             running.child.poll().unwrap().is_none(),
             "fixture exited before input readiness"
@@ -484,7 +494,6 @@ fn descendant_fixture_requires_complete_exact_input_and_eof_before_spawning() {
         );
         thread::sleep(POLL);
     }
-    assert_eq!(fs::read(ready).unwrap(), b"awaiting-input-eof");
     running.stdin.write_all(b"in").unwrap();
     // Exercise a delayed, incomplete package: neither a partial read nor time
     // passing may let the fixture spawn its descendant before EOF.
