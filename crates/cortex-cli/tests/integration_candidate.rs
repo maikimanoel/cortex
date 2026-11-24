@@ -431,3 +431,6 @@ fn separate_committed_candidate_requires_both_current_worker_releases_and_its_ow
         ));
     }
 }
+
+#[path = "integration_candidate/protected.rs"]
+mod protected;
