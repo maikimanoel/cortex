@@ -11,8 +11,9 @@ pub use codex_cli::{
     CodexCliHold, CodexCliInspection, PinnedCodexCliExecutable, inspect_codex_cli_invocation,
 };
 pub use integration::{
-    IntegrationConstituent, IntegrationError, IntegrationInspection, IntegrationOracle,
-    IntegrationRequest, inspect_integrated_candidate,
+    IntegrationConstituent, IntegrationError, IntegrationInspection, IntegrationObservation,
+    IntegrationObservationRequest, IntegrationOracle, IntegrationRequest,
+    inspect_integrated_candidate, observe_integrated_candidate,
 };
 pub use workspace::{
     FixtureWorkspace, FixtureWorkspaceRequest, WorkspaceError, WorkspaceFixtureRun,

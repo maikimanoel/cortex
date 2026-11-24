@@ -62,6 +62,11 @@ impl From<io::Error> for ArtifactError {
     }
 }
 
+/// Exact SHA-256 of an already bounded artifact byte slice.
+pub fn artifact_sha256(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
 /// Retained bytes with exact declared artifact/effect/observation correspondence.
 /// This in-memory capture creates no second authoritative journal or assessment.
 pub struct CapturedArtifact {
@@ -314,7 +319,7 @@ pub fn capture_artifact(
         artifact: artifact.clone(),
         effect: effect.clone(),
         observation: observation.id.clone(),
-        sha256: format!("{:x}", Sha256::digest(&bytes)),
+        sha256: artifact_sha256(&bytes),
         bytes,
     })
 }

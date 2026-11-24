@@ -7,13 +7,24 @@ use cortex_core::{
     binding::{BoundCandidate, ObservationId, WorktreeRequirement},
     knowledge::SourcePath,
     parallel::EdgeDecision,
-    program::OperationId,
+    program::{CoordinationGrant, CoordinationPermission, OperationId},
 };
-use cortex_evidence::program::{Command, CoordinationKernel, ReleaseInput};
+use cortex_evidence::{
+    Provenance,
+    program::{Command, CoordinationKernel, Operation, ReleaseInput},
+    unified::{
+        ObservationKind, ObservationTimes, ReportedObservation, SemanticError, VerificationProfile,
+    },
+};
+use cortex_harness::artifact::artifact_sha256;
 use cortex_storage::{
     history_store::{Access, StoreKey},
-    program_store::{ProgramProfile, ProgramStore, ProgramStoreError},
+    program_store::{
+        AdmissionFailure, AdmissionReceipt, ProgramProfile, ProgramStore, ProgramStoreError,
+    },
 };
+
+use std::time::SystemTime;
 
 /// One exact durable producer release and its scoped committed file mapping.
 pub struct IntegrationConstituent<'a> {
@@ -50,7 +61,6 @@ pub struct IntegrationRequest<'a> {
 }
 
 /// Why the integrated candidate could not be examined in the selected scope.
-#[derive(Debug)]
 pub enum IntegrationError {
     /// The canonical supervised program could not be observed.
     Store(ProgramStoreError),
@@ -64,6 +74,17 @@ pub enum IntegrationError {
     Blob(InspectionError),
     /// Actual integration workspace did not correspond to the accepted baseline.
     Workspace(ExecutionError),
+    /// The explicit metadata grant does not cover review of the integration task.
+    Authority,
+    /// Existing Evidence could not construct the scoped inference.
+    Evidence(SemanticError),
+    /// The exact input and uncertainty remain available for canonical reconciliation.
+    Admission {
+        /// Original operation and exact reported content.
+        operation: Box<Operation>,
+        /// Original canonical refusal or uncertainty.
+        failure: AdmissionFailure,
+    },
 }
 impl std::fmt::Display for IntegrationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -74,7 +95,15 @@ impl std::fmt::Display for IntegrationError {
             Self::Limit => "integration examination: material bound exceeded",
             Self::Blob(_) => "integration examination: committed file unavailable",
             Self::Workspace(_) => "integration examination: candidate workspace unavailable",
+            Self::Authority => "integration examination: scoped review unavailable",
+            Self::Evidence(_) => "integration examination: inference unavailable",
+            Self::Admission { .. } => "integration examination: observation admission unavailable",
         })
+    }
+}
+impl std::fmt::Debug for IntegrationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self, f)
     }
 }
 impl std::error::Error for IntegrationError {
@@ -83,6 +112,8 @@ impl std::error::Error for IntegrationError {
             Self::Store(error) => Some(error),
             Self::Blob(error) => Some(error),
             Self::Workspace(error) => Some(error),
+            Self::Evidence(error) => Some(error),
+            Self::Admission { failure, .. } => Some(failure),
             _ => None,
         }
     }
@@ -98,6 +129,8 @@ pub struct IntegrationInspection {
     pub constituents_match: [bool; 2],
     /// Whether the separate integrated output matches the supplied exact oracle.
     pub output_matches: bool,
+    /// Actual integrated output digest independently reconstructed from the commit.
+    pub output_sha256: String,
 }
 
 /// Compare actual committed worker and integration bytes in a canonical context.
@@ -113,6 +146,15 @@ pub fn inspect_integrated_candidate(
     key: &StoreKey,
     request: IntegrationRequest<'_>,
 ) -> Result<IntegrationInspection, IntegrationError> {
+    inspect_integrated_candidate_inner(store, key, &request, None)
+}
+
+fn inspect_integrated_candidate_inner(
+    store: &ProgramStore,
+    key: &StoreKey,
+    request: &IntegrationRequest<'_>,
+    review: Option<&CoordinationGrant>,
+) -> Result<IntegrationInspection, IntegrationError> {
     if store.profile() != ProgramProfile::SupervisedFixturesV3 {
         return Err(IntegrationError::Context);
     }
@@ -120,6 +162,15 @@ pub fn inspect_integrated_candidate(
         .load(key, Access::ReadOnly)
         .map_err(IntegrationError::Store)?;
     let state = kernel.state();
+    if let Some(review) = review {
+        review
+            .check(
+                state.definition(),
+                CoordinationPermission::Review,
+                std::slice::from_ref(request.task),
+            )
+            .map_err(|_| IntegrationError::Authority)?;
+    }
     let scope = state
         .readiness()
         .scope(request.task)
@@ -198,7 +249,7 @@ pub fn inspect_integrated_candidate(
     .map_err(IntegrationError::Blob)?;
     use_bytes(&mut remaining, output.len())?;
     let output_matches = output == request.oracle.expected;
-    let candidate = check_workspace(scope.context(), request.workspace_observation)
+    let candidate = check_workspace(scope.context(), request.workspace_observation.clone())
         .map_err(IntegrationError::Workspace)?;
     drop(kernel);
     if store
@@ -214,7 +265,107 @@ pub fn inspect_integrated_candidate(
         candidate,
         constituents_match,
         output_matches,
+        output_sha256: artifact_sha256(&output),
     })
+}
+
+/// Explicit metadata authority and identities for one integration observation.
+pub struct IntegrationObservationRequest {
+    /// Fresh, exact ProgramStore operation identity.
+    pub operation: OperationId,
+    /// Scoped review permission from the selected current definition.
+    pub review: CoordinationGrant,
+    /// Observation identity distinct from the Git candidate capture.
+    pub observation: ObservationId,
+}
+
+/// Readback plus the original durable observation input and receipt.
+pub struct IntegrationObservation {
+    /// Actual constituent and integrated result observations.
+    pub inspection: IntegrationInspection,
+    /// Exact admitted operation. It supplies no subsequent authority.
+    pub operation: Operation,
+    /// Canonical metadata admission receipt.
+    pub receipt: AdmissionReceipt,
+}
+
+/// Collect and retain one candidate-scoped comparison through existing Evidence.
+///
+/// The observer records an inference from actual committed-material comparison.
+/// Only a separately authorized assessment can provide a judgment. New
+/// observations remain bound to the examined revision, and an uncertain
+/// admit returns the original operation for canonical reconciliation.
+pub fn observe_integrated_candidate(
+    store: &ProgramStore,
+    key: &StoreKey,
+    request: IntegrationRequest<'_>,
+    observation: IntegrationObservationRequest,
+) -> Result<IntegrationObservation, IntegrationError> {
+    let inspection =
+        inspect_integrated_candidate_inner(store, key, &request, Some(&observation.review))?;
+    let [left, right] = &request.constituents;
+    let inputs = format!(
+        "left-release={} worker-path={} integrated-path={}; right-release={} worker-path={} integrated-path={}",
+        left.release.as_str(),
+        artifact_sha256(left.worker_path.bytes()),
+        artifact_sha256(left.integrated_path.bytes()),
+        right.release.as_str(),
+        artifact_sha256(right.worker_path.bytes()),
+        artifact_sha256(right.integrated_path.bytes()),
+    );
+    let configuration = format!(
+        "output-path={} expected-output={} max-bytes={}",
+        artifact_sha256(request.oracle.path.bytes()),
+        artifact_sha256(request.oracle.expected),
+        request.max_bytes,
+    );
+    let provenance = Provenance::new(
+        "Cortex committed integration comparison",
+        &inputs,
+        &configuration,
+    )
+    .map_err(SemanticError::from)
+    .map_err(IntegrationError::Evidence)?;
+    let profile = VerificationProfile::new(
+        provenance,
+        "1",
+        "cooperative local Linux source fixture",
+        &[],
+    )
+    .map_err(IntegrationError::Evidence)?;
+    let now = SystemTime::now();
+    let observed = ReportedObservation::new(
+        observation.observation,
+        inspection.candidate.observation().clone(),
+        profile,
+        ObservationTimes::new(now, now).map_err(IntegrationError::Evidence)?,
+        ObservationKind::Inference,
+        &format!(
+            "left-corresponds={} right-corresponds={} output-matches-oracle={} observed-output={}",
+            inspection.constituents_match[0],
+            inspection.constituents_match[1],
+            inspection.output_matches,
+            inspection.output_sha256,
+        ),
+    )
+    .map_err(IntegrationError::Evidence)?;
+    let operation = Operation {
+        id: observation.operation,
+        expected: request.expected_revision,
+        grant: observation.review,
+        command: Command::Observe(observed),
+    };
+    match store.admit(key, operation.clone()) {
+        Ok(receipt) => Ok(IntegrationObservation {
+            inspection,
+            operation,
+            receipt,
+        }),
+        Err(failure) => Err(IntegrationError::Admission {
+            operation: Box::new(operation),
+            failure,
+        }),
+    }
 }
 
 fn use_bytes(remaining: &mut usize, bytes: usize) -> Result<(), IntegrationError> {
