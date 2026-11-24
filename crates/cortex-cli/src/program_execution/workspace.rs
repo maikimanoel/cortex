@@ -37,6 +37,8 @@ pub enum WorkspaceError {
     Location,
     /// The fresh attempt slot already exists or contains unexpected entries.
     Occupied,
+    /// The inherited cooperative deadline expired before slot creation.
+    Deadline,
     /// No matching durably retained terminal observation is available.
     TerminalObservation,
     /// Local filesystem failure, reported without private paths.
@@ -51,6 +53,7 @@ impl std::fmt::Display for WorkspaceError {
             }
             Self::Location => f.write_str("fixture workspace: private directory unavailable"),
             Self::Occupied => f.write_str("fixture workspace: output slot occupied"),
+            Self::Deadline => f.write_str("fixture workspace: preparation deadline reached"),
             Self::TerminalObservation => {
                 f.write_str("fixture workspace: terminal receipt unavailable")
             }
@@ -200,6 +203,15 @@ pub fn prepare_fixture_workspace(
     key: &StoreKey,
     request: FixtureWorkspaceRequest<'_>,
 ) -> Result<FixtureWorkspace, ExecutionError> {
+    prepare_fixture_workspace_before(store, key, request, None)
+}
+
+pub(crate) fn prepare_fixture_workspace_before(
+    store: &ProgramStore,
+    key: &StoreKey,
+    request: FixtureWorkspaceRequest<'_>,
+    end: Option<std::time::Instant>,
+) -> Result<FixtureWorkspace, ExecutionError> {
     if store.profile() != ProgramProfile::SupervisedFixturesV3 {
         return Err(ExecutionError::UnsupportedProfile);
     }
@@ -238,6 +250,9 @@ pub fn prepare_fixture_workspace(
     let root = request.parent.join(name);
     output_root_excludes_sources(&kernel, &root, request.additional_sources)
         .map_err(ExecutionError::Artifact)?;
+    if end.is_some_and(|end| std::time::Instant::now() >= end) {
+        return Err(WorkspaceError::Deadline.into());
+    }
     let directory = create_slot(&parent, name)?;
     let workspace = FixtureWorkspace {
         store: store.id(),

@@ -30,7 +30,8 @@ use std::time::SystemTime;
 pub struct IntegrationConstituent<'a> {
     /// Current retained release operation contributing to the integration task.
     pub release: &'a OperationId,
-    /// Regular committed file in the artifact candidate from Evidence.
+    /// Explicitly selected regular file within the release's artifact candidate.
+    /// The existing release does not attest that this path is the accepted artifact.
     pub worker_path: &'a SourcePath,
     /// Corresponding separate regular committed file in the integration candidate.
     pub integrated_path: &'a SourcePath,
@@ -125,7 +126,7 @@ pub struct IntegrationInspection {
     pub revision: u64,
     /// Current integration candidate and its observed repository coverage.
     pub candidate: Box<BoundCandidate>,
-    /// Whether each contributor's committed file is present byte-for-byte.
+    /// Whether each explicitly selected committed file pair has identical bytes.
     pub constituents_match: [bool; 2],
     /// Whether the separate integrated output matches the supplied exact oracle.
     pub output_matches: bool,
@@ -341,7 +342,7 @@ pub fn observe_integrated_candidate(
         ObservationTimes::new(now, now).map_err(IntegrationError::Evidence)?,
         ObservationKind::Inference,
         &format!(
-            "left-corresponds={} right-corresponds={} output-matches-oracle={} observed-output={}",
+            "selected-left-files-equal={} selected-right-files-equal={} output-matches-oracle={} observed-output={}",
             inspection.constituents_match[0],
             inspection.constituents_match[1],
             inspection.output_matches,

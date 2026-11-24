@@ -8,7 +8,7 @@
 use crate::{
     program_execution::{
         ExecutionError, FixtureRun, FixtureWorkspaceRequest, PreparedFixtureRun,
-        WorkspaceFixtureRun, prepare_fixture_workspace, run_prepared_fixture_before,
+        WorkspaceFixtureRun, prepare_fixture_workspace_before, run_prepared_fixture_before,
         run_workspace_fixture_inner,
     },
     program_preparation::{PreparationError, prepare_executor_input},
@@ -556,7 +556,7 @@ fn advance(
                 output_argument: selected.output_argument,
                 source_observation: selected.source_observation.clone(),
             };
-            match prepare_fixture_workspace(store, key, request) {
+            match prepare_fixture_workspace_before(store, key, request, Some(deadline)) {
                 Ok(prepared) => workspace = Some(prepared),
                 Err(error) => return FixtureProgress::Workspace(error),
             }

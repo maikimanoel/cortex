@@ -15,11 +15,11 @@ pub use integration::{
     IntegrationObservationRequest, IntegrationOracle, IntegrationRequest,
     inspect_integrated_candidate, observe_integrated_candidate,
 };
-pub(crate) use workspace::run_workspace_fixture_inner;
 pub use workspace::{
     FixtureWorkspace, FixtureWorkspaceRequest, WorkspaceError, WorkspaceFixtureRun,
     prepare_fixture_workspace, run_workspace_fixture,
 };
+pub(crate) use workspace::{prepare_fixture_workspace_before, run_workspace_fixture_inner};
 
 use crate::{InspectionError, inspect_candidate, program_preparation::ExecutorPreparation};
 use cortex_core::{

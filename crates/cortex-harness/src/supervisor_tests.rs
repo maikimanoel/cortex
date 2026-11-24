@@ -1433,11 +1433,28 @@ fn cleanup_queries_cannot_borrow_later_termination_phases() {
         end: Some(end),
         phases: Some((term, kill)),
         killed: false,
+        direct_end_limit: None,
     };
     assert_eq!(state.query_deadline(start, end), term);
     assert_eq!(state.query_deadline(term, end), kill);
     assert_eq!(state.query_deadline(kill, end), end);
     assert_eq!(Cleanup::default().query_deadline(start, term), term);
+}
+
+#[test]
+fn direct_cleanup_cannot_restart_an_inherited_envelope_after_delayed_observation() {
+    let start = Instant::now();
+    let end = start + Duration::from_millis(100);
+    let delayed = start + Duration::from_millis(96);
+    assert_eq!(direct_cleanup_end(delayed, 40, Some(end)), end);
+    assert_eq!(
+        direct_cleanup_end(start, 40, Some(end)),
+        start + Duration::from_millis(40)
+    );
+    assert_eq!(
+        direct_cleanup_end(delayed, 40, None),
+        delayed + Duration::from_millis(40)
+    );
 }
 
 struct ControlledScope {
@@ -1491,7 +1508,10 @@ fn controlled_checkpoint_refusal_and_lost_reply_withhold_every_input_byte() {
             running,
             &pin,
             &ids(),
-            &AtomicBool::new(false),
+            FixtureCut {
+                cancel: &AtomicBool::new(false),
+                end: None,
+            },
             |_| Ok(()),
             None,
             |capture| {
@@ -1529,7 +1549,10 @@ fn checkpoint_publication_precedes_input_and_cannot_refresh_time_or_authority() 
             running,
             &pin,
             &ids(),
-            &cancel,
+            FixtureCut {
+                cancel: &cancel,
+                end: None,
+            },
             |_| {
                 if case == 3 && published.load(Ordering::Acquire) {
                     Err(InterruptionReason::AuthorityLost)
@@ -1605,7 +1628,7 @@ fn acquisition_cancellation_revocation_and_slow_authority_precede_publication() 
             running,
             &pin,
             &ids(),
-            cancel,
+            FixtureCut { cancel, end: None },
             |_| {
                 if acquired.load(Ordering::Acquire) {
                     if case == 1 {

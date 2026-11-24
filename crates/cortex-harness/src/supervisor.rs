@@ -625,6 +625,7 @@ struct Cleanup {
     end: Option<Instant>,
     phases: Option<(Instant, Instant)>,
     killed: bool,
+    direct_end_limit: Option<Instant>,
 }
 impl Cleanup {
     fn query_deadline(&self, now: Instant, wall_end: Instant) -> Instant {
@@ -664,7 +665,11 @@ impl Cleanup {
                 result.containment = scope.last_observation().map(Box::new);
             } else {
                 running.child.stop();
-                self.end = Some(deadline(now, spec.limits.cleanup_ms).unwrap_or(now));
+                self.end = Some(direct_cleanup_end(
+                    now,
+                    spec.limits.cleanup_ms,
+                    self.direct_end_limit,
+                ));
             }
         }
         if let Some((term, kill)) = self.phases
@@ -682,6 +687,11 @@ impl Cleanup {
         }
     }
 }
+
+fn direct_cleanup_end(now: Instant, cleanup_ms: u64, limit: Option<Instant>) -> Instant {
+    let end = deadline(now, cleanup_ms).unwrap_or(now);
+    limit.map_or(end, |limit| end.min(limit))
+}
 #[cfg(test)]
 fn supervise(
     running: Running,
@@ -695,7 +705,7 @@ fn supervise(
         running,
         prepared,
         ids,
-        cancel,
+        FixtureCut { cancel, end: None },
         authority,
         initial_reason,
         |_| Err(InterruptionReason::AuthorityUnknown),
@@ -705,11 +715,12 @@ fn supervise_with_checkpoint(
     mut running: Running,
     prepared: &PinnedFixture,
     ids: &CaptureIds,
-    cancel: &AtomicBool,
+    cut: FixtureCut<'_>,
     mut authority: impl FnMut(u64) -> Result<(), InterruptionReason>,
     initial_reason: Option<InterruptionReason>,
     mut publish_identity: impl FnMut(&ProcessObservation) -> Result<(), InterruptionReason>,
 ) -> ProcessObservation {
+    let cancel = cut.cancel;
     let spec = &prepared.spec;
     let limits = &spec.limits;
     let mut result = summary(spec, ids.finished_observation.clone(), ids.basis.clone());
@@ -743,7 +754,16 @@ fn supervise_with_checkpoint(
     let mut err_failed = out_failed;
     let mut in_closed = false;
     let mut next_authority = 0_u64;
-    let mut cleanup = Cleanup::default();
+    let mut cleanup = Cleanup {
+        direct_end_limit: cut.end.and_then(|end| {
+            running
+                .start
+                .checked_add(Duration::from_millis(limits.wall_ms))
+                .and_then(|wall| wall.checked_add(Duration::from_millis(limits.cleanup_ms)))
+                .map(|envelope| end.min(envelope))
+        }),
+        ..Cleanup::default()
+    };
     let mut last_progress = 0_u64;
     let mut first_record = None;
     let mut scope_ready = running.scope.is_none();
@@ -1054,7 +1074,6 @@ struct ReceiptWriter<'a> {
     attempts: usize,
     stale: Vec<Operation>,
     reconciled: Vec<ReconciledReceipt>,
-    cut: Option<Instant>,
 }
 impl ReceiptWriter<'_> {
     fn record(
@@ -1062,6 +1081,7 @@ impl ReceiptWriter<'_> {
         id: &OperationId,
         observation: &ProcessObservation,
         tick: u64,
+        cut: Option<Instant>,
     ) -> Result<AdmissionReceipt, AdmissionFailure> {
         let Self {
             store,
@@ -1072,10 +1092,9 @@ impl ReceiptWriter<'_> {
             attempts,
             stale,
             reconciled,
-            cut,
         } = self;
         let check_time = || {
-            if fits_store_cut(*cut, store) {
+            if fits_store_cut(cut, store) {
                 Ok(())
             } else {
                 Err(AdmissionFailure {
@@ -1113,7 +1132,7 @@ impl ReceiptWriter<'_> {
                         if observation.completion == ProcessCompletion::IdentityVerified {
                             return Err(failure);
                         }
-                        if fits_store_cut(*cut, store)
+                        if fits_store_cut(cut, store)
                             && let Ok(Reconciliation::Present(receipt)) =
                                 store.reconcile(key, kernel.initial(), &input, Access::Recover)
                         {
@@ -1448,9 +1467,12 @@ fn execute_fixture_inner(
         attempts: ids.admission_attempts,
         stale: vec![],
         reconciled: vec![],
-        cut: cut.end,
     };
-    let cancel = cut.cancel;
+    let active_cut = cut.end.and_then(|end| {
+        start
+            .checked_add(Duration::from_millis(prepared.spec.limits.wall_ms))
+            .map(|wall| end.min(wall))
+    });
     let mut started = None;
     let mut identity_checkpoint = None;
     let mut recording_failure = None;
@@ -1472,6 +1494,7 @@ fn execute_fixture_inner(
                 &ids.started_operation,
                 &observation,
                 at.saturating_add(observation.elapsed_ms),
+                active_cut,
             ) {
                 Ok(r) => started = Some(r),
                 Err(e) => recording_failure = Some(e),
@@ -1483,8 +1506,11 @@ fn execute_fixture_inner(
                 running,
                 prepared,
                 &ids,
-                cancel,
+                cut,
                 |_ms| {
+                    if !fits_store_cut(active_cut, store) {
+                        return Err(InterruptionReason::Timeout);
+                    }
                     let kernel = store
                         .load(key, Access::ReadOnly)
                         .map_err(|_| InterruptionReason::AuthorityUnknown)?;
@@ -1508,6 +1534,7 @@ fn execute_fixture_inner(
                         &identity_ids.checkpoint_operation,
                         &observation,
                         at.saturating_add(elapsed(start)),
+                        active_cut,
                     ) {
                         Ok(receipt) => {
                             identity_checkpoint = Some(receipt);
@@ -1561,6 +1588,7 @@ fn execute_fixture_inner(
             &ids.finished_operation,
             &observation,
             at.saturating_add(observation.elapsed_ms),
+            cut.end,
         ) {
             Ok(r) => Some(r),
             Err(e) => {
