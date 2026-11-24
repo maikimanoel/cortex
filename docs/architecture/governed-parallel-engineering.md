@@ -326,6 +326,13 @@ semantic/interface conflicts beyond textual merges. Use protected-main PR/CI and
 fresh affected verification. Reuse unaffected evidence only with original identity
 and justified non-impact; do not assign worker results to new integrated bytes.
 
+The cooperative source integration comparison reads selected regular files
+from the exact retained Git commits and compares bytes and Git modes. The
+release binds the artifact identity and candidate. The selected paths and the
+combined-result oracle are supplied separately. The comparison produces a
+scoped inference for review. Protected acceptance still requires an approved
+binding from each released artifact to its reviewed path and contents.
+
 Integration review may hold/reject one consumer edge while preserving another.
 No global wave barrier or successful branch merge completes a program. Required
 acceptance cannot be weakened to clear a dependency, and executors cannot

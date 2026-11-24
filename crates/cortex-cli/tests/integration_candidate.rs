@@ -22,7 +22,7 @@ use cortex_storage::{
 use fixture::{operation, prepare_release, rev, task};
 use std::{
     fs,
-    os::unix::fs::DirBuilderExt,
+    os::unix::fs::{DirBuilderExt, PermissionsExt},
     path::{Path, PathBuf},
     process,
     time::Duration,
@@ -64,14 +64,22 @@ fn git(path: &Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap().trim().to_owned()
 }
 
-fn candidate(path: &Path, files: &[(&str, &[u8])]) -> CandidateRequirement {
+fn candidate(
+    path: &Path,
+    files: &[(&str, &[u8])],
+    executable: Option<&str>,
+) -> CandidateRequirement {
     fs::create_dir(path).unwrap();
     git(
         path,
         &["init", "-q", "--template=", "--initial-branch=main"],
     );
     for (name, bytes) in files {
-        fs::write(path.join(name), bytes).unwrap();
+        let file = path.join(name);
+        fs::write(&file, bytes).unwrap();
+        if executable == Some(*name) {
+            fs::set_permissions(&file, fs::Permissions::from_mode(0o755)).unwrap();
+        }
         git(path, &["add", "--", name]);
     }
     git(path, &["commit", "-qm", "Scoped development fixture"]);
@@ -199,54 +207,37 @@ fn separate_committed_candidate_requires_both_current_worker_releases_and_its_ow
             .join(format!("cortex-integration-candidate-{}", process::id())),
     );
     fs::DirBuilder::new().mode(0o700).create(&root.0).unwrap();
-    let left = candidate(
-        &root.0.join("worker-b"),
-        &[(
-            "part.txt", b"2
-",
-        )],
-    );
-    let right = candidate(
-        &root.0.join("worker-e"),
-        &[(
-            "part.txt", b"3
-",
-        )],
-    );
-    // The individual files correspond. A clean textual combination with the
-    // wrong result still fails the independent integration oracle.
-    for (name, observed, succeeds) in [
+    let left = candidate(&root.0.join("worker-b"), &[("part.txt", b"2\n")], None);
+    let right = candidate(&root.0.join("worker-e"), &[("part.txt", b"3\n")], None);
+    // Byte identity and the combined oracle cannot detect a changed executable bit.
+    // File correspondence cannot establish the semantic result of the combination.
+    for (name, observed, executable, constituents_match, output_matches) in [
+        ("correct", b"sum:5\n", None, [true, true], true),
+        ("conflict", b"sum:4\n", None, [true, true], false),
         (
-            "integrated-correct",
-            b"sum:5
-"
-            .as_slice(),
+            "changed-mode",
+            b"sum:5\n",
+            Some("left.txt"),
+            [false, true],
             true,
         ),
-        (
-            "integrated-conflict",
-            b"sum:4
-"
-            .as_slice(),
-            false,
-        ),
+        ("aliased-source", b"sum:5\n", None, [true, true], true),
     ] {
+        let aliased_source = name == "aliased-source";
         let integrated = candidate(
             &root.0.join(name),
             &[
-                (
-                    "left.txt", b"2
-",
-                ),
-                (
-                    "right.txt",
-                    b"3
-",
-                ),
+                ("left.txt", b"2\n"),
+                ("right.txt", if aliased_source { b"2\n" } else { b"3\n" }),
                 ("summary.txt", observed),
             ],
+            executable,
         );
-        let definition = definition(&left, &right, &integrated);
+        let definition = definition(
+            &left,
+            if aliased_source { &left } else { &right },
+            &integrated,
+        );
         let mut draft = CoordinationKernel::new(definition.clone()).unwrap();
 
         // These are scoped source-simulation artifact reviews. Integration below
@@ -316,6 +307,18 @@ fn separate_committed_candidate_requires_both_current_worker_releases_and_its_ow
         ));
         store.admit(&key, draft.operations()[last].clone()).unwrap();
         let revision = draft.revision();
+        if aliased_source {
+            // Different artifact IDs and reviews still select one worker file twice.
+            assert!(matches!(
+                inspect_integrated_candidate(&store, &key, request(revision, false, 100)),
+                Err(IntegrationError::Context)
+            ));
+            assert_eq!(
+                store.load(&key, Access::ReadOnly).unwrap().revision(),
+                revision
+            );
+            continue;
+        }
         assert!(matches!(
             inspect_integrated_candidate(&store, &key, request(revision, true, 100)),
             Err(IntegrationError::Context)
@@ -326,8 +329,8 @@ fn separate_committed_candidate_requires_both_current_worker_releases_and_its_ow
         ));
         let result =
             inspect_integrated_candidate(&store, &key, request(revision, false, 100)).unwrap();
-        assert_eq!(result.constituents_match, [true, true]);
-        assert_eq!(result.output_matches, succeeds);
+        assert_eq!(result.constituents_match, constituents_match);
+        assert_eq!(result.output_matches, output_matches);
         assert_eq!(
             result.candidate.observation().contract().candidate(),
             &integrated
@@ -336,6 +339,27 @@ fn separate_committed_candidate_requires_both_current_worker_releases_and_its_ow
             store.load(&key, Access::ReadOnly).unwrap().revision(),
             revision
         );
+
+        if name == "correct" {
+            // The same commit remains accessible from this checkout after moving
+            // its Git directory. The accepted repository identity still differs.
+            let recorded = left.repository().git_dir();
+            let relocated = root.0.join("relocated-worker-metadata");
+            fs::rename(recorded, &relocated).unwrap();
+            fs::write(recorded, format!("gitdir: {}\n", relocated.display())).unwrap();
+            assert_eq!(
+                git(left.repository().root(), &["rev-parse", "HEAD"]),
+                left.commit().as_str()
+            );
+            assert!(matches!(
+                inspect_integrated_candidate(&store, &key, request(revision, false, 100)),
+                Err(IntegrationError::Blob(
+                    cortex_cli::InspectionError::Inconsistent
+                ))
+            ));
+            fs::remove_file(recorded).unwrap();
+            fs::rename(relocated, recorded).unwrap();
+        }
 
         let observation_id = ObservationId::new("integration-comparison", 1).unwrap();
         let mut unauthorized = fixture::grant(1, "integration-reviewer");
@@ -364,7 +388,8 @@ fn separate_committed_candidate_requires_both_current_worker_releases_and_its_ow
             },
         )
         .unwrap();
-        assert_eq!(observed.inspection.output_matches, succeeds);
+        assert_eq!(observed.inspection.constituents_match, constituents_match);
+        assert_eq!(observed.inspection.output_matches, output_matches);
         assert_eq!(observed.receipt.ordinal, revision + 1);
         let replayed = store.load(&key, Access::ReadOnly).unwrap();
         let record = replayed
