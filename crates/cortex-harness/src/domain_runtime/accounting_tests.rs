@@ -768,3 +768,150 @@ fn successful_report_and_missing_counter_do_not_settle_after_reopen() {
     assert!(record.holds(Resource::WorkerSlots) && record.unresolved_consumption(CPU));
     assert_eq!(record.measured_consumption(CPU), None);
 }
+
+#[test]
+fn managed_tree_capture_and_canonical_commit_survive_lost_publication_reply() {
+    let root = Temp::new();
+    let (store, intent, mut ids) = stored(&root);
+    let component = Temp::new();
+    let mut manager = LifecycleManager::new(&component, &intent);
+    let first = execute_lifecycle(&store, &mut manager, &ids);
+    manager.inner.finish();
+    assert!(first.report.is_some() && first.admission_failure.is_none());
+    let before_cancel = load(&store);
+    let at = tick(&before_cancel);
+    let cancel = input(
+        &before_cancel,
+        "simulation-owner-cancel",
+        DomainEvent::Cancel {
+            domain: intent.id.clone(),
+            at,
+            basis: fixture::source("simulation-owner-cancel"),
+        },
+    );
+    ids.grant = cancel.grant.clone();
+    store.admit(&key(), cancel).unwrap();
+    let before = load(&store);
+
+    manager.synthetic_empty_tree = true;
+    manager.synthetic_cpu_micros = Some(1_001);
+    let start = Instant::now();
+    let end = start + Duration::from_secs(1);
+    let id = OperationId::new("simulation-tree-lost-reply").unwrap();
+    let mut committed = None;
+    let failure = observe_managed_tree(
+        &store,
+        &key(),
+        &mut manager,
+        &ids,
+        id.clone(),
+        (start, end),
+        |operation| {
+            let receipt =
+                store.admit_observed_domain_until(&key(), operation.clone(), end, || Ok(()))?;
+            assert!(!receipt.duplicate);
+            committed = Some((receipt, operation));
+            Err(AdmissionFailure {
+                completion: Completion::Indeterminate,
+                error: ProgramStoreError::Deadline,
+            })
+        },
+    )
+    .unwrap_err();
+    let ManagedClosureObservationAttemptError::Admission {
+        store: target,
+        operation,
+        failure,
+    } = failure
+    else {
+        panic!("managed capture did not reach canonical publication");
+    };
+    let (receipt, independent) = committed.expect("a real managed record was committed");
+    assert_eq!(target, store.id());
+    assert!(*operation == independent);
+    assert_eq!(operation.id, id);
+    assert_eq!(operation.expected, before.revision());
+    assert_eq!(receipt.ordinal, operation.expected + 1);
+    assert_eq!(failure.completion, Completion::Indeterminate);
+    assert!(matches!(failure.error, ProgramStoreError::Deadline));
+
+    let reopened = ProgramStore::open(
+        &root.0.join("store"),
+        &key(),
+        Access::ReadOnly,
+        store.read_limits(),
+    )
+    .unwrap();
+    assert_eq!(
+        reopened
+            .reconcile(&key(), before.initial(), &operation, Access::ReadOnly)
+            .unwrap(),
+        Reconciliation::Present(AdmissionReceipt {
+            duplicate: true,
+            ..receipt
+        }),
+    );
+    let after = load(&reopened);
+    let domain = after.domains().unwrap().domain(&intent.id).unwrap();
+    assert!(domain.cancelled && domain.closure.is_none());
+    assert!(domain.holds(Resource::WorkerSlots) && domain.holds(Resource::DiskBytes));
+    assert!(after.operations().last() == Some(operation.as_ref()));
+    assert_eq!(
+        (
+            manager.inner.created,
+            manager.inner.stopped,
+            manager.completions
+        ),
+        (1, 0, 1)
+    );
+    let later = execute_lifecycle(&store, &mut manager, &ids);
+    assert!(later.recovery_only);
+    assert!(
+        (later.creation, later.binding, later.release, later.report) == (None, None, None, None)
+    );
+    assert_eq!(load(&reopened).revision(), receipt.ordinal);
+    assert_eq!((manager.inner.created, manager.completions), (1, 1));
+}
+
+#[test]
+fn managed_binding_conflict_returns_original_exact_admission_input() {
+    let root = Temp::new();
+    let (store, intent, mut ids) = stored(&root);
+    let component = Temp::new();
+    let mut manager = LifecycleManager::new(&component, &intent);
+    let before = load(&store);
+    ids.bind = before.operations().first().unwrap().id.clone();
+    let result = execute_lifecycle(&store, &mut manager, &ids);
+    manager.inner.finish();
+    assert!(result.creation.is_some() && result.binding.is_none() && result.release.is_none());
+    let refused = result.admission_failure.unwrap();
+    assert_eq!(refused.store, store.id());
+    assert_eq!(refused.operation.id, ids.bind);
+    assert_eq!(refused.operation.expected, before.revision() + 1);
+    assert_eq!(refused.failure.completion, Completion::Rejected);
+    assert!(matches!(&refused.operation.command,
+        Command::Domain(inner) if matches!(inner.as_ref(), DomainEvent::BoundObserved { domain, .. } if *domain == intent.id)));
+    assert!(matches!(
+        refused.failure.error,
+        ProgramStoreError::Domain(KernelError::Core(
+            cortex_core::program::ProgramError::IdentityConflict
+        ))
+    ));
+    let reopened = ProgramStore::open(
+        &root.0.join("store"),
+        &key(),
+        Access::ReadOnly,
+        store.read_limits(),
+    )
+    .unwrap();
+    assert_eq!(
+        refused
+            .reconcile(&reopened, &key(), before.initial())
+            .unwrap(),
+        Reconciliation::Conflict
+    );
+    let later = execute_lifecycle(&store, &mut manager, &ids);
+    assert!(later.recovery_only);
+    assert_eq!(load(&reopened).revision(), refused.operation.expected);
+    assert_eq!((manager.inner.created, manager.completions), (1, 0));
+}

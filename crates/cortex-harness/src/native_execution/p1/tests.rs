@@ -188,6 +188,7 @@ fn copy_oracle_requires_durable_report_and_eof_in_addition_to_matching_bytes() {
             nonce: None,
             report: None,
             diagnostic: None,
+            admission_failure: None,
             recovery_only: false,
         },
         execution: Some(ExecutionObservation {
@@ -284,6 +285,7 @@ fn canonical_duplicate_reservation_cannot_reach_the_attempt_again() {
                     nonce: None,
                     report: None,
                     diagnostic: None,
+                    admission_failure: None,
                     recovery_only: false,
                 },
                 execution: None,

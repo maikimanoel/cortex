@@ -5,13 +5,15 @@ use crate::{
     domain_manager::*,
 };
 use cortex_core::{
-    program::{CoordinationGrant, OperationId, domain::*},
+    program::{CoordinationGrant, OperationId, ProgramDefinition, domain::*},
     temporal::SourceReference,
 };
 use cortex_evidence::program::{Command, CoordinationKernel, Operation};
 use cortex_storage::{
     history_store::{Access, StoreId, StoreKey},
-    program_store::{AdmissionFailure, AdmissionReceipt, ProgramStore},
+    program_store::{
+        AdmissionFailure, AdmissionReceipt, ProgramStore, ProgramStoreError, Reconciliation,
+    },
 };
 use serde_json::json;
 use std::{
@@ -57,6 +59,8 @@ pub struct DomainRun {
     pub report: Option<AdmissionReceipt>,
     /// Original redacted refusal/interruption.
     pub diagnostic: Option<DomainDiagnostic>,
+    /// Complete original journal attempt when a managed admission failed.
+    pub admission_failure: Option<DomainAdmissionAttempt>,
     /// Existing uncertainty/release means this invocation performed no creation.
     pub recovery_only: bool,
 }
@@ -69,8 +73,48 @@ impl DomainRun {
             nonce: None,
             report: None,
             diagnostic: None,
+            admission_failure: None,
             recovery_only: false,
         }
+    }
+
+    fn refuse_admission(
+        &mut self,
+        store: &ProgramStore,
+        operation: Operation,
+        failure: AdmissionFailure,
+    ) -> DomainDiagnostic {
+        self.admission_failure = Some(DomainAdmissionAttempt {
+            store: store.id(),
+            operation,
+            failure,
+        });
+        issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal)
+    }
+}
+
+/// Exact attempted managed journal input and its original storage response.
+pub struct DomainAdmissionAttempt {
+    /// Selected store incarnation.
+    pub store: StoreId,
+    /// Exact command, grant and predecessor.
+    pub operation: Operation,
+    /// Original rejection, rollback or uncertainty.
+    pub failure: AdmissionFailure,
+}
+
+impl DomainAdmissionAttempt {
+    /// Check only durable presence in the exact selected store.
+    pub fn reconcile(
+        &self,
+        store: &ProgramStore,
+        key: &StoreKey,
+        initial: &ProgramDefinition,
+    ) -> Result<Reconciliation, ProgramStoreError> {
+        if store.id() != self.store {
+            return Err(ProgramStoreError::TargetChanged);
+        }
+        store.reconcile(key, initial, &self.operation, Access::ReadOnly)
     }
 }
 
@@ -536,7 +580,7 @@ fn prepare_with_trial<M: DomainManager>(
         }
         trial_store_budget(store, trial, end)?;
         let (creation, created) = store
-            .dispatch_domain(key, create, |k| {
+            .dispatch_domain(key, create.clone(), |k| {
                 let at = current(k, ids, start, end, cancel)?;
                 manager.check_context(k, &domain.intent, at)?;
                 if let Some(trial) = trial {
@@ -549,7 +593,7 @@ fn prepare_with_trial<M: DomainManager>(
                 manager.create(&domain.intent, end)?;
                 Ok::<_, DomainDiagnostic>(listener)
             })
-            .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))?;
+            .map_err(|failure| run.refuse_admission(store, create, failure))?;
         run.creation = Some(creation);
         let Some(created) = created else {
             run.recovery_only = true;
@@ -627,8 +671,8 @@ fn prepare_with_trial<M: DomainManager>(
         );
         trial_store_budget(store, trial, end)?;
         let binding = store
-            .admit(key, bound)
-            .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))?;
+            .admit(key, bound.clone())
+            .map_err(|failure| run.refuse_admission(store, bound, failure))?;
         run.binding = Some(binding);
         Ok(Some(PreparedNonceDomain {
             channel,
@@ -729,7 +773,7 @@ fn release_with_trial<M: DomainManager>(
         }
         trial_store_budget(store, trial, prepared.end)?;
         let (receipt, released) = store
-            .dispatch_domain(key, release, |k| {
+            .dispatch_domain(key, release.clone(), |k| {
                 let at = current(k, ids, prepared.start, prepared.end, cancel)?;
                 manager.check_context(k, &prepared.intent, at)?;
                 let current_record = record(k, &ids.domain)?;
@@ -784,7 +828,7 @@ fn release_with_trial<M: DomainManager>(
                 )
                 .map_err(|e| issue(DomainPhaseDiagnostic::Release, DomainCause::Io(e.kind())))
             })
-            .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))?;
+            .map_err(|failure| run.refuse_admission(store, release, failure))?;
         run.release = Some(receipt);
         let Some(released) = released else {
             run.recovery_only = true;
@@ -846,8 +890,8 @@ fn release_with_trial<M: DomainManager>(
         trial_store_budget(store, trial, prepared.end)?;
         run.report = Some(
             store
-                .admit(key, report)
-                .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))?,
+                .admit(key, report.clone())
+                .map_err(|failure| run.refuse_admission(store, report, failure))?,
         );
         Ok(())
     };
@@ -1129,24 +1173,53 @@ pub fn observe_managed_executable_closure_tree_with_attempt(
             DomainCause::Correspondence,
         ))
     })?;
-    let operation = capture_closure_tree(store, key, backend, ids, observation_id, start, end)
-        .map_err(ManagedClosureObservationAttemptError::Capture)?;
-    publish_managed_closure_tree(store, key, operation, end)
+    observe_managed_tree(
+        store,
+        key,
+        backend,
+        ids,
+        observation_id,
+        (start, end),
+        |operation| store.admit_observed_domain_until(key, operation, end, || Ok(())),
+    )
 }
 
+fn observe_managed_tree<M: DomainManager>(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut M,
+    ids: &DomainOperations,
+    observation_id: OperationId,
+    (start, end): (Instant, Instant),
+    admit: impl FnOnce(Operation) -> Result<AdmissionReceipt, AdmissionFailure>,
+) -> Result<AdmissionReceipt, ManagedClosureObservationAttemptError> {
+    let operation = capture_closure_tree(store, key, backend, ids, observation_id, start, end)
+        .map_err(ManagedClosureObservationAttemptError::Capture)?;
+    retain_managed_observation_attempt(store.id(), operation, admit)
+}
+
+fn retain_managed_observation_attempt(
+    store: StoreId,
+    operation: Operation,
+    admit: impl FnOnce(Operation) -> Result<AdmissionReceipt, AdmissionFailure>,
+) -> Result<AdmissionReceipt, ManagedClosureObservationAttemptError> {
+    admit(operation.clone()).map_err(|failure| ManagedClosureObservationAttemptError::Admission {
+        store,
+        operation: Box::new(operation),
+        failure,
+    })
+}
+
+#[cfg(test)]
 fn publish_managed_closure_tree(
     store: &ProgramStore,
     key: &StoreKey,
     operation: Operation,
     end: Instant,
 ) -> Result<AdmissionReceipt, ManagedClosureObservationAttemptError> {
-    store
-        .admit_observed_domain_until(key, operation.clone(), end, || Ok(()))
-        .map_err(|failure| ManagedClosureObservationAttemptError::Admission {
-            store: store.id(),
-            operation: Box::new(operation),
-            failure,
-        })
+    retain_managed_observation_attempt(store.id(), operation, |input| {
+        store.admit_observed_domain_until(key, input, end, || Ok(()))
+    })
 }
 
 fn capture_closure_tree<M: DomainManager>(
