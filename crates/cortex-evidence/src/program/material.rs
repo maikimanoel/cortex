@@ -154,6 +154,9 @@ impl CoordinationKernel {
         &self,
         id: &ObservationId,
     ) -> Option<(&Operation, &MaterialObservation)> {
+        if !self.protected_material {
+            return None;
+        }
         self.operations
             .iter()
             .find_map(|operation| match &operation.command {
