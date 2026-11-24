@@ -244,3 +244,20 @@ refresh live state or authorize a write. It adds no retained journal event,
 snapshot-exclusion proof, independent whole-domain witness, final debit, or
 settlement. The existing post-cancel observer retains its prior partial event
 encoding and cancellation prerequisite.
+
+The managed adapter also retains an in-memory CPU history for the exact store,
+domain, invocation, cgroup and monotonic interval. It samples the held directory
+while bootstrap awaits setup, at normal transport end and after durable
+cancellation when the group remains observable. Bootstrap may already have
+consumed CPU at the first cut. Missing readings, wrong epochs and regressions
+preserve uncertainty even if a later number looks valid.
+
+A separate whole-domain observer report can bind one empty-tree counter
+bracket to an initially unused, fully attributed and continuously fenced
+lifetime. The local admission path requires the configured observer role on
+the protected Unix channel and checks the exact operation, store, boot and
+time namespace. The existing journal decides whether to admit the collector's
+rounded whole CPU millisecond debit in `Closed` or `Settle`. This path does
+not release occupancy. A controller restart preserves admitted receipts
+and cannot reconstruct unretained proof. Physical observer coverage, actual
+kernel-counter retention and P1 remain unqualified.

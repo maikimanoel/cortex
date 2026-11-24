@@ -3,7 +3,12 @@
 use super::{CpuCounterObservation, bracket_cpu_observation};
 use cortex_core::program::domain::{DomainId, DomainIdentity};
 use cortex_storage::history_store::StoreId;
-use std::time::Instant;
+use std::{fs, os::unix::fs::MetadataExt, time::Instant};
+
+pub(in crate::native_execution) fn clock_namespace() -> Option<(u64, u64)> {
+    let namespace = fs::metadata("/proc/thread-self/ns/time").ok()?;
+    Some((namespace.dev(), namespace.ino()))
+}
 
 pub(in crate::native_execution) fn monotonic_ns() -> Option<u64> {
     let time = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
@@ -36,6 +41,8 @@ pub struct ManagedCpuReadback {
     /// Linux monotonic start and end in nanoseconds for cross-process matching
     /// within the same recorded boot.
     pub monotonic_ns: Option<(u64, u64)>,
+    /// Device and inode of the selected Linux time namespace, when observed.
+    pub clock_namespace: Option<(u64, u64)>,
     /// Exact recursive population readback when available.
     pub populated: Option<bool>,
     /// Cumulative measurement quality. No variant implies finality.
@@ -164,6 +171,7 @@ impl ManagedCpuObservations {
         if identity != &self.identity
             || began_at < self.last_cut
             || observed_at < began_at
+            || sample.clock_namespace != self.first_held.clock_namespace
             || cut == ManagedCpuCut::FirstHeld
             || (cut == ManagedCpuCut::EndOfTransport
                 && (self.end_of_transport.is_some() || self.after_cancellation.is_some()))

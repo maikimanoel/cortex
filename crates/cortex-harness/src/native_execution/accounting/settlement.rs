@@ -96,6 +96,7 @@ impl fmt::Debug for CollectedCpuClosureError {
 
 struct TerminalSelection {
     digest: [u8; 32],
+    clock_namespace: (u64, u64),
     started_ns: u64,
     first_held_ns: u64,
     before_ns: u64,
@@ -126,6 +127,7 @@ fn select(
     let (first_held_ns, first_end_ns) =
         history.first_held().monotonic_ns.ok_or(Refusal::Counter)?;
     let started_ns = history.started_ns().ok_or(Refusal::Counter)?;
+    let clock_namespace = terminal.clock_namespace.ok_or(Refusal::Counter)?;
     if terminal.populated != Some(false)
         || started_ns > first_held_ns
         || first_held_ns > first_end_ns
@@ -169,13 +171,21 @@ fn select(
                 cut,
                 action
             ],
-            [started_ns, first_held_ns, before_ns, after_ns, usage_micros]
+            [
+                clock_namespace,
+                started_ns,
+                first_held_ns,
+                before_ns,
+                after_ns,
+                usage_micros
+            ]
         ]))
         .map_err(|_| Refusal::Correspondence)?,
     )
     .into();
     Ok(TerminalSelection {
         digest,
+        clock_namespace,
         started_ns,
         first_held_ns,
         before_ns,
@@ -205,6 +215,7 @@ fn observer_report(
         [
             kind,
             digest,
+            clock,
             baseline,
             initial_cpu,
             fence,
@@ -218,6 +229,7 @@ fn observer_report(
     };
     if kind.as_str() != Some("whole-domain-cpu-fence-v1")
         || digest != &json!(selection.digest)
+        || clock != &json!(selection.clock_namespace)
         || initial_cpu.as_u64() != Some(0)
         || !baseline
             .as_u64()

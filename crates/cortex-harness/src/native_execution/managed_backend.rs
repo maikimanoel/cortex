@@ -5,7 +5,7 @@ use super::{
     accounting::{
         CollectedCpuClosure, CollectedCpuClosureCut, CollectedCpuClosureError,
         CpuCounterObservation, ManagedCpuCut, ManagedCpuObservations, ManagedCpuReadback,
-        challenge, monotonic_ns, submit,
+        challenge, clock_namespace, monotonic_ns, submit,
     },
     artifacts,
     backend::ExecutionObservation,
@@ -117,12 +117,14 @@ struct AccountedTreeRead {
 struct OpenCpuCapture {
     began_at: Instant,
     began_ns: Option<u64>,
+    namespace: Option<(u64, u64)>,
 }
 impl OpenCpuCapture {
     fn start() -> Self {
         Self {
             began_at: Instant::now(),
             began_ns: monotonic_ns(),
+            namespace: clock_namespace(),
         }
     }
 
@@ -137,6 +139,9 @@ impl OpenCpuCapture {
             began_at: self.began_at,
             observed_at: Instant::now(),
             monotonic_ns: self.began_ns.zip(monotonic_ns()),
+            clock_namespace: self
+                .namespace
+                .filter(|namespace| Some(*namespace) == clock_namespace()),
             populated,
             counter,
         }
@@ -211,6 +216,7 @@ impl ManagedExecutionDomain {
                 OpenCpuCapture {
                     began_at: started_at,
                     began_ns: monotonic_ns(),
+                    namespace: clock_namespace(),
                 },
             ));
         }
@@ -595,7 +601,9 @@ impl DomainManager for ManagedExecutionDomain {
             intent.id.clone(),
             actual.identity.clone(),
             start.began_at,
-            start.began_ns,
+            start
+                .began_ns
+                .filter(|_| start.namespace == first_held.clock_namespace),
             end,
             first_held,
         ));

@@ -106,6 +106,7 @@ impl Fixture {
             began_at: self.start + Duration::from_millis(offset),
             observed_at: self.start + Duration::from_millis(offset + 1),
             monotonic_ns: Some((offset * 100, offset * 100 + 50)),
+            clock_namespace: Some((4, 20)),
             populated: Some(false),
             counter: CpuCounterObservation::Unavailable,
         }
@@ -173,6 +174,7 @@ fn report(history: &ManagedCpuObservations, request: &CollectedCpuClosure) -> Ve
     serde_json::to_vec(&json!([
         "whole-domain-cpu-fence-v1",
         binding,
+        [4, 20],
         100,
         0,
         300,
@@ -206,6 +208,7 @@ pub(crate) fn source_cpu_attempt<'a>(
             began_at: start,
             observed_at: start,
             monotonic_ns: Some((200, 250)),
+            clock_namespace: Some((4, 20)),
             populated: Some(true),
             counter: CpuCounterObservation::LowerBoundMicros(micros.min(1)),
         },
@@ -222,6 +225,7 @@ pub(crate) fn source_cpu_attempt<'a>(
             began_at: start,
             observed_at: start,
             monotonic_ns: Some((400, 450)),
+            clock_namespace: Some((4, 20)),
             populated: Some(false),
             counter: CpuCounterObservation::Unavailable,
         },
@@ -256,6 +260,15 @@ fn collected_cpu_survives_store_reopen_and_does_not_release_occupancy() {
     let request = f.request("collected-normal-close", Close, NormalEnd);
     let bytes = report(&history, &request);
     let ordinal = request.expected_revision;
+    let mut wrong_clock: Value = serde_json::from_slice(&bytes).unwrap();
+    wrong_clock[2] = json!([4, 21]);
+    assert!(matches!(
+        observer_report(
+            &select(&history, &request).unwrap(),
+            &serde_json::to_vec(&wrong_clock).unwrap(),
+        ),
+        Err(CollectedCpuClosureError::Observer)
+    ));
     assert!(matches!(
         admit(
             &f.store,
