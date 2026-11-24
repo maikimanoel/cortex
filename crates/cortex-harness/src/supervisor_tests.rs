@@ -1799,8 +1799,34 @@ fn lost_committed_start_and_terminal_receipts_reconcile_after_one_actual_child()
         let f = durable("count");
         let before = f.store.load(&f.key, Access::ReadOnly).unwrap();
         let submitted = std::cell::RefCell::new(Vec::new());
+        let competing = std::cell::Cell::new(false);
         let commit = |stage, operation: &Operation| {
             submitted.borrow_mut().push(stage);
+            if missed == RecordingStage::Terminal
+                && stage == RecordingStage::Terminal
+                && !competing.replace(true)
+            {
+                thread::scope(|threads| {
+                    threads
+                        .spawn(|| {
+                            let revision = f.store.load(&f.key, Access::ReadOnly).unwrap();
+                            assert_eq!(revision.revision(), operation.expected);
+                            let revoke = support::operation(
+                                &revision,
+                                "competing-report-revocation",
+                                WorkflowCommand::SupervisedEffect(Box::new(EffectEvent::Revoke {
+                                    grant: support::proposed_grant(&f.scope).id,
+                                    at: revision.fixture_effects().last_tick() + 1,
+                                    basis: source("controller-revocation-at-report"),
+                                })),
+                            );
+                            let receipt = f.store.admit(&f.key, revoke).unwrap();
+                            assert_eq!(receipt.ordinal, operation.expected + 1);
+                        })
+                        .join()
+                        .unwrap();
+                });
+            }
             let receipt = f.store.admit(&f.key, operation.clone())?;
             assert!(!receipt.duplicate);
             if stage == missed {
@@ -1819,10 +1845,27 @@ fn lost_committed_start_and_terminal_receipts_reconcile_after_one_actual_child()
             &cancel,
         )
         .unwrap();
-        assert_eq!(
-            submitted.into_inner(),
-            [RecordingStage::Started, RecordingStage::Terminal]
-        );
+        let stale = if missed == RecordingStage::Terminal {
+            assert_eq!(
+                submitted.into_inner(),
+                [
+                    RecordingStage::Started,
+                    RecordingStage::Terminal,
+                    RecordingStage::Terminal,
+                ]
+            );
+            let [stale] = run.stale_receipt_attempts.as_slice() else {
+                panic!("the original stale predecessor was not retained");
+            };
+            Some(stale)
+        } else {
+            assert_eq!(
+                submitted.into_inner(),
+                [RecordingStage::Started, RecordingStage::Terminal]
+            );
+            assert!(run.stale_receipt_attempts.is_empty());
+            None
+        };
         assert!(run.recording_failure.is_none() && run.recording_recovery.is_none());
         let [resolved] = run.reconciled_receipt_failures.as_slice() else {
             panic!("the original lost reply was not retained");
@@ -1857,7 +1900,10 @@ fn lost_committed_start_and_terminal_receipts_reconcile_after_one_actual_child()
         // resolves the immutable inputs from the independently reopened image.
         let reopened = reopen_fixture(&f);
         let image = reopened.load(&f.key, Access::ReadOnly).unwrap();
-        assert_eq!(image.revision(), before.revision() + 3);
+        assert_eq!(
+            image.revision(),
+            before.revision() + 3 + u64::from(stale.is_some())
+        );
         assert_eq!(
             image.fixture_effects().effects()[0]
                 .process_observations
@@ -1886,6 +1932,16 @@ fn lost_committed_start_and_terminal_receipts_reconcile_after_one_actual_child()
                 )
                 .is_err()
         );
+        if let Some(stale) = stale {
+            assert_eq!(stale.id, resolved.operation.id);
+            assert_eq!(stale.expected + 1, resolved.operation.expected);
+            assert_eq!(
+                reopened
+                    .reconcile(&f.key, before.initial(), stale, Access::ReadOnly)
+                    .unwrap(),
+                Reconciliation::Conflict
+            );
+        }
         let mut changed = resolved.operation.clone();
         changed.expected += 1;
         assert_eq!(
