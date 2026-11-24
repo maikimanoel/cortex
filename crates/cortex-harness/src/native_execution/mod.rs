@@ -14,5 +14,6 @@ pub mod bootstrap;
 pub mod managed;
 
 pub mod managed_backend;
+pub mod normal_end;
 
 pub(crate) mod stdio;
