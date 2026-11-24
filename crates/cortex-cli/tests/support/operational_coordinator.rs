@@ -98,7 +98,10 @@ fn work(
             dispatch: id("dispatch"),
         },
         captures: capture_ids(&format!("coordinator-{name}")),
-        workspace_observation: ObservationId::new(id("workspace").as_str(), 1).unwrap(),
+        workspace_observation: {
+            let previous = current.context().capture().unwrap().id();
+            ObservationId::new(previous.scope(), previous.sequence() + 1).unwrap()
+        },
         dispatch_basis: source("finite-coordinator-turn"),
     }
 }
@@ -135,6 +138,11 @@ fn observed(turn: &FixtureTurn, job: &FixtureWork) {
 
 #[test]
 fn canonical_turn_selects_and_dispatches_after_a_durable_edge_on_reopen() {
+    if std::env::var_os("CORTEX_GPE_CAMPAIGN_ROOT").is_some() {
+        // The retained execution mode selects only the original exact fixture
+        // population and must not spend its launch slots on this new scenario.
+        return;
+    }
     let c = Campaign::new();
     let initial = definition(&c);
     let artifact = initial.graph().edges()[0].requirement().artifact().clone();
