@@ -1083,7 +1083,7 @@ pub fn observe_managed_executable_closure_tree(
     let operation = capture_closure_tree(store, key, backend, ids, observation_id, start, end)
         .map_err(ManagedClosureObservationError::Capture)?;
     store
-        .admit(key, operation)
+        .admit_observed_domain_until(key, operation, end, || Ok(()))
         .map_err(ManagedClosureObservationError::Admission)
 }
 
@@ -1100,7 +1100,7 @@ fn capture_closure_tree<M: DomainManager>(
         return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Deadline));
     }
     let kernel = store
-        .load(key, Access::ReadOnly)
+        .load_read_only_until(key, end)
         .map_err(|_| issue(DomainPhaseDiagnostic::Closure, DomainCause::Journal))?;
     let domain = record(&kernel, &ids.domain)?;
     let binding = domain

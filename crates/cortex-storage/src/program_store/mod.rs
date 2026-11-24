@@ -210,6 +210,7 @@ impl ReadLimits {
 }
 struct Budget {
     start: Instant,
+    deadline: Option<Instant>,
     limits: ReadLimits,
     used: usize,
     #[cfg(test)]
@@ -219,10 +220,25 @@ impl Budget {
     fn new(limits: ReadLimits) -> Self {
         Self {
             start: Instant::now(),
+            deadline: None,
             limits,
             used: 0,
             #[cfg(test)]
             expired: false,
+        }
+    }
+    fn until(mut self, deadline: Instant) -> Self {
+        self.deadline = Some(deadline);
+        self
+    }
+    fn lock_timeout(&self) -> Result<Duration, ProgramStoreError> {
+        match self.deadline {
+            Some(deadline) => deadline
+                .checked_duration_since(Instant::now())
+                .filter(|remaining| !remaining.is_zero())
+                .map(|remaining| self.limits.timeout.min(remaining))
+                .ok_or(ProgramStoreError::Deadline),
+            None => Ok(self.limits.timeout),
         }
     }
     fn check(&self) -> Result<(), ProgramStoreError> {
@@ -230,7 +246,10 @@ impl Budget {
         if self.expired {
             return Err(ProgramStoreError::Deadline);
         }
-        if self.start.elapsed() >= self.limits.timeout {
+        let now = Instant::now();
+        if now.duration_since(self.start) >= self.limits.timeout
+            || self.deadline.is_some_and(|deadline| now >= deadline)
+        {
             Err(ProgramStoreError::Deadline)
         } else {
             Ok(())
@@ -249,6 +268,21 @@ impl Budget {
         }
     }
 }
+struct ObservationCut<'a> {
+    deadline: Instant,
+    check: &'a mut dyn FnMut() -> Result<(), ProgramStoreError>,
+}
+
+struct AdmissionHooks<'a, O> {
+    observe: O,
+    cut: Option<ObservationCut<'a>>,
+}
+impl<O> AdmissionHooks<'_, O> {
+    fn trace(observe: O) -> Self {
+        Self { observe, cut: None }
+    }
+}
+
 /// Exact successful metadata admission, not a verification or acceptance judgment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AdmissionReceipt {
@@ -526,14 +560,37 @@ impl ProgramStore {
         key: &StoreKey,
         access: Access,
     ) -> Result<CoordinationKernel, ProgramStoreError> {
-        let mut budget = Budget::new(self.limits);
-        let _lock = self.location.lock_for(self.limits.timeout)?;
+        self.load_with_budget(key, access, Budget::new(self.limits))
+    }
+    /// Read the current projection within a caller's original monotonic deadline
+    /// and the existing store limits. The deadline checks are cooperative.
+    pub fn load_read_only_until(
+        &self,
+        key: &StoreKey,
+        deadline: Instant,
+    ) -> Result<CoordinationKernel, ProgramStoreError> {
+        self.load_with_budget(
+            key,
+            Access::ReadOnly,
+            Budget::new(self.limits).until(deadline),
+        )
+    }
+    fn load_with_budget(
+        &self,
+        key: &StoreKey,
+        access: Access,
+        mut budget: Budget,
+    ) -> Result<CoordinationKernel, ProgramStoreError> {
+        let _lock = self.location.lock_for(budget.lock_timeout()?)?;
         self.location.ready()?;
         budget.check()?;
         let conn = history_store::connect(&self.location, key, access)?;
         let (id, kernel, profile) = load(&conn, &self.location, &mut budget)?;
         if id != self.id || profile != self.profile {
             return Err(ProgramStoreError::TargetChanged);
+        }
+        if budget.deadline.is_some() {
+            budget.check()?;
         }
         Ok(kernel)
     }
@@ -545,6 +602,48 @@ impl ProgramStore {
         input: Operation,
     ) -> Result<AdmissionReceipt, AdmissionFailure> {
         self.admit_observed(key, input, |_, _| {})
+    }
+    /// Admit a version-four closure observation or disposition under its original
+    /// monotonic deadline. The brief local check can only refuse an otherwise
+    /// valid canonical operation. It runs under the lifecycle lock immediately
+    /// before commit and must not perform external effects, wait for input or
+    /// reenter the store. Duplicates do not call it. Late acknowledgment after
+    /// a possible commit is indeterminate and requires explicit reconciliation.
+    /// All timing bounds remain cooperative on a responsive local filesystem.
+    pub fn admit_observed_domain_until(
+        &self,
+        key: &StoreKey,
+        input: Operation,
+        deadline: Instant,
+        mut check: impl FnMut() -> Result<(), ProgramStoreError>,
+    ) -> Result<AdmissionReceipt, AdmissionFailure> {
+        use cortex_core::program::domain::DomainEvent;
+        if self.profile != ProgramProfile::RecoverableDomainsV4
+            || !matches!(&input.command, Command::Domain(event) if matches!(
+                event.as_ref(),
+                DomainEvent::ClosureTreeObserved { .. }
+                    | DomainEvent::Closed { .. }
+                    | DomainEvent::Settle { .. }
+            ))
+        {
+            return Err(AdmissionFailure::rejected(ProgramStoreError::Unsupported));
+        }
+        self.admit_recorded(
+            key,
+            input,
+            AdmissionHooks {
+                observe: |_: Stage, _: &Connection| {},
+                cut: Some(ObservationCut {
+                    deadline,
+                    check: &mut check,
+                }),
+            },
+            |_| (),
+            &mut diagnostics::Disabled,
+            #[cfg(test)]
+            None,
+        )
+        .map(|(receipt, _)| receipt)
     }
     /// Admit with an explicitly selected bounded in-memory diagnostic report.
     ///
@@ -565,7 +664,7 @@ impl ProgramStore {
         let result = self.admit_recorded(
             key,
             input,
-            |_, _| {},
+            AdmissionHooks::trace(|_: Stage, _: &Connection| {}),
             |_| (),
             diagnostics,
             #[cfg(test)]
@@ -641,7 +740,7 @@ impl ProgramStore {
         self.admit_recorded(
             key,
             input,
-            observe,
+            AdmissionHooks::trace(observe),
             launch,
             &mut diagnostics::Disabled,
             #[cfg(test)]
@@ -659,7 +758,14 @@ impl ProgramStore {
         fault: Option<AdmissionFault>,
     ) -> Result<(AdmissionReceipt, Option<R>), AdmissionFailure> {
         diagnostics.begin(self.id, &input);
-        let result = self.admit_recorded(key, input, observe, launch, diagnostics, fault);
+        let result = self.admit_recorded(
+            key,
+            input,
+            AdmissionHooks::trace(observe),
+            launch,
+            diagnostics,
+            fault,
+        );
         diagnostics.finish(&result);
         result
     }
@@ -667,16 +773,26 @@ impl ProgramStore {
         &self,
         key: &StoreKey,
         input: Operation,
-        mut observe: impl FnMut(Stage, &Connection),
+        hooks: AdmissionHooks<'_, impl FnMut(Stage, &Connection)>,
         launch: impl FnOnce(&CoordinationKernel) -> R,
         diagnostics: &mut D,
         #[cfg(test)] fault: Option<AdmissionFault>,
     ) -> Result<(AdmissionReceipt, Option<R>), AdmissionFailure> {
+        let AdmissionHooks {
+            mut observe,
+            mut cut,
+        } = hooks;
         let mut budget = Budget::new(self.limits);
+        if let Some(cut) = &cut {
+            budget = budget.until(cut.deadline);
+        }
         diagnostics.record(AdmissionStage::LockRequested);
+        let timeout = budget
+            .lock_timeout()
+            .map_err(|error| diagnostic_rejection(diagnostics, error))?;
         let _lock = self
             .location
-            .lock_for(self.limits.timeout)
+            .lock_for(timeout)
             .map_err(|error| diagnostic_rejection(diagnostics, error.into()))?;
         diagnostics.record(AdmissionStage::LockAcquired);
         #[cfg(test)]
@@ -812,7 +928,14 @@ impl ProgramStore {
             budget.expired = true;
         }
         diagnostics.record(AdmissionStage::PreCommitDeadlineCheck);
-        if let Err(error) = budget.check() {
+        let ready = budget.check().and_then(|()| {
+            if let Some(cut) = &mut cut {
+                (cut.check)()?;
+                budget.check()?;
+            }
+            Ok(())
+        });
+        if let Err(error) = ready {
             diagnostics.record(AdmissionStage::Failure((&error).into()));
             return Err(AdmissionFailure {
                 completion: if diagnostic_rollback(tx, diagnostics).is_ok() {
