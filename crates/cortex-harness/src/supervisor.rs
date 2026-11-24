@@ -2,7 +2,7 @@ use crate::owned_scope::{PreparedScope, ScopeSignal};
 use cortex_core::{
     binding::ObservationId,
     program::{
-        OperationId, ProgramError, ProgramLimits,
+        OperationId, ProgramDefinition, ProgramError, ProgramLimits,
         executor::{Control, ExecutorDescriptor, PreparedInput, Requirements, negotiate},
         operational::{EffectEvent, EffectId, EffectScope},
         scheduling::Resource,
@@ -12,9 +12,10 @@ use cortex_core::{
 };
 use cortex_evidence::program::{Command as WorkflowCommand, CoordinationKernel, Operation};
 use cortex_storage::{
-    history_store::{Access, Completion, StoreKey},
+    history_store::{Access, Completion, StoreId, StoreKey},
     program_store::{
-        AdmissionFailure, AdmissionReceipt, ProgramStore, ProgramStoreError, Reconciliation,
+        AdmissionFailure, AdmissionReceipt, ProgramProfile, ProgramStore, ProgramStoreError,
+        Reconciliation,
     },
 };
 use std::{
@@ -82,10 +83,70 @@ pub struct RunResult {
     pub recorded: Option<AdmissionReceipt>,
     /// Original recording failure; an unrecorded observation must be reconciled.
     pub recording_failure: Option<AdmissionFailure>,
+    /// Store, stage and exact input available for resolving the original failure.
+    pub recording_recovery: Option<RecordingRecovery>,
     /// Exact rejected stale-revision appends, retained before any bounded repair.
     pub stale_receipt_attempts: Vec<Operation>,
     /// Original uncertain append failures resolved by exact durable reconciliation.
     pub reconciled_receipt_failures: Vec<ReconciledReceipt>,
+}
+
+/// Append boundary where the supervisor stopped recording.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordingStage {
+    /// First observation of the retained direct child.
+    Started,
+    /// Explicit identity observance before input delivery.
+    IdentityCheckpoint,
+    /// Terminal or interrupted process observation.
+    Terminal,
+}
+
+/// Reconciliation inputs retained with an unresolved recording failure.
+pub struct RecordingRecovery {
+    /// Identity of the encrypted journal selected for the append.
+    pub store: StoreId,
+    /// Observation whose publication did not establish success.
+    pub stage: RecordingStage,
+    /// Exact submitted operation. Absent when publication stopped before submission.
+    pub operation: Option<Operation>,
+    /// Original automatic readback, including any error, when attempted.
+    pub readback: Option<Result<Reconciliation, ProgramStoreError>>,
+}
+
+impl RecordingRecovery {
+    /// Compare the exact input in the original store. No write or retry follows.
+    /// A missing input means the supervisor did not submit an append at this cut.
+    pub fn reconcile(
+        &self,
+        store: &ProgramStore,
+        key: &StoreKey,
+        initial: &ProgramDefinition,
+    ) -> Result<Option<Reconciliation>, ProgramStoreError> {
+        if store.id() != self.store {
+            return Err(ProgramStoreError::TargetChanged);
+        }
+        self.operation
+            .as_ref()
+            .map(|operation| store.reconcile(key, initial, operation, Access::ReadOnly))
+            .transpose()
+    }
+}
+
+struct FailedRecording {
+    failure: AdmissionFailure,
+    recovery: RecordingRecovery,
+}
+
+#[cfg(test)]
+type TestRecordingAdmission<'a> =
+    dyn Fn(RecordingStage, &Operation) -> Result<AdmissionReceipt, AdmissionFailure> + 'a;
+
+#[cfg(test)]
+#[derive(Default)]
+struct FixtureTestCuts<'a> {
+    withhold_dispatch_reply: bool,
+    record: Option<&'a TestRecordingAdmission<'a>>,
 }
 
 /// An original uncertain receipt append and the later exact matching observation.
@@ -1074,96 +1135,110 @@ struct ReceiptWriter<'a> {
     attempts: usize,
     stale: Vec<Operation>,
     reconciled: Vec<ReconciledReceipt>,
+    #[cfg(test)]
+    test_admission: Option<&'a TestRecordingAdmission<'a>>,
 }
 impl ReceiptWriter<'_> {
     fn record(
         &mut self,
+        stage: RecordingStage,
         id: &OperationId,
         observation: &ProcessObservation,
         tick: u64,
         cut: Option<Instant>,
-    ) -> Result<AdmissionReceipt, AdmissionFailure> {
-        let Self {
-            store,
-            key,
-            dispatch,
-            effect,
-            scope,
-            attempts,
-            stale,
-            reconciled,
-        } = self;
+    ) -> Result<AdmissionReceipt, Box<FailedRecording>> {
+        let store = self.store;
+        let failed = |failure, operation, readback| {
+            Box::new(FailedRecording {
+                failure,
+                recovery: RecordingRecovery {
+                    store: store.id(),
+                    stage,
+                    operation,
+                    readback,
+                },
+            })
+        };
         let check_time = || {
             if fits_store_cut(cut, store) {
                 Ok(())
             } else {
-                Err(AdmissionFailure {
-                    completion: Completion::Rejected,
-                    error: ProgramStoreError::Deadline,
-                })
+                Err(failed(
+                    AdmissionFailure {
+                        completion: Completion::Rejected,
+                        error: ProgramStoreError::Deadline,
+                    },
+                    None,
+                    None,
+                ))
             }
         };
-        for _ in 0..*attempts {
+        for attempt in 1..=self.attempts {
             check_time()?;
-            let kernel = store
-                .load(key, Access::ReadOnly)
-                .map_err(|error| AdmissionFailure {
-                    completion: Completion::Rejected,
-                    error,
-                })?;
+            let kernel = store.load(self.key, Access::ReadOnly).map_err(|error| {
+                failed(
+                    AdmissionFailure {
+                        completion: Completion::Rejected,
+                        error,
+                    },
+                    None,
+                    None,
+                )
+            })?;
             let input = Operation {
                 id: id.clone(),
                 expected: kernel.revision(),
-                grant: dispatch.grant.clone(),
+                grant: self.dispatch.grant.clone(),
                 command: WorkflowCommand::SupervisedEffect(Box::new(
                     EffectEvent::ProcessObserved {
-                        effect: (*effect).clone(),
-                        scope: (*scope).clone(),
+                        effect: self.effect.clone(),
+                        scope: self.scope.clone(),
                         at: tick.max(kernel.fixture_effects().last_tick()),
                         observation: observation.clone(),
                     },
                 )),
             };
             check_time()?;
-            match store.admit(key, input.clone()) {
+            #[cfg(test)]
+            let result = self.test_admission.map_or_else(
+                || store.admit(self.key, input.clone()),
+                |admit| admit(stage, &input),
+            );
+            #[cfg(not(test))]
+            let result = store.admit(self.key, input.clone());
+            match result {
                 Ok(receipt) => return Ok(receipt),
                 Err(failure) => {
-                    if failure.completion == Completion::Indeterminate {
-                        if observation.completion == ProcessCompletion::IdentityVerified {
-                            return Err(failure);
-                        }
-                        if fits_store_cut(cut, store)
-                            && let Ok(Reconciliation::Present(receipt)) =
-                                store.reconcile(key, kernel.initial(), &input, Access::Recover)
-                        {
-                            reconciled.push(ReconciledReceipt {
-                                operation: input,
-                                failure,
-                                receipt,
-                            });
-                            return Ok(receipt);
-                        }
-                        return Err(failure);
+                    let readback = (failure.completion == Completion::Indeterminate
+                        && stage != RecordingStage::IdentityCheckpoint
+                        && fits_store_cut(cut, store))
+                    .then(|| store.reconcile(self.key, kernel.initial(), &input, Access::ReadOnly));
+                    if let Some(Ok(Reconciliation::Present(receipt))) = &readback {
+                        self.reconciled.push(ReconciledReceipt {
+                            operation: input,
+                            failure,
+                            receipt: *receipt,
+                        });
+                        return Ok(*receipt);
                     }
-                    let retry = failure.completion == Completion::Rejected
+                    let stale = failure.completion == Completion::Rejected
                         && matches!(
                             &failure.error,
                             ProgramStoreError::Domain(cortex_evidence::program::KernelError::Core(
                                 ProgramError::Stale
                             ))
                         );
-                    if retry {
-                        stale.push(input);
-                    } else {
-                        return Err(failure);
+                    if stale {
+                        self.stale.push(input.clone());
+                        if attempt < self.attempts {
+                            continue;
+                        }
                     }
+                    return Err(failed(failure, Some(input), readback));
                 }
             }
         }
-        Err(AdmissionFailure {
-            completion: Completion::Rejected,
-            error: ProgramStoreError::Domain(ProgramError::Stale.into()),
-        })
+        unreachable!("execute_fixture validates a positive receipt attempt bound")
     }
 }
 
@@ -1279,6 +1354,8 @@ pub fn execute_fixture(
         None,
         prepared,
         FixtureCut { cancel, end: None },
+        #[cfg(test)]
+        FixtureTestCuts::default(),
     )
 }
 
@@ -1310,6 +1387,8 @@ pub fn execute_fixture_before(
             cancel,
             end: Some(end),
         },
+        #[cfg(test)]
+        FixtureTestCuts::default(),
     )
 }
 
@@ -1333,6 +1412,8 @@ pub fn execute_fixture_with_identity_checkpoint(
         Some(identity_ids),
         prepared,
         FixtureCut { cancel, end: None },
+        #[cfg(test)]
+        FixtureTestCuts::default(),
     )
 }
 
@@ -1344,6 +1425,7 @@ fn execute_fixture_inner(
     identity_ids: Option<IdentityCaptureIds>,
     prepared: &PinnedFixture,
     cut: FixtureCut<'_>,
+    #[cfg(test)] test_cuts: FixtureTestCuts<'_>,
 ) -> Result<RunResult, HarnessError> {
     if prepared.spec.identity_checkpoint.is_some() != identity_ids.is_some() {
         return Err(HarnessError::Contract);
@@ -1388,9 +1470,27 @@ fn execute_fixture_inner(
         if !fits_store_cut(cut.end, store) {
             return Err(HarnessError::Limits);
         }
-        let (receipt, _) = store
-            .dispatch_fixture(key, dispatch, |_| ())
-            .map_err(HarnessError::Admission)?;
+        if store.profile() != ProgramProfile::SupervisedFixturesV3 {
+            return Err(HarnessError::Admission(AdmissionFailure {
+                completion: Completion::Rejected,
+                error: ProgramStoreError::Unsupported,
+            }));
+        }
+        let receipt = match store
+            .reconcile(key, kernel.initial(), &dispatch, Access::ReadOnly)
+            .map_err(HarnessError::Store)?
+        {
+            Reconciliation::Present(receipt) => receipt,
+            Reconciliation::Conflict => {
+                return Err(HarnessError::Admission(AdmissionFailure {
+                    completion: Completion::Rejected,
+                    error: ProgramStoreError::Domain(ProgramError::IdentityConflict.into()),
+                }));
+            }
+            Reconciliation::Absent => {
+                return Err(HarnessError::Store(ProgramStoreError::TargetChanged));
+            }
+        };
         return Ok(RunResult {
             dispatch: receipt,
             started: None,
@@ -1398,6 +1498,7 @@ fn execute_fixture_inner(
             observation: None,
             recorded: None,
             recording_failure: None,
+            recording_recovery: None,
             stale_receipt_attempts: vec![],
             reconciled_receipt_failures: vec![],
         });
@@ -1441,6 +1542,18 @@ fn execute_fixture_inner(
     {
         return Err(HarnessError::Limits);
     }
+    #[cfg(test)]
+    if test_cuts.withhold_dispatch_reply {
+        // Exercise the real canonical commit, then withhold delivery before
+        // forwarding the acknowledgement to the process launcher.
+        store
+            .dispatch_fixture(key, dispatch, |_| ())
+            .map_err(HarnessError::Admission)?;
+        return Err(HarnessError::Admission(AdmissionFailure {
+            completion: Completion::Indeterminate,
+            error: ProgramStoreError::Deadline,
+        }));
+    }
     let (receipt, launched) = store
         .dispatch_fixture(key, dispatch.clone(), |current| {
             launch_after_commit(prepared, current, &effect, &scope, at, start, cut)
@@ -1454,6 +1567,7 @@ fn execute_fixture_inner(
             observation: None,
             recorded: None,
             recording_failure: None,
+            recording_recovery: None,
             stale_receipt_attempts: vec![],
             reconciled_receipt_failures: vec![],
         });
@@ -1467,6 +1581,8 @@ fn execute_fixture_inner(
         attempts: ids.admission_attempts,
         stale: vec![],
         reconciled: vec![],
+        #[cfg(test)]
+        test_admission: test_cuts.record,
     };
     let active_cut = cut.end.and_then(|end| {
         start
@@ -1491,6 +1607,7 @@ fn execute_fixture_inner(
                 ProcessCompletion::Unknown
             };
             match writer.record(
+                RecordingStage::Started,
                 &ids.started_operation,
                 &observation,
                 at.saturating_add(observation.elapsed_ms),
@@ -1531,6 +1648,7 @@ fn execute_fixture_inner(
                     let mut observation = captured.clone();
                     observation.id = identity_ids.checkpoint_observation.clone();
                     match writer.record(
+                        RecordingStage::IdentityCheckpoint,
                         &identity_ids.checkpoint_operation,
                         &observation,
                         at.saturating_add(elapsed(start)),
@@ -1585,6 +1703,7 @@ fn execute_fixture_inner(
     };
     let recorded = if recording_failure.is_none() {
         match writer.record(
+            RecordingStage::Terminal,
             &ids.finished_operation,
             &observation,
             at.saturating_add(observation.elapsed_ms),
@@ -1601,6 +1720,10 @@ fn execute_fixture_inner(
     };
     // The caller receives the final observation even when its append failed. The
     // canonical dispatch remains uncertain and cannot be retried as a new launch.
+    let (recording_failure, recording_recovery) = match recording_failure {
+        Some(failure) => (Some(failure.failure), Some(failure.recovery)),
+        None => (None, None),
+    };
     Ok(RunResult {
         dispatch: receipt,
         started,
@@ -1608,6 +1731,7 @@ fn execute_fixture_inner(
         observation: Some(observation),
         recorded,
         recording_failure,
+        recording_recovery,
         stale_receipt_attempts: writer.stale,
         reconciled_receipt_failures: writer.reconciled,
     })
