@@ -1244,8 +1244,22 @@ pub fn prepare_managed_executable_domain(
     ids: &DomainOperations,
     cancel: &AtomicBool,
 ) -> DomainPreparation {
+    prepare_managed_executable_domain_until(store, key, backend, ids, cancel, None)
+}
+
+pub(crate) fn prepare_managed_executable_domain_until(
+    store: &ProgramStore,
+    key: &StoreKey,
+    backend: &mut crate::native_execution::managed_backend::ManagedExecutionDomain,
+    ids: &DomainOperations,
+    cancel: &AtomicBool,
+    limit: Option<Instant>,
+) -> DomainPreparation {
     let start = Instant::now();
-    let end = start.checked_add(Duration::from_millis(backend.wall_ms()));
+    let end = start
+        .checked_add(Duration::from_millis(backend.wall_ms()))
+        .map(|end| limit.map_or(end, |limit| end.min(limit)))
+        .filter(|end| *end > start);
     let value = backend.digest().to_owned();
     let endpoint = store
         .load(key, Access::ReadOnly)
