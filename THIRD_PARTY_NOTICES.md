@@ -130,11 +130,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## Development-only POSIX spawn fixture
+## Linux bootstrap and POSIX spawn fixtures
 
-`nix` 0.31.3 supplies safe POSIX file actions and child lifecycle wrappers for
-controlled Linux tests. Its build helper is `cfg_aliases` 0.2.2. They are not
-production executor dependencies. Both use the MIT License.
+`nix` 0.31.3 supplies safe namespace setup for the dedicated Linux bootstrap.
+The controlled Linux tests also use its POSIX file actions and child lifecycle
+wrappers. Its build helper is `cfg_aliases` 0.2.2. Both use the MIT License.
 
 ### nix 0.31.3
 

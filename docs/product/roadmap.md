@@ -25,7 +25,7 @@ This does not require a fixed checklist, formal method or agent topology for eve
 
 | Milestone | Current readiness | Dependency | Exit evidence |
 | --- | --- | --- | --- |
-| 001 — Repository Foundation | DELIVERED: Cortex source foundation; local/remote verification and private delivery require candidate-scoped handoff evidence | None | Actual three-crate workspace, CLI behavior, minimal contract tests, private remote, configured CI |
+| 001 — Repository Foundation | DELIVERED: Cortex source foundation; local/remote verification and private delivery require candidate-scoped handoff evidence | None | Original three-crate workspace, CLI behavior, minimal contract tests, private remote and configured CI at foundation delivery |
 | 001A — Product Blueprint | Documentation artifact defined here; checkpoint acceptance/commit/push must be established in its handoff | 001 | Complete catalog, consistent architecture/roadmap/decisions, link and scope audits, local checks, verified private documentation commit/push |
 | 002 — First Vertical Slice | DELIVERED: bounded 002-A/B/C/D slice; candidate-scoped local/remote verification and private delivery in handoff | 001A | All 002-A/B/C/D exits; real task-to-candidate-to-evidence-to-inspection end-to-end tests and honest failure/unknown cases |
 | 003 — Temporal Knowledge & Memory | IN_PROGRESS: canonical history and first encrypted 003-A store | 002; privacy/storage/coverage decisions | Graph extraction/query/conflict/invalidation, memory supersession/time/staleness, retrieval/context and portable handoff correctness |
