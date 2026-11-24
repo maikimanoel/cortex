@@ -1,7 +1,7 @@
 //! Controlled preflight/journal cuts. No test starts or contacts a host manager.
 use super::*;
 use crate::{
-    domain_runtime::tests::fixture,
+    domain_runtime::{DomainRun, tests::fixture},
     native_execution::{backend::ExecutionObservation, transport::CapturedStreams},
 };
 use cortex_core::{
@@ -288,14 +288,17 @@ fn canonical_duplicate_reservation_cannot_reach_the_attempt_again() {
         let creation = store.admit(&key, request).unwrap();
         RawCopyP1Run::Observed {
             reservation: receipt,
-            lifecycle: Box::new(DomainRun {
-                creation: Some(creation),
-                binding: None,
-                release: None,
-                nonce: None,
-                report: None,
-                diagnostic: None,
-                recovery_only: false,
+            run: Box::new(ExecutableDomainRun {
+                domain: DomainRun {
+                    creation: Some(creation),
+                    binding: None,
+                    release: None,
+                    nonce: None,
+                    report: None,
+                    diagnostic: None,
+                    recovery_only: false,
+                },
+                execution: None,
             }),
             copy: RawCopyP1Observation::Unresolved,
         }
