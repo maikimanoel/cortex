@@ -15,6 +15,9 @@ pub mod artifact;
 pub mod domain_bootstrap;
 
 #[cfg(target_os = "linux")]
+pub mod domain_coordination;
+
+#[cfg(target_os = "linux")]
 mod domain_manager;
 #[cfg(target_os = "linux")]
 mod domain_runtime;

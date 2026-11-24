@@ -351,3 +351,19 @@ identity/predecessor correspondence, and uses one outer in-memory draft plus the
 existing reducer guards. It cannot dispatch or reserve durable resources. Later
 explicit ProgramStore admissions can commit a prefix; that prefix and any
 Indeterminate result must remain retained without automatic retry.
+
+On Linux, `cortex_harness::domain_coordination::admit_domain_reservations`
+executes an explicitly selected, finite batch of version-four reservation
+operations. Each input carries its original expected revision and scoped
+grant. The canonical store reloads under its lifecycle lock and applies
+the existing Core and Evidence checks for current dependencies, claim,
+candidate, package, authority and resource capacity. The caller selects
+which tasks to reconsider after a dependency release or resource change.
+The order is explicit and supplies no scheduler priority or aging policy.
+
+The result distinguishes new reservations, exact duplicates, governed
+holds and storage stops. A governed hold leaves other selected inputs
+eligible for their own check. A storage stop leaves the rest unattempted.
+The authoritative journal retains any committed prefix. A reservation is
+one lifecycle cut. Creation, binding, release, report and closure require
+their existing separate operations and proofs.

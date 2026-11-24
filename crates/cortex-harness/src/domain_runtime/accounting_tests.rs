@@ -87,7 +87,11 @@ fn check_debt(store: &ProgramStore, f: &DomainIntent) {
         Err(KernelError::Domain(DomainError::Debt(CPU)))
     ));
     assert!(k.domains().unwrap().domain(&f.id).is_none());
-    let refused = store.admit(&key(), reserve).unwrap_err();
+    let decisions =
+        admit_domain_reservations(store, &key(), vec![reserve], NonZeroUsize::MIN).unwrap();
+    let [ReservationDecision::Held(refused)] = decisions.as_slice() else {
+        panic!("dependent reservation did not hold: {decisions:?}");
+    };
     assert_eq!(refused.completion, Completion::Rejected);
     assert!(matches!(
         refused.error,
@@ -258,20 +262,28 @@ pub(super) fn exercise_settlement(
     let (one, two) = thread::scope(|scope| {
         let submit = |operation| {
             barrier.wait();
-            store.admit(&key(), operation)
+            admit_domain_reservations(store, &key(), vec![operation], NonZeroUsize::MIN)
+                .unwrap()
+                .pop()
+                .unwrap()
         };
         let one = scope.spawn(move || submit(valid));
         let two = scope.spawn(move || submit(stale));
         (one.join().unwrap(), two.join().unwrap())
     });
     let refusal = match (one, two) {
-        (Ok(receipt), Err(refused)) | (Err(refused), Ok(receipt)) => {
+        (ReservationDecision::Reserved(receipt), ReservationDecision::Held(refused))
+        | (ReservationDecision::Held(refused), ReservationDecision::Reserved(receipt)) => {
             assert!(!receipt.duplicate);
             refused
         }
         _ => panic!("exactly one new F reservation must commit"),
     };
     assert_eq!(refusal.completion, Completion::Rejected);
+    assert!(matches!(
+        refusal.error,
+        ProgramStoreError::Domain(KernelError::Core(cortex_core::program::ProgramError::Stale))
+    ));
     assert_eq!(load(store).revision(), k.revision() + 1);
     assert_eq!(
         load(store).domains().unwrap().consumed_or_reserved(CPU),

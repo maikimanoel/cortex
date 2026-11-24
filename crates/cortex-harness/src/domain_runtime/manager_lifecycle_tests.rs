@@ -3,8 +3,12 @@
 //! payload is activated; these tests do not establish host lifetime guarantees.
 use super::*;
 use crate::ServiceLimits;
+use crate::domain_coordination::{
+    ReservationBatchError, ReservationDecision, admit_domain_reservations,
+};
 use crate::native_execution::managed::{ManagerLifecycleReadback, ManagerObservationError};
 use cortex_core::program::scheduling::Resource;
+use std::num::NonZeroUsize;
 
 struct LifecycleManager {
     inner: FakeManager,
@@ -654,6 +658,36 @@ fn malformed_structured_stream_refuses_canonical_report_without_replay_or_neighb
 
 #[path = "accounting_tests.rs"]
 mod accounting;
+
+#[test]
+fn reservation_batch_stops_when_the_store_cannot_validate_inputs() {
+    let root = Temp::new();
+    let (store, intent, _) = stored(&root);
+    let before = store.load(&key(), Access::ReadOnly).unwrap();
+    let operation = fixture::domain_operation(
+        &before,
+        "unreadable-journal-reservation",
+        Command::Domain(Box::new(DomainEvent::Reserve {
+            intent,
+            at: before.domains().unwrap().last_tick(),
+        })),
+    );
+    let wrong_key = StoreKey::new(&[0x35; 32]).unwrap();
+    let decisions = admit_domain_reservations(
+        &store,
+        &wrong_key,
+        vec![operation.clone(), operation],
+        NonZeroUsize::new(2).unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(
+        decisions.as_slice(),
+        [ReservationDecision::Stopped(_)]
+    ));
+    let after = store.load(&key(), Access::ReadOnly).unwrap();
+    assert_eq!(after.operations().len(), before.operations().len());
+}
+
 #[test]
 fn source_graph_accepted_dependencies_do_not_settle_execution_debt() {
     source_graph_with_accounting(false);
@@ -713,6 +747,7 @@ fn source_graph_with_accounting(apply_accounting: bool) {
     fixture::release(&mut kernel, "DE");
     let b = fixture::setup(&mut kernel, "B");
     let e = fixture::setup(&mut kernel, "E");
+    let before_reservations = kernel.operations().len();
     for (name, intent) in [("graph-reserve-B", &b), ("graph-reserve-E", &e)] {
         fixture::event(
             &mut kernel,
@@ -730,9 +765,76 @@ fn source_graph_with_accounting(apply_accounting: bool) {
         ReadLimits::new(16000000, Duration::from_secs(5)).unwrap(),
     )
     .unwrap();
-    for op in kernel.operations() {
+    let (initial, reservations) = kernel.operations().split_at(before_reservations);
+    for op in initial {
         store.admit(&key(), op.clone()).unwrap();
     }
+    let only_b = NonZeroUsize::MIN;
+    assert!(matches!(
+        admit_domain_reservations(&store, &key(), reservations.to_vec(), only_b),
+        Err(ReservationBatchError::Limit)
+    ));
+    let mut non_reservation = reservations[1].clone();
+    non_reservation.command = Command::Domain(Box::new(DomainEvent::CreateRequested {
+        domain: e.id.clone(),
+        at: 1,
+    }));
+    let two = NonZeroUsize::new(2).unwrap();
+    assert!(matches!(
+        admit_domain_reservations(
+            &store,
+            &key(),
+            vec![reservations[0].clone(), non_reservation],
+            two,
+        ),
+        Err(ReservationBatchError::Command(1))
+    ));
+    let before = store.load(&key(), Access::ReadOnly).unwrap();
+    assert_eq!(before.operations().len(), before_reservations);
+    assert!(before.domains().unwrap().domains().is_empty());
+    // A wrong operational grant for one selected task cannot block an
+    // independent valid reservation at the same retained revision.
+    let mut wrong = reservations[0].clone();
+    let Command::Domain(event) = &mut wrong.command else {
+        unreachable!();
+    };
+    let DomainEvent::Reserve { intent, .. } = event.as_mut() else {
+        unreachable!();
+    };
+    intent.effect.grant = cortex_core::program::GrantId::new("missing-grant").unwrap();
+    let decisions = admit_domain_reservations(
+        &store,
+        &key(),
+        vec![wrong, reservations[0].clone(), reservations[1].clone()],
+        NonZeroUsize::new(3).unwrap(),
+    )
+    .unwrap();
+    let [
+        ReservationDecision::Held(failure),
+        ReservationDecision::Reserved(reserved_b),
+        ReservationDecision::Reserved(reserved_e),
+    ] = decisions.as_slice()
+    else {
+        panic!("wrong decisions: {decisions:?}");
+    };
+    assert!(matches!(
+        failure.error,
+        cortex_storage::program_store::ProgramStoreError::Domain(
+            cortex_evidence::program::KernelError::Operational(
+                cortex_core::program::operational::OperationalError::Program(
+                    cortex_core::program::ProgramError::Missing
+                )
+            )
+        )
+    ));
+    assert_eq!(reserved_b.ordinal, before.revision() + 1);
+    assert_eq!(reserved_e.ordinal, reserved_b.ordinal + 1);
+    let repeated = admit_domain_reservations(&store, &key(), reservations.to_vec(), two).unwrap();
+    assert!(matches!(
+        repeated.as_slice(),
+        [ReservationDecision::AlreadyRetained(b), ReservationDecision::AlreadyRetained(e)]
+            if b.ordinal == reserved_b.ordinal && e.ordinal == reserved_e.ordinal
+    ));
     let make_ids = |intent: &DomainIntent, label: &str| {
         let current = store.load(&key(), Access::ReadOnly).unwrap();
         DomainOperations {
@@ -866,19 +968,23 @@ fn source_graph_with_accounting(apply_accounting: bool) {
     }
     let current = store.load(&key(), Access::ReadOnly).unwrap();
     let revision = current.revision();
-    let refused = store
-        .admit(
-            &key(),
-            fixture::domain_operation(
-                &current,
-                "graph-reserve-F",
-                Command::Domain(Box::new(DomainEvent::Reserve {
-                    intent: f.clone(),
-                    at: current.domains().unwrap().last_tick(),
-                })),
-            ),
-        )
-        .unwrap_err();
+    let held = admit_domain_reservations(
+        &store,
+        &key(),
+        vec![fixture::domain_operation(
+            &current,
+            "graph-reserve-F",
+            Command::Domain(Box::new(DomainEvent::Reserve {
+                intent: f.clone(),
+                at: current.domains().unwrap().last_tick(),
+            })),
+        )],
+        NonZeroUsize::MIN,
+    )
+    .unwrap();
+    let [ReservationDecision::Held(refused)] = held.as_slice() else {
+        panic!("F cannot reserve while CPU debt is unresolved: {held:?}");
+    };
     // Accepted dependencies and fresh authority do not settle unknown cumulative
     // consumption. A larger fixture ceiling is not permission to erase debt.
     assert_eq!(format!("{:?}", refused.completion), "Rejected");
