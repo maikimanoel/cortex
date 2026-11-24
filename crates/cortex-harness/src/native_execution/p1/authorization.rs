@@ -1,4 +1,5 @@
 //! Exact, finite local trial admission over the selected protected trust path.
+use super::super::accounting::clock_namespace;
 use super::{
     P1Refusal, RawCopyP1Binding, live_budget,
     trust::{Role, TrialTrust, TrustedChannel},
@@ -20,7 +21,7 @@ use std::{
     cell::Cell,
     os::{fd::OwnedFd, unix::ffi::OsStrExt},
     sync::atomic::AtomicBool,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 /// Channels and fixed external limits for one raw-copy trial.
@@ -45,7 +46,9 @@ pub struct RawCopyP1Authority {
 pub struct RawCopyP1AuthorityScope {
     /// Exact Git tree reviewed independently for this trial.
     pub tree: CandidateId,
-    /// Original Linux CLOCK_MONOTONIC deadline in microseconds on this boot.
+    /// Exact time-namespace device and inode independently checked by the peers.
+    pub clock_namespace: (u64, u64),
+    /// Original Linux CLOCK_MONOTONIC deadline in that namespace, in microseconds.
     pub expires_before_micros: u64,
     /// Exact independent outer containment context to be checked by both peers.
     pub containment_sha256: [u8; 32],
@@ -61,6 +64,7 @@ pub(super) struct AuthorizedTrial<'a> {
     binding: &'a RawCopyP1Binding<'a>,
     cancel: &'a AtomicBool,
     expires_before_micros: u64,
+    clock_namespace: (u64, u64),
     context: [u8; 32],
     pending: Cell<Option<[u8; 32]>>,
 }
@@ -71,7 +75,20 @@ fn now_micros() -> Option<u64> {
     u64::try_from(now.tv_sec)
         .ok()?
         .checked_mul(1_000_000)?
-        .checked_add(u64::try_from(now.tv_nsec).ok()? / 1_000)
+        .checked_add(u64::try_from(now.tv_nsec).ok()?.div_ceil(1_000))
+}
+
+fn conservative_end(
+    anchor: Instant,
+    monotonic_micros: u64,
+    expires_before_micros: u64,
+) -> Option<Instant> {
+    let remaining = expires_before_micros.checked_sub(monotonic_micros)?;
+    let remaining = Duration::from_micros(remaining);
+    if remaining.is_zero() || remaining > super::MAX_CASE_INTERVAL {
+        return None;
+    }
+    anchor.checked_add(remaining)
 }
 
 fn hex(bytes: &[u8; 32]) -> String {
@@ -89,6 +106,14 @@ fn reference(value: &SourceReference) -> Value {
         SourceOrigin::ObservationReference(id) => json!(["observation", id.scope(), id.sequence()]),
     };
     json!([origin, value.source(), value.version()])
+}
+
+/// Observe the caller's Linux clock namespace device and inode.
+///
+/// Both separate peers must check their own namespace before relying on the
+/// shared absolute deadline. This is metadata, without authority or execution.
+pub fn raw_copy_clock_namespace() -> Option<(u64, u64)> {
+    clock_namespace()
 }
 
 /// Derive the pre-effect correspondence digest used by both peers.
@@ -140,6 +165,7 @@ pub fn raw_copy_authority_fingerprint(
         ],
         reference(binding.approval),
         reference(binding.observer),
+        scope.clock_namespace,
         scope.expires_before_micros,
         scope.containment_sha256,
         scope.stop_plan_sha256,
@@ -178,17 +204,18 @@ impl<'a> AuthorizedTrial<'a> {
     ) -> Result<Self, P1Refusal> {
         let scope = &authority.scope;
         let expires_before_micros = scope.expires_before_micros;
+        // Anchor before reading Linux monotonic time. Intervening scheduling
+        // can only shorten the mapping from the externally selected expiry.
+        let anchor = Instant::now();
         let now = now_micros().ok_or(P1Refusal::DeadlineOrCancellation)?;
-        let remaining = expires_before_micros
-            .checked_sub(now)
+        let approved_end = conservative_end(anchor, now, expires_before_micros)
             .ok_or(P1Refusal::DeadlineOrCancellation)?;
-        let local_remaining = live_budget(binding.deadline, cancel)?;
-        if remaining == 0
-            || remaining > super::MAX_CASE_INTERVAL.as_micros() as u64
-            || local_remaining.as_micros() > u128::from(remaining)
+        live_budget(binding.deadline, cancel)?;
+        if binding.deadline > approved_end
             || scope.tree.as_str().len() != binding.candidate.commit().as_str().len()
             || scope.containment_sha256 == [0; 32]
             || scope.stop_plan_sha256 == [0; 32]
+            || clock_namespace() != Some(scope.clock_namespace)
         {
             return Err(P1Refusal::Correspondence);
         }
@@ -209,6 +236,7 @@ impl<'a> AuthorizedTrial<'a> {
             binding,
             cancel,
             expires_before_micros,
+            clock_namespace: scope.clock_namespace,
             context,
             pending: Cell::new(None),
         })
@@ -240,12 +268,7 @@ impl<'a> AuthorizedTrial<'a> {
     }
 
     pub(super) fn check_live(&self, end: Instant) -> Result<(), DomainDiagnostic> {
-        live_budget(end, self.cancel).map_err(|_| failed(DomainCause::Deadline))?;
-        if end > self.binding.deadline
-            || now_micros().is_none_or(|now| now >= self.expires_before_micros)
-        {
-            return Err(failed(DomainCause::Deadline));
-        }
+        self.check_clock(end)?;
         self.trust
             .check_current()
             .map_err(|_| failed(DomainCause::Authority))?;
@@ -255,6 +278,19 @@ impl<'a> AuthorizedTrial<'a> {
         self.observer
             .check_no_revocation()
             .map_err(|_| failed(DomainCause::Authority))?;
+        self.check_clock(end)
+    }
+
+    fn check_clock(&self, end: Instant) -> Result<(), DomainDiagnostic> {
+        if clock_namespace() != Some(self.clock_namespace) {
+            return Err(failed(DomainCause::Authority));
+        }
+        live_budget(end, self.cancel).map_err(|_| failed(DomainCause::Deadline))?;
+        if end > self.binding.deadline
+            || now_micros().is_none_or(|now| now >= self.expires_before_micros)
+        {
+            return Err(failed(DomainCause::Deadline));
+        }
         Ok(())
     }
 
@@ -338,6 +374,23 @@ impl<'a> AuthorizedTrial<'a> {
             operation.expected,
             at,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_only_the_finite_absolute_interval_from_the_original_anchor() {
+        let anchor = Instant::now();
+        let proposed_end = anchor + Duration::from_micros(9);
+        let authorized_end = conservative_end(anchor, 101, 109).unwrap();
+        assert_eq!(authorized_end, anchor + Duration::from_micros(8));
+        assert!(proposed_end > authorized_end);
+        assert!(conservative_end(anchor, 109, 109).is_none());
+        assert!(conservative_end(anchor, 110, 109).is_none());
+        assert!(conservative_end(anchor, 100, 60_000_101).is_none());
     }
 }
 
