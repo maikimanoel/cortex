@@ -28,13 +28,13 @@ use cortex_evidence::program::{Command, Operation};
 use cortex_harness::{
     CaptureIds, HarnessError, PinnedFixture, RunResult,
     artifact::{ArtifactError, CapturedArtifact, capture_artifact},
-    execute_fixture,
+    execute_fixture, execute_fixture_before,
 };
 use cortex_storage::{
     history_store::{Access, StoreKey},
     program_store::{ProgramProfile, ProgramStore, ProgramStoreError},
 };
-use std::{error::Error, fmt, path::Path, sync::atomic::AtomicBool};
+use std::{error::Error, fmt, path::Path, sync::atomic::AtomicBool, time::Instant};
 
 /// Refusal from the selected composition or an existing owner.
 #[derive(Debug)]
@@ -169,7 +169,17 @@ pub fn run_prepared_fixture(
     request: PreparedFixtureRun<'_>,
     cancel: &AtomicBool,
 ) -> Result<FixtureRun, ExecutionError> {
-    run_prepared_fixture_inner(store, key, request, None, cancel)
+    run_prepared_fixture_inner(store, key, request, None, None, cancel)
+}
+
+pub(crate) fn run_prepared_fixture_before(
+    store: &ProgramStore,
+    key: &StoreKey,
+    request: PreparedFixtureRun<'_>,
+    end: Instant,
+    cancel: &AtomicBool,
+) -> Result<FixtureRun, ExecutionError> {
+    run_prepared_fixture_inner(store, key, request, None, Some(end), cancel)
 }
 
 fn run_prepared_fixture_inner(
@@ -177,6 +187,7 @@ fn run_prepared_fixture_inner(
     key: &StoreKey,
     request: PreparedFixtureRun<'_>,
     attempt_workspace: Option<&FixtureWorkspace>,
+    end: Option<Instant>,
     cancel: &AtomicBool,
 ) -> Result<FixtureRun, ExecutionError> {
     if store.profile() != ProgramProfile::SupervisedFixturesV3
@@ -260,14 +271,25 @@ fn run_prepared_fixture_inner(
         attempt.check_empty()?;
     }
     drop(kernel);
-    let run = execute_fixture(
-        store,
-        key,
-        request.dispatch,
-        request.captures,
-        request.pin,
-        cancel,
-    )
+    let run = match end {
+        Some(end) => execute_fixture_before(
+            store,
+            key,
+            request.dispatch,
+            request.captures,
+            request.pin,
+            end,
+            cancel,
+        ),
+        None => execute_fixture(
+            store,
+            key,
+            request.dispatch,
+            request.captures,
+            request.pin,
+            cancel,
+        ),
+    }
     .map_err(ExecutionError::Harness)?;
     Ok(FixtureRun { workspace, run })
 }

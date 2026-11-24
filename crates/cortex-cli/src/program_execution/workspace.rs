@@ -266,7 +266,7 @@ pub fn run_workspace_fixture(
     request: PreparedFixtureRun<'_>,
     cancel: &AtomicBool,
 ) -> Result<WorkspaceFixtureRun, ExecutionError> {
-    let run = run_prepared_fixture_inner(store, key, request, Some(&workspace), cancel)?;
+    let run = run_prepared_fixture_inner(store, key, request, Some(&workspace), None, cancel)?;
     Ok(WorkspaceFixtureRun { workspace, run })
 }
 

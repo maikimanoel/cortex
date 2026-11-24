@@ -1054,6 +1054,7 @@ struct ReceiptWriter<'a> {
     attempts: usize,
     stale: Vec<Operation>,
     reconciled: Vec<ReconciledReceipt>,
+    cut: Option<Instant>,
 }
 impl ReceiptWriter<'_> {
     fn record(
@@ -1071,8 +1072,20 @@ impl ReceiptWriter<'_> {
             attempts,
             stale,
             reconciled,
+            cut,
         } = self;
+        let check_time = || {
+            if fits_store_cut(*cut, store) {
+                Ok(())
+            } else {
+                Err(AdmissionFailure {
+                    completion: Completion::Rejected,
+                    error: ProgramStoreError::Deadline,
+                })
+            }
+        };
         for _ in 0..*attempts {
+            check_time()?;
             let kernel = store
                 .load(key, Access::ReadOnly)
                 .map_err(|error| AdmissionFailure {
@@ -1092,6 +1105,7 @@ impl ReceiptWriter<'_> {
                     },
                 )),
             };
+            check_time()?;
             match store.admit(key, input.clone()) {
                 Ok(receipt) => return Ok(receipt),
                 Err(failure) => {
@@ -1099,8 +1113,9 @@ impl ReceiptWriter<'_> {
                         if observation.completion == ProcessCompletion::IdentityVerified {
                             return Err(failure);
                         }
-                        if let Ok(Reconciliation::Present(receipt)) =
-                            store.reconcile(key, kernel.initial(), &input, Access::Recover)
+                        if fits_store_cut(*cut, store)
+                            && let Ok(Reconciliation::Present(receipt)) =
+                                store.reconcile(key, kernel.initial(), &input, Access::Recover)
                         {
                             reconciled.push(ReconciledReceipt {
                                 operation: input,
@@ -1133,6 +1148,34 @@ impl ReceiptWriter<'_> {
     }
 }
 
+fn fits_store_cut(cut: Option<Instant>, store: &ProgramStore) -> bool {
+    cut.is_none_or(|cut| {
+        cut.checked_duration_since(Instant::now())
+            .is_some_and(|remaining| remaining > store.read_limits().timeout())
+    })
+}
+
+#[derive(Clone, Copy)]
+struct FixtureCut<'a> {
+    cancel: &'a AtomicBool,
+    end: Option<Instant>,
+}
+
+impl FixtureCut<'_> {
+    fn permits(self, start: Instant, limits: &ProcessLimits) -> bool {
+        !self.cancel.load(Ordering::Acquire)
+            && self.end.is_none_or(|end| {
+                Instant::now() < end
+                    && start
+                        .checked_add(Duration::from_millis(limits.wall_ms))
+                        .and_then(|run_end| {
+                            run_end.checked_add(Duration::from_millis(limits.cleanup_ms))
+                        })
+                        .is_some_and(|cleanup_end| cleanup_end <= end)
+            })
+    }
+}
+
 fn launch_after_commit(
     prepared: &PinnedFixture,
     current: &CoordinationKernel,
@@ -1140,9 +1183,9 @@ fn launch_after_commit(
     scope: &EffectScope,
     at: u64,
     start: Instant,
-    cancel: &AtomicBool,
+    cut: FixtureCut<'_>,
 ) -> Result<Option<Running>, SpawnFailure> {
-    if cancel.load(Ordering::Acquire) || prepared.check(current, effect).is_err() {
+    if !cut.permits(start, &prepared.spec.limits) || prepared.check(current, effect).is_err() {
         return Ok(None);
     }
     let Some(tick) = at.checked_add(elapsed(start)) else {
@@ -1159,7 +1202,7 @@ fn launch_after_commit(
             .transport
             .as_ref()
             .is_some_and(|t| elapsed(start) >= t.startup_ms)
-        || cancel.load(Ordering::Acquire)
+        || !cut.permits(start, &prepared.spec.limits)
     {
         // Every branch precedes spawn, so absence is observed rather than inferred
         // from a timeout or an ambiguous operating-system spawn error.
@@ -1167,7 +1210,7 @@ fn launch_after_commit(
     }
     spawn_checked(prepared, start, || {
         let ms = elapsed(start);
-        !cancel.load(Ordering::Acquire)
+        cut.permits(start, &prepared.spec.limits)
             && ms < prepared.spec.limits.wall_ms
             && prepared
                 .spec
@@ -1209,7 +1252,46 @@ pub fn execute_fixture(
     prepared: &PinnedFixture,
     cancel: &AtomicBool,
 ) -> Result<RunResult, HarnessError> {
-    execute_fixture_inner(store, key, dispatch, ids, None, prepared, cancel)
+    execute_fixture_inner(
+        store,
+        key,
+        dispatch,
+        ids,
+        None,
+        prepared,
+        FixtureCut { cancel, end: None },
+    )
+}
+
+/// Run the cooperative direct-child profile within an inherited monotonic cut.
+/// The complete process and cleanup envelope must fit before dispatch and
+/// at spawn. Existing filesystem and store timeouts remain cooperative.
+/// If time for publication is absent, the original observations and durable
+/// dispatch uncertainty remain available to the caller for reconciliation.
+pub fn execute_fixture_before(
+    store: &ProgramStore,
+    key: &StoreKey,
+    dispatch: Operation,
+    ids: CaptureIds,
+    prepared: &PinnedFixture,
+    end: Instant,
+    cancel: &AtomicBool,
+) -> Result<RunResult, HarnessError> {
+    if prepared.spec.containment.is_some() {
+        return Err(HarnessError::Contract);
+    }
+    execute_fixture_inner(
+        store,
+        key,
+        dispatch,
+        ids,
+        None,
+        prepared,
+        FixtureCut {
+            cancel,
+            end: Some(end),
+        },
+    )
 }
 
 /// Execute the explicitly selected identity-checkpoint contract. The new IDs
@@ -1231,7 +1313,7 @@ pub fn execute_fixture_with_identity_checkpoint(
         ids,
         Some(identity_ids),
         prepared,
-        cancel,
+        FixtureCut { cancel, end: None },
     )
 }
 
@@ -1242,7 +1324,7 @@ fn execute_fixture_inner(
     ids: CaptureIds,
     identity_ids: Option<IdentityCaptureIds>,
     prepared: &PinnedFixture,
-    cancel: &AtomicBool,
+    cut: FixtureCut<'_>,
 ) -> Result<RunResult, HarnessError> {
     if prepared.spec.identity_checkpoint.is_some() != identity_ids.is_some() {
         return Err(HarnessError::Contract);
@@ -1256,6 +1338,9 @@ fn execute_fixture_inner(
         },
         _ => return Err(HarnessError::Contract),
     };
+    if !fits_store_cut(cut.end, store) {
+        return Err(HarnessError::Limits);
+    }
     let kernel = store
         .load(key, Access::ReadOnly)
         .map_err(HarnessError::Store)?;
@@ -1281,6 +1366,9 @@ fn execute_fixture_inner(
     // Historical duplicate reconciliation does not depend on a still-existing
     // executable or an otherwise-current package; it can never relaunch.
     if kernel.operations().iter().any(|o| o.id == dispatch.id) {
+        if !fits_store_cut(cut.end, store) {
+            return Err(HarnessError::Limits);
+        }
         let (receipt, _) = store
             .dispatch_fixture(key, dispatch, |_| ())
             .map_err(HarnessError::Admission)?;
@@ -1329,9 +1417,14 @@ fn execute_fixture_inner(
         return Err(HarnessError::Limits);
     }
     let start = Instant::now();
+    if cut.end.is_some()
+        && (!cut.permits(start, &prepared.spec.limits) || !fits_store_cut(cut.end, store))
+    {
+        return Err(HarnessError::Limits);
+    }
     let (receipt, launched) = store
         .dispatch_fixture(key, dispatch.clone(), |current| {
-            launch_after_commit(prepared, current, &effect, &scope, at, start, cancel)
+            launch_after_commit(prepared, current, &effect, &scope, at, start, cut)
         })
         .map_err(HarnessError::Admission)?;
     let Some(launched) = launched else {
@@ -1355,7 +1448,9 @@ fn execute_fixture_inner(
         attempts: ids.admission_attempts,
         stale: vec![],
         reconciled: vec![],
+        cut: cut.end,
     };
+    let cancel = cut.cancel;
     let mut started = None;
     let mut identity_checkpoint = None;
     let mut recording_failure = None;

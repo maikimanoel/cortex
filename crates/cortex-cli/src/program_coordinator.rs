@@ -6,7 +6,9 @@
 //! only owner of effects and conflict, replay and recovery semantics.
 
 use crate::{
-    program_execution::{ExecutionError, FixtureRun, PreparedFixtureRun, run_prepared_fixture},
+    program_execution::{
+        ExecutionError, FixtureRun, PreparedFixtureRun, run_prepared_fixture_before,
+    },
     program_preparation::{PreparationError, prepare_executor_input},
 };
 use cortex_core::{
@@ -229,7 +231,7 @@ pub fn run_fixture_turn(
     let mut tasks = BTreeMap::new();
     if work.len() > kernel.state().definition().limits().entries
         || work.iter().any(|job| {
-            tasks.insert(&job.proposal.task, job).is_some()
+            tasks.insert(job.proposal.task.as_str(), job).is_some()
                 || job.operation_ids().iter().any(|id| !ids.insert(*id))
         })
     {
@@ -252,7 +254,7 @@ pub fn run_fixture_turn(
     for job in work {
         if affected
             .as_ref()
-            .is_some_and(|tasks| !tasks.contains(&job.proposal.task))
+            .is_some_and(|tasks| !tasks.contains(job.proposal.task.as_str()))
         {
             continue;
         }
@@ -274,7 +276,7 @@ pub fn run_fixture_turn(
         if !fits(deadline, wait, cancel) {
             return Err(FixtureTurnError::Budget);
         }
-        let job = tasks[&decision.task];
+        let job = tasks[decision.task.as_str()];
         // The batch preview provides ordering. A refused neighbor cannot
         // consume capacity in a turn which actually selects at most one.
         let own = if decision.proposed {
@@ -323,7 +325,7 @@ fn affected_tasks(
     kernel: &CoordinationKernel,
     store: StoreId,
     since: Option<&FixtureCursor>,
-) -> Result<Option<BTreeSet<TaskId>>, FixtureTurnError> {
+) -> Result<Option<BTreeSet<String>>, FixtureTurnError> {
     let Some(since) = since else { return Ok(None) };
     let index = usize::try_from(since.revision).map_err(|_| FixtureTurnError::Cursor)?;
     let prefix = kernel
@@ -343,7 +345,7 @@ fn affected_tasks(
                     .iter()
                     .any(|d| d.operation == op.id && d.released) =>
             {
-                affected.insert(input.contract.scope().consumer().task().clone());
+                affected.insert(input.contract.scope().consumer().task().as_str().to_owned());
             }
             // Failed releases and validity observations can invalidate other
             // consumers. A shared resource or policy event can affect all.
@@ -526,7 +528,7 @@ fn advance(
         return FixtureProgress::Budget;
     }
     let dispatch = staged.dispatch;
-    match run_prepared_fixture(
+    match run_prepared_fixture_before(
         store,
         key,
         PreparedFixtureRun {
@@ -536,6 +538,7 @@ fn advance(
             captures: job.captures.clone(),
             workspace_observation: job.workspace_observation.clone(),
         },
+        deadline,
         cancel,
     ) {
         Ok(run) => FixtureProgress::Observed(Box::new(run)),

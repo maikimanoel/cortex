@@ -1310,7 +1310,10 @@ fn a_deadline_consumed_before_the_post_commit_launch_boundary_starts_no_child() 
         &f.scope,
         3,
         old,
-        &AtomicBool::new(false),
+        FixtureCut {
+            cancel: &AtomicBool::new(false),
+            end: None,
+        },
     )
     .unwrap();
     assert!(outcome.is_none());
@@ -1319,6 +1322,30 @@ fn a_deadline_consumed_before_the_post_commit_launch_boundary_starts_no_child() 
         kernel.fixture_effects().effects()[0].status,
         cortex_core::program::operational::EffectStatus::DispatchUncertain
     );
+}
+
+#[test]
+fn inherited_cut_refuses_an_envelope_that_cannot_fit_before_dispatch() {
+    let f = durable("count");
+    let before = f.store.load(&f.key, Access::ReadOnly).unwrap().revision();
+    let end = Instant::now() + Duration::from_millis(f.pin.spec.limits.wall_ms);
+    assert!(matches!(
+        execute_fixture_before(
+            &f.store,
+            &f.key,
+            f.dispatch,
+            ids(),
+            &f.pin,
+            end,
+            &AtomicBool::new(false)
+        ),
+        Err(HarnessError::Limits)
+    ));
+    assert_eq!(
+        f.store.load(&f.key, Access::ReadOnly).unwrap().revision(),
+        before
+    );
+    assert!(!f.root.0.join("launch-count").exists());
 }
 
 #[test]
@@ -1346,7 +1373,10 @@ fn consumed_startup_deadline_does_not_borrow_the_remaining_wall_budget() {
         &f.scope,
         3,
         old,
-        &AtomicBool::new(false),
+        FixtureCut {
+            cancel: &AtomicBool::new(false),
+            end: None,
+        },
     )
     .unwrap();
     assert!(outcome.is_none());

@@ -43,7 +43,8 @@ mod supervisor;
 #[cfg(target_os = "linux")]
 pub use supervisor::{
     CaptureIds, HarnessError, IdentityCaptureIds, PinnedFixture, ReconciledReceipt, RunResult,
-    execute_fixture, execute_fixture_with_identity_checkpoint, inspect_fixture,
+    execute_fixture, execute_fixture_before, execute_fixture_with_identity_checkpoint,
+    inspect_fixture,
 };
 
 #[cfg(target_os = "linux")]
