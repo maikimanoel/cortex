@@ -6,7 +6,7 @@
 //! credential alone would not detect passing the peer descriptor to a new UID.
 use rustix::{
     event::{PollFd, PollFlags, Timespec, poll},
-    fs::{Mode, OFlags, ResolveFlags, open, openat2},
+    fs::{Mode, OFlags, PROC_SUPER_MAGIC, ResolveFlags, fstatfs, open, openat2, readlinkat},
     io::{FdFlags, fcntl_getfd},
     net::{
         self, AddressFamily, RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, ReturnFlags,
@@ -76,6 +76,56 @@ fn protected_dir(parent: &File, component: &str) -> io::Result<File> {
     Ok(dir)
 }
 
+fn full_uid_map(bytes: &[u8]) -> bool {
+    if bytes.len() > PROFILE_BOUND {
+        return false;
+    }
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+    text.split_ascii_whitespace().eq(["0", "0", "4294967295"])
+}
+
+fn check_unremapped_uid_namespace(root: &File) -> io::Result<()> {
+    let proc = File::from(openat2(
+        root,
+        "proc",
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::DIRECTORY,
+        Mode::empty(),
+        ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_MAGICLINKS,
+    )?);
+    let pid = rustix::process::getpid().as_raw_pid().to_string();
+    if fstatfs(&proc)?.f_type != PROC_SUPER_MAGIC
+        || readlinkat(&proc, "self", Vec::new())?.as_bytes() != pid.as_bytes()
+    {
+        return Err(denied());
+    }
+    let same_proc = ResolveFlags::BENEATH
+        | ResolveFlags::NO_SYMLINKS
+        | ResolveFlags::NO_MAGICLINKS
+        | ResolveFlags::NO_XDEV;
+    let pid_dir = File::from(openat2(
+        &proc,
+        pid.as_str(),
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::DIRECTORY,
+        Mode::empty(),
+        same_proc,
+    )?);
+    let map = File::from(openat2(
+        &pid_dir,
+        "uid_map",
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NONBLOCK,
+        Mode::empty(),
+        same_proc,
+    )?);
+    let mut bytes = Vec::with_capacity(PROFILE_BOUND + 1);
+    map.take(PROFILE_BOUND as u64 + 1).read_to_end(&mut bytes)?;
+    if !full_uid_map(&bytes) {
+        return Err(denied());
+    }
+    Ok(())
+}
+
 fn principals(bytes: &[u8], runner: u32) -> io::Result<Principals> {
     let text = std::str::from_utf8(bytes).map_err(|_| denied())?;
     let ids: Vec<_> = text.split_ascii_whitespace().collect();
@@ -114,6 +164,7 @@ impl TrialTrust {
         if metadata.uid() != 0 || metadata.mode() & 0o022 != 0 {
             return Err(denied());
         }
+        check_unremapped_uid_namespace(&root)?;
         let cortex = protected_dir(&protected_dir(&root, "etc")?, "cortex")?;
         let profile = File::from(openat2(
             &cortex,
@@ -308,6 +359,20 @@ mod tests {
             b"cortex-p1-trust-v1 22 21 extra",
         ] {
             assert!(principals(invalid, 20).is_err());
+        }
+    }
+
+    #[test]
+    fn remapped_partial_and_extra_user_namespace_ranges_are_rejected() {
+        assert!(full_uid_map(b"         0          0 4294967295\n"));
+        for value in [
+            b"0 1000 1\n".as_slice(),
+            b"0 0 1\n1 1 4294967294\n",
+            b"0 0 4294967295\n1000 1000 1\n",
+            b"0 0 4294967296\n",
+            b"1 1 4294967294\n",
+        ] {
+            assert!(!full_uid_map(value));
         }
     }
 
