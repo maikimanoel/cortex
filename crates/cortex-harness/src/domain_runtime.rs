@@ -131,6 +131,24 @@ pub(crate) trait DomainTrialGuard {
     ) -> Result<(), DomainDiagnostic>;
 }
 
+fn trial_store_budget(
+    store: &ProgramStore,
+    trial: Option<&dyn DomainTrialGuard>,
+    end: Instant,
+) -> Result<(), DomainDiagnostic> {
+    if trial.is_some()
+        && end
+            .checked_duration_since(Instant::now())
+            .is_none_or(|remaining| remaining <= store.read_limits().timeout())
+    {
+        return Err(issue(
+            DomainPhaseDiagnostic::Publication,
+            DomainCause::Deadline,
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) trait DomainManager {
     fn check_context(
         &self,
@@ -480,6 +498,7 @@ fn prepare_with_trial<M: DomainManager>(
     } = request;
     let mut run = DomainRun::empty();
     let attempt = || -> Result<Option<PreparedNonceDomain>, DomainDiagnostic> {
+        trial_store_budget(store, trial, end)?;
         if !token(nonce) {
             return Err(issue(
                 DomainPhaseDiagnostic::Preparation,
@@ -515,6 +534,7 @@ fn prepare_with_trial<M: DomainManager>(
                 end,
             )?;
         }
+        trial_store_budget(store, trial, end)?;
         let (creation, created) = store
             .dispatch_domain(key, create, |k| {
                 let at = current(k, ids, start, end, cancel)?;
@@ -537,6 +557,7 @@ fn prepare_with_trial<M: DomainManager>(
         };
         let listener = created?;
         let mut channel = loop {
+            trial_store_budget(store, trial, end)?;
             current(
                 &store
                     .load(key, Access::ReadOnly)
@@ -589,6 +610,7 @@ fn prepare_with_trial<M: DomainManager>(
             crate::native_linux::NativeReadiness::observed(policy, &actual.identity.boot)
         });
         let observation = binding_observation(&actual, &domain.intent, &ids.basis)?;
+        trial_store_budget(store, trial, end)?;
         let kernel = store
             .load(key, Access::ReadOnly)
             .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))?;
@@ -603,6 +625,7 @@ fn prepare_with_trial<M: DomainManager>(
                 at,
             },
         );
+        trial_store_budget(store, trial, end)?;
         let binding = store
             .admit(key, bound)
             .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))?;
@@ -661,6 +684,7 @@ fn release_with_trial<M: DomainManager>(
             ));
         }
         let ids = &prepared.ids;
+        trial_store_budget(store, trial, prepared.end)?;
         let kernel = store
             .load(key, Access::ReadOnly)
             .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))?;
@@ -703,6 +727,7 @@ fn release_with_trial<M: DomainManager>(
                 prepared.end,
             )?;
         }
+        trial_store_budget(store, trial, prepared.end)?;
         let (receipt, released) = store
             .dispatch_domain(key, release, |k| {
                 let at = current(k, ids, prepared.start, prepared.end, cancel)?;
@@ -769,6 +794,7 @@ fn release_with_trial<M: DomainManager>(
         let mut next_check = Instant::now();
         let mut authority = || {
             if Instant::now() >= next_check {
+                trial_store_budget(store, trial, prepared.end)?;
                 let fresh = store
                     .load(key, Access::ReadOnly)
                     .map_err(|_| issue(DomainPhaseDiagnostic::Release, DomainCause::Journal))?;
@@ -793,6 +819,7 @@ fn release_with_trial<M: DomainManager>(
         if manager.is_nonce() {
             run.nonce = Some(prepared.nonce.clone());
         }
+        trial_store_budget(store, trial, prepared.end)?;
         let kernel = store
             .load(key, Access::ReadOnly)
             .map_err(|_| issue(DomainPhaseDiagnostic::Publication, DomainCause::Journal))?;
@@ -816,6 +843,7 @@ fn release_with_trial<M: DomainManager>(
                 basis: ids.basis.clone(),
             },
         );
+        trial_store_budget(store, trial, prepared.end)?;
         run.report = Some(
             store
                 .admit(key, report)
@@ -1341,13 +1369,15 @@ pub(crate) fn prepare_managed_executable_domain_until(
     let end = start
         .checked_add(Duration::from_millis(backend.wall_ms()))
         .map(|end| limit.map_or(end, |limit| end.min(limit)))
-        .filter(|end| *end > start);
+        .filter(|end| *end > start && trial_store_budget(store, trial, *end).is_ok());
     let value = backend.digest().to_owned();
-    let endpoint = store
-        .load(key, Access::ReadOnly)
-        .ok()
-        .and_then(|k| record(&k, &ids.domain).ok())
-        .and_then(|r| backend.endpoint(&r.intent.request).ok());
+    let endpoint = end.and_then(|_| {
+        store
+            .load(key, Access::ReadOnly)
+            .ok()
+            .and_then(|k| record(&k, &ids.domain).ok())
+            .and_then(|r| backend.endpoint(&r.intent.request).ok())
+    });
     match (end, endpoint) {
         (Some(end), Some(endpoint)) => prepare_with_trial(
             store,
