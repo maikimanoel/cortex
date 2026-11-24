@@ -439,5 +439,33 @@ fn coordinator_retains_pre_dispatch_prefix_and_reopen_never_launches_it() {
     assert_eq!(snapshot(&c.state), current);
     assert!(!c.output.join("launched-A").exists());
     let slot = c.output.join(jobs[0].effect.as_str());
+    assert_eq!(fs::read_dir(&slot).unwrap().count(), 0);
+    effect(
+        &c,
+        &reopened,
+        "cancel-retained-coordinator-prefix",
+        EffectEvent::Cancel {
+            effect: jobs[0].effect.clone(),
+            scope: record.intent.scope.clone(),
+            at: saved.fixture_effects().last_tick(),
+            basis: source("operator-cancels-pre-dispatch-prefix"),
+        },
+    );
+    let cancelled = load(&c, &reopened);
+    let record = &cancelled.fixture_effects().effects()[0];
+    assert_eq!(record.status, EffectStatus::CancelledBeforeDispatch);
+    assert!(record.dispatch_at.is_none() && record.process_observations.is_empty());
+    let unchanged = snapshot(&c.state);
+    let reconsidered = run_fixture_turn(
+        &reopened,
+        &c.key,
+        &jobs,
+        Some(&again.cursor),
+        Instant::now() + Duration::from_secs(180),
+        &cancel,
+    )
+    .unwrap();
+    assert!(reconsidered.progress.is_none() && reconsidered.receipts.is_empty());
+    assert_eq!(snapshot(&c.state), unchanged);
     assert_eq!(fs::read_dir(slot).unwrap().count(), 0);
 }

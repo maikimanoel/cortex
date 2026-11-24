@@ -493,6 +493,7 @@ fn ordinary_fixture_reserve_late_ack_requires_exact_readback() {
         .unwrap_err();
     assert_eq!(failure.completion, Completion::Indeterminate);
     assert!(matches!(failure.error, ProgramStoreError::Deadline));
+    eprintln!("Synthetic encrypted-store postcommit fault: {diagnostics:?}");
     assert!(stages(&diagnostics).contains(&AdmissionStage::CommitAcknowledged));
     let reopened = ProgramStore::open(&f.store(), &key(), Access::ReadOnly, limits()).unwrap();
     let after = reopened.load(&key(), Access::ReadOnly).unwrap();

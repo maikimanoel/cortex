@@ -28,7 +28,7 @@ pub(super) enum UnconfirmedAdmission {
     Reservation {
         original: AdmissionFailure,
         receipt: AdmissionReceipt,
-        current_read: Result<bool, ProgramStoreError>,
+        current_read: Result<bool, Box<ProgramStoreError>>,
     },
 }
 
@@ -179,7 +179,7 @@ pub(super) fn confirm_synthetic_reservation(
     Err(UnconfirmedAdmission::Reservation {
         original,
         receipt,
-        current_read,
+        current_read: current_read.map_err(Box::new),
     })
 }
 
