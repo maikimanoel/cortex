@@ -7,8 +7,8 @@ mod fixture;
 use cortex_cli::{
     inspect_candidate,
     program_execution::{
-        IntegrationConstituent, IntegrationError, IntegrationOracle, IntegrationRequest,
-        inspect_integrated_candidate,
+        IntegrationConstituent, IntegrationError, IntegrationObservationRequest, IntegrationOracle,
+        IntegrationRequest, inspect_integrated_candidate, observe_integrated_candidate,
     },
 };
 use cortex_core::{
@@ -337,6 +337,60 @@ fn separate_committed_candidate_requires_both_current_worker_releases_and_its_ow
             revision
         );
 
+        let observation_id = ObservationId::new("integration-comparison", 1).unwrap();
+        let mut unauthorized = fixture::grant(1, "integration-reviewer");
+        unauthorized.tasks.retain(|member| member != &f);
+        assert!(matches!(
+            observe_integrated_candidate(
+                &store,
+                &key,
+                request(revision, false, 100),
+                IntegrationObservationRequest {
+                    operation: OperationId::new("integration-unscoped").unwrap(),
+                    review: unauthorized,
+                    observation: observation_id.clone(),
+                }
+            ),
+            Err(IntegrationError::Authority)
+        ));
+        let observed = observe_integrated_candidate(
+            &store,
+            &key,
+            request(revision, false, 100),
+            IntegrationObservationRequest {
+                operation: OperationId::new("integration-observation").unwrap(),
+                review: fixture::grant(1, "integration-reviewer"),
+                observation: observation_id.clone(),
+            },
+        )
+        .unwrap();
+        assert_eq!(observed.inspection.output_matches, succeeds);
+        assert_eq!(observed.receipt.ordinal, revision + 1);
+        let replayed = store.load(&key, Access::ReadOnly).unwrap();
+        let record = replayed
+            .records()
+            .iter()
+            .find(|record| record.observation().id() == &observation_id)
+            .unwrap();
+        assert_eq!(
+            record.observation().subject().contract().candidate(),
+            &integrated
+        );
+        assert_eq!(
+            *record.observation().kind(),
+            cortex_evidence::unified::ObservationKind::Inference
+        );
+        assert!(
+            record
+                .observation()
+                .profile()
+                .provenance()
+                .configuration()
+                .contains("expected-output=")
+        );
+        assert!(record.assessment().is_none());
+        draft.admit(observed.operation).unwrap();
+
         let invalidation = operation(
             &draft,
             "invalidate-BF",
@@ -347,7 +401,7 @@ fn separate_committed_candidate_requires_both_current_worker_releases_and_its_ow
         );
         store.admit(&key, invalidation).unwrap();
         assert!(matches!(
-            inspect_integrated_candidate(&store, &key, request(revision + 1, false, 100)),
+            inspect_integrated_candidate(&store, &key, request(revision + 2, false, 100)),
             Err(IntegrationError::Release)
         ));
     }
