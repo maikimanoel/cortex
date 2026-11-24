@@ -75,7 +75,7 @@ fn now_micros() -> Option<u64> {
     u64::try_from(now.tv_sec)
         .ok()?
         .checked_mul(1_000_000)?
-        .checked_add(u64::try_from(now.tv_nsec).ok()? / 1_000)
+        .checked_add(u64::try_from(now.tv_nsec).ok()?.div_ceil(1_000))
 }
 
 fn conservative_end(
@@ -282,10 +282,12 @@ impl<'a> AuthorizedTrial<'a> {
     }
 
     fn check_clock(&self, end: Instant) -> Result<(), DomainDiagnostic> {
+        if clock_namespace() != Some(self.clock_namespace) {
+            return Err(failed(DomainCause::Authority));
+        }
         live_budget(end, self.cancel).map_err(|_| failed(DomainCause::Deadline))?;
         if end > self.binding.deadline
             || now_micros().is_none_or(|now| now >= self.expires_before_micros)
-            || clock_namespace() != Some(self.clock_namespace)
         {
             return Err(failed(DomainCause::Deadline));
         }
