@@ -160,3 +160,30 @@ before dispatch. Controller build/inspection helpers are distinct from the two
 audited fixture executors, which invoke no tools or descendants. All actual
 checks require candidate-scoped execution evidence; this source is not a test-run
 record, live evaluation, host qualification or protected integration.
+
+## Prepared dispatch and current artifact capture
+
+The Linux library consumers `cortex_cli::program_execution::run_prepared_fixture`
+and `capture_fixture_output` exercise the same cooperative format-3 profile.
+The caller retains the canonical preparation, commits its exact operation
+and selects the trusted executable pin and fresh dispatch operation. The
+consumer compares the retained preparation and package bytes and obtains a
+separate current Git binding before handing dispatch to Harness. Harness and
+ProgramStore recheck the package, process spec and authority at the locked
+launch cut. The process result retains the original receipts and uncertainty.
+Git correspondence requires an unchanged cooperative workspace between
+observation and launch. This profile establishes no hostile filesystem isolation.
+
+Artifact capture takes the exact declared producer role, an explicit protected
+path and an independently expected digest. It requires a current Git binding
+and the canonical retained process observation and checks for a journal revision
+change across capture. The selected file association is a caller assertion.
+An equal preexisting file could have the same digest. Actual authorship remains
+unestablished. The independent literal oracle and Evidence decision remain
+separate, including for the terminal result, which has no outgoing graph edge.
+
+The selected Codex CLI 0.167.0 transport inspection maps the complete prepared
+bytes to the advertised stdin and JSON-lines invocation shape. Every inspection
+retains a typed live-provider hold. The observed installation exceeds the existing
+program binary byte envelope. Argument advertisement and a synthetic transport
+test provide no installed behavior, credential isolation or qualified controls.

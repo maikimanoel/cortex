@@ -256,28 +256,33 @@ pub struct FixtureArtifactRequest<'a> {
     pub additional_sources: &'a [RepositoryIdentity],
     /// Positive capture bound within program limits.
     pub max_bytes: usize,
-    /// Exact independently expected digest, when known.
-    pub expected_sha256: Option<&'a str>,
+    /// Expected SHA-256 from an independent oracle selected by the caller.
+    pub expected_sha256: &'a str,
     /// ID of a new bounded Git observation at the capture boundary.
     pub workspace_observation: ObservationId,
 }
 
 /// Captured bytes and their distinct canonical and workspace correspondences.
 ///
-/// This read-only result does not interpret a child's claims, assess semantics,
-/// or release a dependency. A reviewer still supplies the canonical observations
-/// and separately scoped review before any authoritative acceptance.
+/// The caller supplies the file path and expected digest. Equal bytes could
+/// have been written by another cooperating actor. A reviewer supplies an
+/// independent semantic observation and separately scoped review to release an
+/// edge through Evidence.
 pub struct FixtureArtifact {
     /// Revision at which the producer correspondence was read.
     pub revision: u64,
     /// Core binding from the retained contract and the separate Git inspection.
     pub workspace: Box<BoundCandidate>,
-    /// Actual process-correspondent retained bytes and digest.
+    /// Actual bounded file bytes and digest, associated with the terminal
+    /// observation by the caller's output selection and Harness checks.
     pub content: CapturedArtifact,
 }
 
-/// Capture an exact current fixture result using Harness's protected path and
-/// process checks, independently of the child's structured stdout claim.
+/// Capture an exact declared artifact after the retained process observation.
+///
+/// Harness protects the path and checks canonical artifact and process identity.
+/// The caller's expected digest distinguishes changed bytes inside that boundary.
+/// Physical file authorship remains unestablished.
 pub fn capture_fixture_output(
     store: &ProgramStore,
     key: &StoreKey,
@@ -299,10 +304,7 @@ pub fn capture_fixture_output(
         request.max_bytes,
     )
     .map_err(ExecutionError::Artifact)?;
-    if request
-        .expected_sha256
-        .is_some_and(|digest| digest != content.sha256())
-    {
+    if request.expected_sha256 != content.sha256() {
         return Err(ExecutionError::ArtifactDigest);
     }
     let scope = kernel

@@ -591,10 +591,7 @@ fn codex_cli_lowers_exact_input_but_retains_the_live_and_executable_holds() {
         source("codex-cli-synthetic-transport-test"),
         identity.clone(),
         Transport::StandardInputJsonLines,
-        operational_fixture::descriptor()
-            .observations()
-            .iter()
-            .cloned(),
+        operational_fixture::descriptor().observations().to_vec(),
         8,
     )
     .unwrap();
