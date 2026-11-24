@@ -1,7 +1,7 @@
-//! Bound examinations of committed artifacts in a distinct integration candidate.
+//! Bound examinations of selected committed files in a distinct integration candidate.
 
 use super::{ExecutionError, check_workspace};
-use crate::{InspectionError, inspection::committed_blob_bounded};
+use crate::{InspectionError, inspection::committed_file_bounded};
 use cortex_core::{
     TaskId,
     binding::{BoundCandidate, ObservationId, WorktreeRequirement},
@@ -126,7 +126,7 @@ pub struct IntegrationInspection {
     pub revision: u64,
     /// Current integration candidate and its observed repository coverage.
     pub candidate: Box<BoundCandidate>,
-    /// Whether each explicitly selected committed file pair has identical bytes.
+    /// Whether each selected committed file pair has identical bytes and Git file mode.
     pub constituents_match: [bool; 2],
     /// Whether the separate integrated output matches the supplied exact oracle.
     pub output_matches: bool,
@@ -134,14 +134,14 @@ pub struct IntegrationInspection {
     pub output_sha256: String,
 }
 
-/// Compare actual committed worker and integration bytes in a canonical context.
+/// Compare actual committed worker and integration files in a canonical context.
 ///
 /// The integration task must have exactly these two current incoming releases.
-/// The source paths and output oracle are explicit selections within the
-/// accepted local scope. The two constituents are pinned by their retained
-/// Evidence artifact candidates. Git ref labels and ignored worktree bytes
-/// cannot supply either material object. Results are read-only observations
-/// for the separately authorized assessment owner.
+/// Select separate committed file objects by commit and path. Each file is read
+/// within the recorded repository and compared by bytes and Git mode. The
+/// releases identify the artifact candidates. Path selection and the output
+/// oracle are supplied separately.
+/// Results are read-only observations for the separately authorized assessment owner.
 pub fn inspect_integrated_candidate(
     store: &ProgramStore,
     key: &StoreKey,
@@ -208,6 +208,9 @@ fn inspect_integrated_candidate_inner(
     if left_release.contract.scope().edge() == right_release.contract.scope().edge()
         || left_release.contract.scope().producer().task()
             == right_release.contract.scope().producer().task()
+        || (left_release.contract.artifact_requirement().commit()
+            == right_release.contract.artifact_requirement().commit()
+            && left.worker_path == right.worker_path)
     {
         return Err(IntegrationError::Context);
     }
@@ -223,33 +226,33 @@ fn inspect_integrated_candidate_inner(
         if integrated.commit() == worker.commit() {
             return Err(IntegrationError::Context);
         }
-        let before = committed_blob_bounded(
+        let before = committed_file_bounded(
             worker.repository(),
             worker.commit(),
             selected.worker_path,
             remaining,
         )
         .map_err(IntegrationError::Blob)?;
-        use_bytes(&mut remaining, before.len())?;
-        let after = committed_blob_bounded(
+        use_bytes(&mut remaining, before.bytes.len())?;
+        let after = committed_file_bounded(
             integrated.repository(),
             integrated.commit(),
             selected.integrated_path,
             remaining,
         )
         .map_err(IntegrationError::Blob)?;
-        use_bytes(&mut remaining, after.len())?;
+        use_bytes(&mut remaining, after.bytes.len())?;
         constituents_match[i] = before == after;
     }
-    let output = committed_blob_bounded(
+    let output = committed_file_bounded(
         integrated.repository(),
         integrated.commit(),
         request.oracle.path,
         remaining,
     )
     .map_err(IntegrationError::Blob)?;
-    use_bytes(&mut remaining, output.len())?;
-    let output_matches = output == request.oracle.expected;
+    use_bytes(&mut remaining, output.bytes.len())?;
+    let output_matches = output.bytes == request.oracle.expected;
     let candidate = check_workspace(scope.context(), request.workspace_observation.clone())
         .map_err(IntegrationError::Workspace)?;
     drop(kernel);
@@ -266,7 +269,7 @@ fn inspect_integrated_candidate_inner(
         candidate,
         constituents_match,
         output_matches,
-        output_sha256: artifact_sha256(&output),
+        output_sha256: artifact_sha256(&output.bytes),
     })
 }
 
@@ -329,7 +332,7 @@ pub fn observe_integrated_candidate(
     .map_err(IntegrationError::Evidence)?;
     let profile = VerificationProfile::new(
         provenance,
-        "1",
+        "2",
         "cooperative local Linux source fixture",
         &[],
     )
@@ -342,7 +345,7 @@ pub fn observe_integrated_candidate(
         ObservationTimes::new(now, now).map_err(IntegrationError::Evidence)?,
         ObservationKind::Inference,
         &format!(
-            "selected-left-files-equal={} selected-right-files-equal={} output-matches-oracle={} observed-output={}",
+            "selected-left-bytes-and-mode-equal={} selected-right-bytes-and-mode-equal={} output-matches-oracle={} observed-output={}",
             inspection.constituents_match[0],
             inspection.constituents_match[1],
             inspection.output_matches,

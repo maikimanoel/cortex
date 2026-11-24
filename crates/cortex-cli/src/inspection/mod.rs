@@ -375,25 +375,74 @@ pub(crate) fn committed_blob(
     commit: &cortex_core::CandidateId,
     path: &cortex_core::knowledge::SourcePath,
 ) -> Result<Vec<u8>, InspectionError> {
-    committed_blob_bounded(
-        repository,
+    let mut git = committed_git(repository);
+    read_committed_file(
+        &mut git,
         commit,
         path,
         cortex_core::knowledge::MAX_SOURCE_BYTES,
     )
+    .map(|file| file.bytes)
 }
 
-pub(crate) fn committed_blob_bounded(
+#[derive(PartialEq, Eq)]
+pub(crate) struct CommittedFile {
+    pub(crate) bytes: Vec<u8>,
+    #[cfg(target_os = "linux")]
+    executable: bool,
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn committed_file_bounded(
     repository: &RepositoryIdentity,
     commit: &cortex_core::CandidateId,
     path: &cortex_core::knowledge::SourcePath,
     max_bytes: usize,
-) -> Result<Vec<u8>, InspectionError> {
-    let mut git = Git {
+) -> Result<CommittedFile, InspectionError> {
+    let mut git = committed_git(repository);
+    check_committed_repository(&mut git, repository)?;
+    let kind = git.output(
+        &["cat-file", "-t", commit.as_str()],
+        "candidate object type",
+    )?;
+    if kind != b"commit\n" {
+        return Err(InspectionError::Unsupported(
+            "candidate object is not a commit",
+        ));
+    }
+    let file = read_committed_file(&mut git, commit, path, max_bytes)?;
+    check_committed_repository(&mut git, repository)?;
+    Ok(file)
+}
+
+fn committed_git(repository: &RepositoryIdentity) -> Git {
+    Git {
         directory: repository.root().to_owned(),
         deadline: Instant::now() + Duration::from_secs(15),
         operations: 0,
-    };
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn check_committed_repository(
+    git: &mut Git,
+    repository: &RepositoryIdentity,
+) -> Result<(), InspectionError> {
+    if git.location("--show-toplevel")? != repository.root()
+        || git.location("--absolute-git-dir")? != repository.git_dir()
+        || git.location("--git-common-dir")? != repository.common_dir()
+    {
+        return Err(InspectionError::Inconsistent);
+    }
+    Ok(())
+}
+
+fn read_committed_file(
+    git: &mut Git,
+    commit: &cortex_core::CandidateId,
+    path: &cortex_core::knowledge::SourcePath,
+    max_bytes: usize,
+) -> Result<CommittedFile, InspectionError> {
     let name = os_string(path.bytes())?;
     let tree = git
         .run(
@@ -445,7 +494,11 @@ pub(crate) fn committed_blob_bounded(
     if bytes.len() != size {
         return Err(InspectionError::Inconsistent);
     }
-    Ok(bytes)
+    Ok(CommittedFile {
+        bytes,
+        #[cfg(target_os = "linux")]
+        executable: mode == b"100755",
+    })
 }
 
 /// Inspect a local working tree using the documented 002-A limits and controls.
