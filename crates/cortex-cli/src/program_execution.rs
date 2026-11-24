@@ -40,10 +40,47 @@ use cortex_harness::{
     execute_fixture, execute_fixture_before,
 };
 use cortex_storage::{
-    history_store::{Access, StoreKey},
-    program_store::{ProgramProfile, ProgramStore, ProgramStoreError},
+    history_store::{Access, StoreId, StoreKey},
+    program_store::{
+        AdmissionFailure, ProgramProfile, ProgramStore, ProgramStoreError, Reconciliation,
+    },
 };
 use std::{error::Error, fmt, path::Path, sync::atomic::AtomicBool, time::Instant};
+
+/// Exact failed dispatch admission from the composed consumer.
+pub struct DispatchAdmissionAttempt {
+    /// Journal selected for the attempt.
+    pub store: StoreId,
+    /// Complete input with the original predecessor and grant.
+    pub operation: Operation,
+    /// Original supervisor admission result.
+    pub failure: AdmissionFailure,
+}
+
+impl DispatchAdmissionAttempt {
+    /// Establish only the durable presence of the original input. The returned
+    /// record carries no new launch authority or physical observation.
+    pub fn reconcile(
+        &self,
+        store: &ProgramStore,
+        key: &StoreKey,
+        initial: &cortex_core::program::ProgramDefinition,
+    ) -> Result<Reconciliation, ProgramStoreError> {
+        if store.id() != self.store {
+            return Err(ProgramStoreError::TargetChanged);
+        }
+        store.reconcile(key, initial, &self.operation, Access::ReadOnly)
+    }
+}
+
+impl fmt::Debug for DispatchAdmissionAttempt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DispatchAdmissionAttempt")
+            .field("store", &self.store)
+            .field("failure", &self.failure)
+            .finish_non_exhaustive()
+    }
+}
 
 /// Refusal from the selected composition or an existing owner.
 #[derive(Debug)]
@@ -66,6 +103,8 @@ pub enum ExecutionError {
     Workspace(BindingDecision),
     /// The trusted fixture supervisor refused the request.
     Harness(HarnessError),
+    /// Dispatch admission failed or its result was uncertain.
+    DispatchAdmission(Box<DispatchAdmissionAttempt>),
     /// The canonical process or protected file capture refused the output.
     Artifact(ArtifactError),
     /// Observed bytes contradict the independently selected expected digest.
@@ -89,6 +128,7 @@ impl fmt::Display for ExecutionError {
                 "program execution: current workspace correspondence unavailable"
             }
             Self::Harness(_) => "program execution: supervisor refused dispatch",
+            Self::DispatchAdmission(_) => "program execution: dispatch admission unavailable",
             Self::Artifact(_) => "program execution: artifact capture refused",
             Self::ArtifactDigest => "program execution: artifact digest mismatch",
             Self::ChangedRevision => "program execution: canonical revision changed during capture",
@@ -105,6 +145,7 @@ impl Error for ExecutionError {
             Self::Inspection(error) => Some(error),
             Self::Binding(error) => Some(error),
             Self::Harness(error) => Some(error),
+            Self::DispatchAdmission(attempt) => Some(&attempt.failure),
             Self::Artifact(error) => Some(error),
             Self::AttemptWorkspace(error) => Some(error),
             _ => None,
@@ -284,7 +325,7 @@ fn run_prepared_fixture_inner(
         Some(end) => execute_fixture_before(
             store,
             key,
-            request.dispatch,
+            request.dispatch.clone(),
             request.captures,
             request.pin,
             end,
@@ -293,13 +334,22 @@ fn run_prepared_fixture_inner(
         None => execute_fixture(
             store,
             key,
-            request.dispatch,
+            request.dispatch.clone(),
             request.captures,
             request.pin,
             cancel,
         ),
     }
-    .map_err(ExecutionError::Harness)?;
+    .map_err(|error| match error {
+        HarnessError::Admission(failure) => {
+            ExecutionError::DispatchAdmission(Box::new(DispatchAdmissionAttempt {
+                store: store.id(),
+                operation: request.dispatch,
+                failure,
+            }))
+        }
+        error => ExecutionError::Harness(error),
+    })?;
     Ok(FixtureRun { workspace, run })
 }
 

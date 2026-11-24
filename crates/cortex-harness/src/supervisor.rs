@@ -146,6 +146,7 @@ type TestRecordingAdmission<'a> =
 #[derive(Default)]
 struct FixtureTestCuts<'a> {
     withhold_dispatch_reply: bool,
+    before_dispatch: Option<&'a dyn Fn()>,
     record: Option<&'a TestRecordingAdmission<'a>>,
 }
 
@@ -1347,8 +1348,7 @@ pub fn execute_fixture(
     cancel: &AtomicBool,
 ) -> Result<RunResult, HarnessError> {
     execute_fixture_inner(
-        store,
-        key,
+        (store, key),
         dispatch,
         ids,
         None,
@@ -1377,8 +1377,7 @@ pub fn execute_fixture_before(
         return Err(HarnessError::Contract);
     }
     execute_fixture_inner(
-        store,
-        key,
+        (store, key),
         dispatch,
         ids,
         None,
@@ -1405,8 +1404,7 @@ pub fn execute_fixture_with_identity_checkpoint(
     cancel: &AtomicBool,
 ) -> Result<RunResult, HarnessError> {
     execute_fixture_inner(
-        store,
-        key,
+        (store, key),
         dispatch,
         ids,
         Some(identity_ids),
@@ -1418,8 +1416,7 @@ pub fn execute_fixture_with_identity_checkpoint(
 }
 
 fn execute_fixture_inner(
-    store: &ProgramStore,
-    key: &StoreKey,
+    journal: (&ProgramStore, &StoreKey),
     dispatch: Operation,
     ids: CaptureIds,
     identity_ids: Option<IdentityCaptureIds>,
@@ -1427,6 +1424,7 @@ fn execute_fixture_inner(
     cut: FixtureCut<'_>,
     #[cfg(test)] test_cuts: FixtureTestCuts<'_>,
 ) -> Result<RunResult, HarnessError> {
+    let (store, key) = journal;
     if prepared.spec.identity_checkpoint.is_some() != identity_ids.is_some() {
         return Err(HarnessError::Contract);
     }
@@ -1541,6 +1539,10 @@ fn execute_fixture_inner(
         && (!cut.permits(start, &prepared.spec.limits) || !fits_store_cut(cut.end, store))
     {
         return Err(HarnessError::Limits);
+    }
+    #[cfg(test)]
+    if let Some(before_dispatch) = test_cuts.before_dispatch {
+        before_dispatch();
     }
     #[cfg(test)]
     if test_cuts.withhold_dispatch_reply {
