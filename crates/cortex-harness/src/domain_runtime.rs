@@ -1161,9 +1161,13 @@ fn capture_closure_tree<M: DomainManager>(
     if start >= end {
         return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Deadline));
     }
-    let kernel = store
-        .load_read_only_until(key, end)
-        .map_err(|_| issue(DomainPhaseDiagnostic::Closure, DomainCause::Journal))?;
+    let kernel = store.load_read_only_until(key, end).map_err(|error| {
+        let cause = match error {
+            cortex_storage::program_store::ProgramStoreError::Deadline => DomainCause::Deadline,
+            _ => DomainCause::Journal,
+        };
+        issue(DomainPhaseDiagnostic::Closure, cause)
+    })?;
     let domain = record(&kernel, &ids.domain)?;
     let binding = domain
         .binding_observation
@@ -1174,7 +1178,10 @@ fn capture_closure_tree<M: DomainManager>(
     }
     backend.corresponds(&domain.intent)?;
     let (actual, nodes) = backend.observe_tree(&domain.intent, end)?;
-    if Instant::now() >= end || actual.identity != binding.identity {
+    if Instant::now() >= end {
+        return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Deadline));
+    }
+    if actual.identity != binding.identity {
         return Err(issue(
             DomainPhaseDiagnostic::Closure,
             DomainCause::Correspondence,
