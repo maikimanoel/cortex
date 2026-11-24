@@ -1,11 +1,13 @@
 //! Collector-derived CPU accounting with a separate authenticated fence report.
 
-use super::{CpuCounterObservation, ManagedCpuObservations, monotonic_cpu_history};
+use super::{
+    CpuCounterObservation, ManagedCpuObservations, clock_namespace, monotonic_cpu_history,
+};
 use crate::native_execution::p1::trust::{Role, TrialTrust};
 use cortex_core::{
     binding::ObservationId,
     program::{
-        CoordinationGrant, OperationId,
+        CoordinationGrant, OperationId, ProgramError,
         domain::{
             ClosureReceipt, Consumption, ConsumptionObservation, DomainEvent, DomainIntent,
             HistoricalOutcome,
@@ -14,9 +16,9 @@ use cortex_core::{
     },
     temporal::{SourceOrigin, SourceReference},
 };
-use cortex_evidence::program::{Command, Operation};
+use cortex_evidence::program::{Command, KernelError, Operation};
 use cortex_storage::{
-    history_store::{Access, StoreKey},
+    history_store::StoreKey,
     program_store::{AdmissionFailure, AdmissionReceipt, ProgramStore, ProgramStoreError},
 };
 use serde_json::{Value, json};
@@ -261,7 +263,7 @@ fn admit(
     intent: &DomainIntent,
     request: CollectedCpuClosure,
     packet: &[u8],
-    before_submit: impl FnOnce() -> Result<(), CollectedCpuClosureError>,
+    mut before_submit: impl FnMut() -> Result<(), CollectedCpuClosureError>,
 ) -> Result<AdmissionReceipt, CollectedCpuClosureError> {
     use CollectedCpuClosureError as Refusal;
     let selection = select(history, &request)?;
@@ -269,8 +271,13 @@ fn admit(
     if store.id() != history.store() || history.domain() != &intent.id {
         return Err(Refusal::Correspondence);
     }
-    check_store_budget(store, history.interval().1)?;
-    let kernel = store.load(key, Access::ReadOnly).map_err(Refusal::Store)?;
+    let deadline = history.interval().1;
+    let kernel = store
+        .load_read_only_until(key, deadline)
+        .map_err(|error| match error {
+            ProgramStoreError::Deadline => Refusal::Deadline,
+            other => Refusal::Store(other),
+        })?;
     let record = kernel
         .domains()
         .and_then(|projection| projection.domain(history.domain()))
@@ -348,27 +355,14 @@ fn admit(
         grant: request.grant,
         command: Command::Domain(Box::new(event)),
     };
-    before_submit()?;
-    check_store_budget(store, history.interval().1)?;
     store
-        .admit(key, operation.clone())
+        .admit_observed_domain_until(key, operation.clone(), deadline, || {
+            before_submit().map_err(|_| KernelError::Core(ProgramError::Authority).into())
+        })
         .map_err(|failure| Refusal::Admission {
             operation: Box::new(operation),
             failure,
         })
-}
-
-fn check_store_budget(
-    store: &ProgramStore,
-    deadline: Instant,
-) -> Result<(), CollectedCpuClosureError> {
-    if deadline
-        .checked_duration_since(Instant::now())
-        .is_none_or(|left| left.is_zero() || store.read_limits().timeout() >= left)
-    {
-        return Err(CollectedCpuClosureError::Deadline);
-    }
-    Ok(())
 }
 
 pub(in crate::native_execution) fn submit(
@@ -383,9 +377,14 @@ pub(in crate::native_execution) fn submit(
     if store.id() != history.store() {
         return Err(Refusal::Correspondence);
     }
-    let _ = select(history, &request)?;
+    let selected = select(history, &request)?;
     let deadline = history.interval().1;
-    check_store_budget(store, deadline)?;
+    if Instant::now() >= deadline {
+        return Err(Refusal::Deadline);
+    }
+    if clock_namespace() != Some(selected.clock_namespace) {
+        return Err(Refusal::Observer);
+    }
     let trust = TrialTrust::load().map_err(|_| Refusal::Observer)?;
     let observer = trust
         .channel(observer, Role::Observer)
@@ -407,7 +406,14 @@ pub(in crate::native_execution) fn submit(
         intent,
         request,
         &bytes[..length],
-        || trust.check_current().map_err(|_| Refusal::Observer),
+        || {
+            trust.check_current().map_err(|_| Refusal::Observer)?;
+            if clock_namespace() == Some(selected.clock_namespace) {
+                Ok(())
+            } else {
+                Err(Refusal::Observer)
+            }
+        },
     )
 }
 

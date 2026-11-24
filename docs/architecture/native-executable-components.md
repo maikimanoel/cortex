@@ -256,8 +256,14 @@ A separate whole-domain observer report can bind one empty-tree counter
 bracket to an initially unused, fully attributed and continuously fenced
 lifetime. The local admission path requires the configured observer role on
 the protected Unix channel and checks the exact operation, store, boot and
-time namespace. The existing journal decides whether to admit the collector's
-rounded whole CPU millisecond debit in `Closed` or `Settle`. This path does
-not release occupancy. A controller restart preserves admitted receipts
-and cannot reconstruct unretained proof. Physical observer coverage, actual
-kernel-counter retention and P1 remain unqualified.
+time namespace. The bracket completion is sampled after the final clock
+namespace check. Managed tree publication and CPU disposition use the
+original absolute cutoff through reconstruction and canonical admission.
+The protected observer profile and local clock namespace are rechecked at
+the pre-commit cut for a new CPU disposition. A late acknowledgment leaves
+the potential write indeterminate. The existing journal decides whether
+to admit the collector's rounded whole CPU millisecond debit in `Closed`
+or `Settle`. CPU-only disposition leaves occupancy held. A controller
+restart preserves admitted receipts and cannot reconstruct unretained proof.
+Physical observer coverage, actual kernel-counter retention and P1 remain
+unqualified.

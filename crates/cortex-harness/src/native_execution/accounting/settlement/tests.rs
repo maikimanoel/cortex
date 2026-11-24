@@ -7,7 +7,10 @@ use crate::{
     native_execution::accounting::{ManagedCpuCut, ManagedCpuReadback},
 };
 use cortex_core::program::domain::{DomainIdentity, DomainPhase};
-use cortex_storage::program_store::ReadLimits;
+use cortex_storage::{
+    history_store::{Access, Completion},
+    program_store::ReadLimits,
+};
 use std::{fs, os::unix::fs::DirBuilderExt, path::PathBuf, time::Duration};
 
 struct Fixture {
@@ -290,9 +293,23 @@ fn collected_cpu_survives_store_reopen_and_does_not_release_occupancy() {
             &f.intent,
             f.request("collected-normal-close", Close, NormalEnd),
             &bytes,
-            || Err(CollectedCpuClosureError::Observer),
+            || {
+                let lock = fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(f.temp.join("store").join(".lock"))
+                    .unwrap();
+                assert!(matches!(lock.try_lock(), Err(fs::TryLockError::WouldBlock)));
+                Err(CollectedCpuClosureError::Observer)
+            },
         ),
-        Err(CollectedCpuClosureError::Observer)
+        Err(CollectedCpuClosureError::Admission {
+            failure: AdmissionFailure {
+                completion: Completion::RolledBack,
+                error: ProgramStoreError::Domain(KernelError::Core(ProgramError::Authority)),
+            },
+            ..
+        })
     ));
     assert_eq!(f.load().revision(), ordinal);
     let repeated = CollectedCpuClosure {
@@ -319,7 +336,7 @@ fn collected_cpu_survives_store_reopen_and_does_not_release_occupancy() {
             &f.intent,
             repeated,
             &bytes,
-            || Ok(())
+            || panic!("an exact retained operation must skip the pre-commit check")
         )
         .unwrap()
         .duplicate
@@ -339,6 +356,57 @@ fn collected_cpu_survives_store_reopen_and_does_not_release_occupancy() {
     assert!(retained.released.is_empty());
     assert_eq!(retained.consumption[0].measured, Some(3));
     assert_eq!(reopened.revision(), ordinal + 1);
+}
+
+#[test]
+fn observed_domain_admission_refuses_unsupported_and_expired_operations_without_a_guard() {
+    let f = Fixture::new("deadline", false);
+    let kernel = f.load();
+    let unsupported = fixture::domain_operation(
+        &kernel,
+        "not-an-observation",
+        Command::Domain(Box::new(DomainEvent::Cancel {
+            domain: f.intent.id.clone(),
+            at: 7,
+            basis: fixture::source("test-cancel"),
+        })),
+    );
+    let closure = fixture::domain_operation(
+        &kernel,
+        "past-closure",
+        Command::Domain(Box::new(DomainEvent::Closed {
+            receipt: fixture::closure(&f.intent, Some(1)),
+            at: 7,
+        })),
+    );
+    assert!(matches!(
+        f.store.admit_observed_domain_until(
+            &f.key,
+            unsupported,
+            Instant::now() + Duration::from_secs(60),
+            || panic!("unsupported commands must skip the observation guard"),
+        ),
+        Err(AdmissionFailure {
+            completion: Completion::Rejected,
+            error: ProgramStoreError::Unsupported,
+        })
+    ));
+    let expired = Instant::now();
+    assert!(matches!(
+        f.store.load_read_only_until(&f.key, expired),
+        Err(ProgramStoreError::Deadline)
+    ));
+    assert!(matches!(
+        f.store
+            .admit_observed_domain_until(&f.key, closure, expired, || panic!(
+                "expired commands must skip the observation guard"
+            ),),
+        Err(AdmissionFailure {
+            completion: Completion::Rejected,
+            error: ProgramStoreError::Deadline,
+        })
+    ));
+    assert_eq!(f.load().revision(), kernel.revision());
 }
 
 #[test]

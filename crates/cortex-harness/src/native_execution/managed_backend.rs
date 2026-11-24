@@ -134,14 +134,16 @@ impl OpenCpuCapture {
         populated: Option<bool>,
         counter: CpuCounterObservation,
     ) -> ManagedCpuReadback {
+        let clock_namespace = self
+            .namespace
+            .filter(|namespace| Some(*namespace) == clock_namespace());
+        let monotonic_ns = self.began_ns.zip(monotonic_ns());
         ManagedCpuReadback {
             cut,
             began_at: self.began_at,
             observed_at: Instant::now(),
-            monotonic_ns: self.began_ns.zip(monotonic_ns()),
-            clock_namespace: self
-                .namespace
-                .filter(|namespace| Some(*namespace) == clock_namespace()),
+            monotonic_ns,
+            clock_namespace,
             populated,
             counter,
         }
@@ -369,18 +371,26 @@ impl ManagedExecutionDomain {
         end: Instant,
         cut: ManagedCpuCut,
     ) -> Result<AccountedTree, DomainDiagnostic> {
+        let end = end.min(
+            self.original_end
+                .ok_or_else(|| diagnostic(ExecutionError::Identity))?,
+        );
         let capture = OpenCpuCapture::start();
         let result = self.read_accounted_tree(intent, expected, end);
+        let mut sample = capture.finish(cut, None, CpuCounterObservation::Unavailable);
+        let result = result.and_then(|read| {
+            if sample.observed_at < end {
+                Ok(read)
+            } else {
+                Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Deadline))
+            }
+        });
         let (populated, reads) = result.as_ref().map_or((None, (None, None)), |read| {
             (Some(read.observation.populated), read.reads)
         });
+        sample.populated = populated;
         let cpu = match &mut self.cpu_observations {
-            Some(history) => history.record_bracket(
-                expected,
-                cut,
-                capture.finish(cut, populated, CpuCounterObservation::Unavailable),
-                reads,
-            ),
+            Some(history) => history.record_bracket(expected, cut, sample, reads),
             None => CpuCounterObservation::Unavailable,
         };
         result.map(|read| AccountedTree {
@@ -395,10 +405,6 @@ impl ManagedExecutionDomain {
         expected: &DomainIdentity,
         end: Instant,
     ) -> Result<AccountedTreeRead, DomainDiagnostic> {
-        let end = end.min(
-            self.original_end
-                .ok_or_else(|| diagnostic(ExecutionError::Identity))?,
-        );
         if Instant::now() >= end {
             return Err(issue(DomainPhaseDiagnostic::Closure, DomainCause::Deadline));
         }
